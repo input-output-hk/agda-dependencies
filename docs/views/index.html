@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agda-deps — view gallery</title>
+<style>
+  :root{
+    --d:#4caf50; --p:#f44336; --h:#9c27b0; --f:#ff9800;
+    --bg:#0f1115; --card:#1a1d24; --card2:#222632; --ink:#e6e9ef;
+    --muted:#9aa3b2; --line:#2c313c; --accent:#5b9dff;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  header{
+    padding:48px 32px 28px; max-width:1180px; margin:0 auto;
+  }
+  h1{margin:0 0 8px; font-size:30px; letter-spacing:-.01em}
+  .sub{color:var(--muted); max-width:760px; font-size:15px}
+  .legend{display:flex; gap:18px; flex-wrap:wrap; margin-top:18px; font-size:13px; color:var(--muted)}
+  .legend span{display:inline-flex; align-items:center; gap:6px}
+  .dot{width:11px; height:11px; border-radius:3px; display:inline-block}
+  main{max-width:1180px; margin:0 auto; padding:0 32px 64px}
+  .group-title{
+    margin:34px 0 4px; font-size:13px; text-transform:uppercase;
+    letter-spacing:.08em; color:var(--muted); font-weight:600;
+  }
+  .group-desc{color:var(--muted); font-size:13.5px; margin:0 0 18px}
+  .grid{
+    display:grid; gap:18px;
+    grid-template-columns:repeat(auto-fill,minmax(330px,1fr));
+  }
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:0; overflow:hidden; display:flex; flex-direction:column;
+    transition:border-color .15s, transform .15s;
+  }
+  .card:hover{border-color:var(--accent); transform:translateY(-2px)}
+  .card a.frame{
+    display:block; text-decoration:none; color:inherit;
+    background:var(--card2); border-bottom:1px solid var(--line);
+    height:170px; position:relative; overflow:hidden;
+  }
+  .card iframe{
+    width:200%; height:340px; border:0; transform:scale(.5);
+    transform-origin:top left; pointer-events:none; background:#fff;
+  }
+  .card .open-hint{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(15,17,21,.0); color:#fff; font-weight:600; font-size:14px;
+    opacity:0; transition:opacity .15s;
+  }
+  .card a.frame:hover .open-hint{opacity:1; background:rgba(15,17,21,.55)}
+  .body{padding:16px 18px 18px}
+  .name{font-size:17px; font-weight:650; margin:0 0 2px}
+  .slug{
+    font:12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    color:var(--accent); margin-bottom:10px; display:inline-block;
+  }
+  .desc{color:var(--muted); font-size:13.5px; margin:0 0 12px}
+  .tags{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px}
+  .tag{
+    font-size:11px; padding:2px 8px; border-radius:999px;
+    background:#262b36; color:var(--muted); border:1px solid var(--line);
+  }
+  .tag.def{color:#a5d6ff; border-color:#2d4a6b}
+  .tag.mod{color:#b9f6ca; border-color:#2d5b3f}
+  .tag.scale{color:#ffe0a3; border-color:#6b552d}
+  code.cmd{
+    display:block; background:#0b0d12; border:1px solid var(--line);
+    border-radius:8px; padding:9px 11px; font:11.5px/1.4 ui-monospace,Menlo,Consolas,monospace;
+    color:#cfd6e4; overflow-x:auto; white-space:pre;
+  }
+  .btn{
+    display:inline-block; margin-top:12px; padding:8px 14px; border-radius:8px;
+    background:var(--accent); color:#06101f; font-weight:650; font-size:13px;
+    text-decoration:none;
+  }
+  footer{max-width:1180px; margin:0 auto; padding:0 32px 56px; color:var(--muted); font-size:13px}
+  footer code{background:#0b0d12; padding:2px 6px; border-radius:5px; border:1px solid var(--line)}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>agda-deps — view gallery</h1>
+  <p class="sub">
+    Every HTML view the backend can emit, rendered from the bundled
+    <code style="background:#0b0d12;padding:1px 5px;border-radius:4px;border:1px solid var(--line)">test/</code>
+    corpus. Click any card to open the full interactive view. Pick the one that
+    fits your project size and the question you're asking, then pass it with
+    <code style="background:#0b0d12;padding:1px 5px;border-radius:4px;border:1px solid var(--line)">--view=&lt;slug&gt;</code>.
+  </p>
+  <div class="legend">
+    <strong style="color:var(--ink)">Node state:</strong>
+    <span><i class="dot" style="background:var(--d)"></i> Defined</span>
+    <span><i class="dot" style="background:var(--p)"></i> Postulate</span>
+    <span><i class="dot" style="background:var(--h)"></i> Hole</span>
+    <span><i class="dot" style="background:var(--f)"></i> Failed</span>
+  </div>
+</header>
+
+<main>
+
+  <div class="group-title">Module-graph views</div>
+  <p class="group-desc">The whole project as a graph of modules. Start here to see shape and scale. Work with <code style="background:#0b0d12;padding:1px 5px;border-radius:4px;border:1px solid var(--line)">--skip-agda</code> on broken / huge corpora.</p>
+  <div class="grid" id="g-module"></div>
+
+  <div class="group-title">Definition-level views</div>
+  <p class="group-desc">Down to individual lemmas and definitions, with depends-on / used-by and source. Need Agda elaboration; pair with <code style="background:#0b0d12;padding:1px 5px;border-radius:4px;border:1px solid var(--line)">--with-source</code>.</p>
+  <div class="grid" id="g-def"></div>
+
+  <div class="group-title">Progress &amp; proof-obligation views</div>
+  <p class="group-desc">Answer "is the proof effort moving?" — holes, postulates and what they block.</p>
+  <div class="grid" id="g-progress"></div>
+
+  <div class="group-title">Spatial &amp; overview views</div>
+  <p class="group-desc">Whole-project shape at a glance: hierarchy, density, reading order, terrain.</p>
+  <div class="grid" id="g-spatial"></div>
+
+</main>
+
+<footer>
+  Regenerate any card with
+  <code>cabal run agda-deps -- --format=html --view=&lt;slug&gt; --with-source -i test/ -o views/&lt;slug&gt;/ test/Test.agda</code>.
+  Default view is <code>module-dag-pods</code>. For ~100k modules use <code>big-module-dag-pods</code>;
+  for WebGL scale use <code>sigma</code>. See <code>README.md</code> → Views.
+</footer>
+
+<script>
+const views = [
+  // group: module
+  {g:'module', name:'Module DAG pods', slug:'module-dag-pods', def:false,
+   tags:[['mod','module-level'],['scale','≤ ~5k modules'],['def','default']],
+   desc:'Top-down DAG of expandable module "pod" cards. dagre layout in-browser. The default view and best first stop for medium projects.'},
+  {g:'module', name:'Cytoscape compound', slug:'cytoscape', def:false,
+   tags:[['mod','module-level']],
+   desc:'Original compound-node viewer: modules as parent boxes, defs inside. Force-directed, rich sidebar — search, walker, path mode, package layout, transitive-edge filter.'},
+  {g:'module', name:'Sigma (WebGL)', slug:'sigma', def:false,
+   tags:[['mod','module-level'],['scale','~1M nodes']],
+   desc:'WebGL renderer via sigma.js + graphology + dagre. Scales to ~1M nodes while edges stay thin. Layout selector (DAG / concentric), fit button, import / imported-by panel.'},
+  {g:'module', name:'Big module DAG pods', slug:'big-module-dag-pods', def:false,
+   tags:[['mod','module-level'],['scale','~100k modules']],
+   desc:'Viewport-virtualised port of module-dag-pods. Layout pre-computed Haskell-side; only visible pods get DOM elements; a minimap drives navigation.'},
+
+  // group: def
+  {g:'def', name:'IDE three-pane', slug:'ide-three-pane', def:true,
+   tags:[['def','definition-level']],
+   desc:'File tree + focused subgraph + source pane. The familiar editor layout, scoped to one definition at a time.'},
+  {g:'def', name:'Source-centric', slug:'source-centric', def:true,
+   tags:[['def','definition-level']],
+   desc:'Code-first reading view with a minimap. The source leads; the graph rides alongside.'},
+  {g:'def', name:'Notion doc', slug:'notion-doc', def:true,
+   tags:[['def','definition-level']],
+   desc:'Scrollable cross-linked document — every definition is a block with inline links to its dependencies.'},
+  {g:'def', name:'Wiki backlinks', slug:'wiki-backlinks', def:true,
+   tags:[['def','definition-level']],
+   desc:'Single-page focus with explicit depends-on / used-by lists, wiki-style. Jump along either direction.'},
+
+  // group: progress
+  {g:'progress', name:'Progress dashboard', slug:'progress-dashboard', def:true,
+   tags:[['def','definition-level']],
+   desc:'Grafana-style KPI board: completeness %, scoreboard (theorems-with-upstream-holes, avg-depth-unproven-leaf, postulate-debt ratio), D/P/H/F donut, hot-modules table, per-module hole-density heatmap.'},
+  {g:'progress', name:'Critical-path holes', slug:'critical-path-holes', def:true,
+   tags:[['def','definition-level']],
+   desc:'Kanban of proof obligations. Holes/postulates upstream of the entry theorem, lanes for Blocking / Indirectly-blocking / Postulates / Recently-discharged; cards carry severity and the dep chain back to the goal.'},
+
+  // group: spatial
+  {g:'spatial', name:'Sunburst hierarchy', slug:'sunburst-hierarchy', def:false,
+   tags:[['mod','module-level']],
+   desc:'D3 sunburst over the dotted-module hierarchy. Arc fill = weighted state mix; click to zoom. Toggleable import chords + A→B trail finder. Supports --agda-html-dir "Open source".'},
+  {g:'spatial', name:'Pixel-grid overview', slug:'pixel-grid-overview', def:true,
+   tags:[['def','definition-level']],
+   desc:'Every definition is a coloured tile, banded per module. Sort modes (alpha / kind / deps / state), heatmap toggle (downstream / upstream / depth), keyboard cursor, minimap.'},
+  {g:'spatial', name:'Reading-order narrative', slug:'reading-order-narrative', def:true,
+   tags:[['def','definition-level']],
+   desc:'Textbook-style scroll: defs in topological order, serif body with a sticky margin mini-graph. Skim / 2nd-reading toggles; progress strip with hole/postulate hotspots. Pairs well with --with-source.'},
+  {g:'spatial', name:'Cartographic atlas', slug:'cartographic-atlas', def:false,
+   tags:[['mod','module-level']],
+   desc:'Topographic-map metaphor: continents (top-level prefixes), territories (modules), elevation (depth from axioms), volcano/sinkhole glyphs for holes/postulates, ports = re-exports, capital = entry theorem. Pan/zoom, trade routes, weather panel.'},
+];
+
+function card(v){
+  const tags = v.tags.map(([cls,txt])=>`<span class="tag ${cls}">${txt}</span>`).join('');
+  const cmd = `cabal run agda-deps -- \\\n  --format=html --view=${v.slug} \\\n  --with-source -i test/ -o out/ test/Test.agda`;
+  return `
+  <div class="card">
+    <a class="frame" href="${v.slug}/deps.html">
+      <iframe src="${v.slug}/deps.html" loading="lazy" scrolling="no" title="${v.name} preview"></iframe>
+      <span class="open-hint">Open ${v.name} ↗</span>
+    </a>
+    <div class="body">
+      <div class="name">${v.name}</div>
+      <span class="slug">--view=${v.slug}</span>
+      <div class="tags">${tags}</div>
+      <p class="desc">${v.desc}</p>
+      <code class="cmd">${cmd}</code>
+      <a class="btn" href="${v.slug}/deps.html">Open full view →</a>
+    </div>
+  </div>`;
+}
+
+for(const g of ['module','def','progress','spatial']){
+  document.getElementById('g-'+g).innerHTML =
+    views.filter(v=>v.g===g).map(card).join('');
+}
+</script>
+</body>
+</html>

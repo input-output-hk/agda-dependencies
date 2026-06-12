@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- agda-deps · IDE three-pane view: module tree, cytoscape neighbourhood graph, and source drawer. -->
+<meta charset="UTF-8">
+<title>agda-deps — IDE Three-Pane</title>
+<script src="https://unpkg.com/cytoscape@3/dist/cytoscape.min.js"></script>
+<script>window.__gzipEnabled = __GZIP_ENABLED__;</script>
+<script>
+  if (window.__gzipEnabled && typeof DecompressionStream === 'undefined') {
+    document.write('<scr' + 'ipt src="https://unpkg.com/pako@2.1.0/dist/pako_inflate.min.js"></scr' + 'ipt>');
+  }
+</script>
+<style>
+  :root {
+    --c-defined:   __COLOR_DEFINED__;
+    --c-postulate: __COLOR_POSTULATE__;
+    --c-hole:      __COLOR_HOLE__;
+    --c-failed:    __COLOR_FAILED__;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px;
+    background: #1e1e1e; color: #d4d4d4; overflow: hidden; }
+
+  /* ── BANNER ── */
+  #tp-banner {
+    background: #007acc; color: #fff; padding: 4px 12px; font-size: 12px;
+    display: flex; align-items: center; gap: 8px; height: 26px;
+  }
+  #tp-banner strong { font-weight: 600; }
+  #tp-banner .tp-entry { margin-left: auto; color: #aad4f0; font-size: 11px; }
+
+  /* ── ROOT ── */
+  #tp-root {
+    display: flex; height: calc(100% - 26px); overflow: hidden;
+  }
+
+  /* ── PANE RESIZER ── */
+  .tp-resizer {
+    width: 4px; background: #333; cursor: col-resize; flex-shrink: 0;
+    transition: background 0.12s;
+  }
+  .tp-resizer:hover, .tp-resizer.active { background: #007acc; }
+
+  /* ── LEFT PANE ── */
+  #tp-left {
+    width: 270px; min-width: 140px; max-width: 50%;
+    background: #252526; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;
+  }
+  #tp-left-hdr {
+    padding: 8px 10px 5px; font-size: 11px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: #bbb; border-bottom: 1px solid #333; flex-shrink: 0;
+  }
+  #tp-search {
+    margin: 6px 8px; padding: 4px 8px; background: #3c3c3c; border: 1px solid #555;
+    border-radius: 4px; color: #d4d4d4; font-size: 13px; outline: none; width: calc(100% - 16px);
+  }
+  #tp-search:focus { border-color: #007acc; }
+  #tp-tree {
+    flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 0 8px;
+  }
+  #tp-tree::-webkit-scrollbar { width: 6px; }
+  #tp-tree::-webkit-scrollbar-track { background: #252526; }
+  #tp-tree::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+
+  /* tree rows */
+  details.tp-folder > summary {
+    padding: 3px 8px 3px 0; cursor: pointer; user-select: none;
+    display: flex; align-items: center; gap: 5px; color: #ccc; font-size: 13px;
+    list-style: none; white-space: nowrap; overflow: hidden;
+  }
+  details.tp-folder > summary::before {
+    content: '▶'; font-size: 9px; color: #888; transition: transform 0.12s; flex-shrink: 0;
+    min-width: 10px; text-align: center;
+  }
+  details.tp-folder[open] > summary::before { transform: rotate(90deg); }
+  details.tp-folder > summary:hover { background: #2a2d2e; }
+  summary::-webkit-details-marker { display: none; }
+  .tp-folder-icon { color: #e8a044; font-size: 12px; flex-shrink: 0; }
+  .tp-mod-icon { color: #519aba; font-size: 12px; flex-shrink: 0; }
+  .tp-mod-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+
+  .tp-mod-row {
+    display: flex; align-items: center; gap: 5px; font-size: 13px;
+    white-space: nowrap; overflow: hidden; cursor: pointer; user-select: none;
+    padding: 3px 8px 3px 0;
+  }
+  .tp-mod-row:hover { background: #2a2d2e; }
+  .tp-mod-row.tp-active { background: #094771; color: #fff; }
+  .tp-mod-row.tp-active .tp-mod-icon { color: #9cdcfe; }
+  .tp-mod-row.tp-external { color: #666; }
+  .tp-mod-row.tp-external .tp-mod-icon { color: #4a4a4a; }
+
+  /* state dots */
+  .tp-dots { display: flex; gap: 2px; flex-shrink: 0; }
+  .tp-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .tp-dot-d { background: var(--c-defined); }
+  .tp-dot-p { background: var(--c-postulate); }
+  .tp-dot-h { background: var(--c-hole); }
+  .tp-dot-f { background: var(--c-failed); }
+
+  /* ── MIDDLE PANE ── */
+  #tp-mid {
+    flex: 1; min-width: 200px; display: flex; flex-direction: column;
+    background: #1e1e1e; overflow: hidden;
+  }
+  #tp-mid-hdr {
+    background: #2d2d2d; border-bottom: 1px solid #333; padding: 6px 10px;
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0; min-height: 36px;
+  }
+  #tp-breadcrumb { flex: 1; font-size: 13px; color: #9cdcfe; }
+  .tp-btn {
+    padding: 3px 10px; background: #3c3c3c; border: 1px solid #555; border-radius: 3px;
+    color: #d4d4d4; cursor: pointer; font-size: 12px;
+  }
+  .tp-btn:hover { background: #4a4a4a; border-color: #777; }
+  .tp-btn:disabled { opacity: 0.4; cursor: default; }
+  #tp-cy { flex: 1; }
+  #tp-mid-hint {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: #555; font-size: 15px; pointer-events: none; text-align: center; line-height: 1.8;
+  }
+
+  /* ── RIGHT PANE ── */
+  #tp-right {
+    width: 300px; min-width: 160px; max-width: 50%;
+    background: #252526; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;
+    border-left: 1px solid #333;
+  }
+  #tp-right-hdr {
+    padding: 8px 10px 5px; font-size: 11px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: #bbb; border-bottom: 1px solid #333; flex-shrink: 0;
+  }
+  #tp-def-hdr {
+    padding: 10px 12px 8px; flex-shrink: 0; border-bottom: 1px solid #333; display: none;
+  }
+  #tp-def-name { font-size: 15px; font-weight: 600; color: #9cdcfe; margin-bottom: 4px; }
+  #tp-def-mod  { font-size: 11px; color: #777; margin-bottom: 6px; }
+  #tp-def-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+  }
+  .tp-badge-d { background: #1b4d1c; color: var(--c-defined);   border: 1px solid var(--c-defined); }
+  .tp-badge-p { background: #4d1b1b; color: var(--c-postulate); border: 1px solid var(--c-postulate); }
+  .tp-badge-h { background: #2e1b4d; color: var(--c-hole);      border: 1px solid var(--c-hole); }
+  .tp-badge-f { background: #3d2200; color: var(--c-failed);    border: 1px solid var(--c-failed); }
+  #tp-src-container {
+    flex: 1; overflow-y: auto; padding: 12px; display: none;
+  }
+  #tp-src-container::-webkit-scrollbar { width: 6px; }
+  #tp-src-container::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+  /* source view: HTML from Agda highlighting */
+  #tp-src-html {
+    font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace;
+    font-size: 12.5px; line-height: 1.6; background: #1e1e1e; padding: 10px 12px;
+    border-radius: 4px; border: 1px solid #333;
+    overflow-x: auto; white-space: pre;
+  }
+  /* Override Agda CSS for dark background */
+  #tp-src-html .Keyword    { color: #569cd6; }
+  #tp-src-html .Function   { color: #dcdcaa; }
+  #tp-src-html .Datatype   { color: #4ec9b0; }
+  #tp-src-html .InductiveConstructor { color: #9cdcfe; }
+  #tp-src-html .Postulate  { color: var(--c-postulate); }
+  #tp-src-html .Hole       { color: var(--c-hole); background: #2e1b4d; }
+  #tp-src-html .Comment    { color: #6a9955; }
+  #tp-src-html .String     { color: #ce9178; }
+  #tp-src-html .Number     { color: #b5cea8; }
+  #tp-src-html .PrimitiveType { color: #4ec9b0; }
+  #tp-src-html .Pragma     { color: #808080; }
+  #tp-src-html a { color: inherit; text-decoration: none; }
+  #tp-src-fallback {
+    font-family: 'Fira Code', Consolas, monospace; font-size: 12.5px; line-height: 1.6;
+    color: #ce9178; white-space: pre; background: #1e1e1e; padding: 10px 12px;
+    border-radius: 4px; border: 1px solid #333; display: none;
+  }
+  #tp-right-hint {
+    display: flex; align-items: center; justify-content: center; flex: 1;
+    color: #555; font-size: 14px; flex-direction: column; gap: 8px;
+  }
+  #tp-right-hint .tp-hint-icon { font-size: 28px; }
+  #tp-no-src-msg {
+    padding: 12px; color: #666; font-size: 12px; font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<div id="tp-banner">
+  <strong>agda-deps — IDE Three-Pane</strong>
+  <span id="tp-entry-label" class="tp-entry"></span>
+</div>
+
+<div id="tp-root">
+
+  <!-- LEFT: module tree -->
+  <div id="tp-left">
+    <div id="tp-left-hdr">Explorer</div>
+    <input id="tp-search" type="text" placeholder="Search modules…" autocomplete="off">
+    <div id="tp-tree"></div>
+  </div>
+
+  <div class="tp-resizer" id="tp-resizer-l"></div>
+
+  <!-- MIDDLE: focused subgraph -->
+  <div id="tp-mid" style="position:relative">
+    <div id="tp-mid-hdr">
+      <div id="tp-breadcrumb"><span style="color:#555">Click a module in the tree to focus</span></div>
+      <button class="tp-btn" id="tp-btn-back" disabled>← Back</button>
+      <button class="tp-btn" id="tp-btn-expand">Expand neighbors</button>
+      <button class="tp-btn" id="tp-btn-fit" title="Fit to view">⤢</button>
+    </div>
+    <div id="tp-cy"></div>
+    <div id="tp-mid-hint">Click a module in the tree<br>to see its dependency neighbourhood</div>
+  </div>
+
+  <div class="tp-resizer" id="tp-resizer-r"></div>
+
+  <!-- RIGHT: source drawer -->
+  <div id="tp-right">
+    <div id="tp-right-hdr">Source</div>
+    <div id="tp-def-hdr">
+      <div id="tp-def-name"></div>
+      <div id="tp-def-mod"></div>
+      <span id="tp-def-badge"></span>
+    </div>
+    <div id="tp-src-container">
+      <div id="tp-src-html"></div>
+      <pre id="tp-src-fallback"></pre>
+    </div>
+    <div id="tp-right-hint">
+      <div class="tp-hint-icon">⬡</div>
+      <div>Select a definition</div>
+      <div style="font-size:12px;color:#444">click a node in the graph</div>
+    </div>
+  </div>
+
+</div><!-- #tp-root -->
+
+<script>
+__DATA_LOADING_PRELUDE__
+</script>
+<script>
+(function () {
+'use strict';
+
+// ── DECODER HELPERS ────────────────────────────────────────────────────────────
+function b64ToBytes(b64) {
+  var bin = atob(b64); var out = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64ToInt32(b64)   { return new Int32Array(b64ToBytes(b64).buffer); }
+function b64ToInt8(b64)    { return new Int8Array(b64ToBytes(b64).buffer); }
+function b64ToFloat32(b64) { return new Float32Array(b64ToBytes(b64).buffer); }
+
+// ── FETCH HELPER (gzip-aware) ─────────────────────────────────────────────────
+async function fetchJson(url) {
+  if (GZIP_ENABLED && window.pako) {
+    try {
+      var r = await fetch(url + '.gz');
+      if (r.ok) {
+        var ab = await r.arrayBuffer();
+        var str = pako.inflate(new Uint8Array(ab), { to: 'string' });
+        return JSON.parse(str);
+      }
+    } catch (e) { /* fall through */ }
+  }
+  var r2 = await fetch(url);
+  return r2.json();
+}
+
+// ── LOAD GRAPH ────────────────────────────────────────────────────────────────
+async function loadGraph() {
+  if (LAZY) { return fetchJson(GRAPH_URL); }
+  return GRAPH;
+}
+
+async function loadModuleDetail(g, modName) {
+  if (!g.moduleFiles || !g.moduleFiles[modName]) return null;
+  return fetchJson(g.moduleFiles[modName]);
+}
+
+// Placeholder detail files — emitted by the producer for modules
+// that are declared in moduleFiles but have no kept defs (external
+// stdlib modules, all-filtered modules, or modules in the failed-
+// typecheck set under --keep-going). Detail JSON carries
+// { placeholder: true, reason: "external"|"failed"|"filtered",
+//   module: "<name>", externalPostulates?: [...] }. We render an
+// IDE-style centered card in the middle pane instead of cytoscape.
+function placeholderReasonText(reason) {
+  switch (reason) {
+    case 'external':
+      return 'External module — outside the project root. ' +
+             'It was referenced but not analysed.';
+    case 'failed':
+      return 'This module failed to type-check (--keep-going). ' +
+             'Its contents are unknown.';
+    case 'filtered':
+      return 'Every definition in this module was filtered out ' +
+             '(private, generated, or module-instantiation copy).';
+    default:
+      return 'This module was not analysed.';
+  }
+}
+
+function renderPlaceholderHTML(detail) {
+  var reason = (detail && detail.reason) || 'unknown';
+  var reasonText = placeholderReasonText(reason);
+  var modName = (detail && detail.module) || '';
+  var postulates = (detail && detail.externalPostulates) || [];
+  var extra = '';
+  if (postulates.length) {
+    var shown = postulates.slice(0, 8)
+                          .map(function (p) {
+                            return '<code style="background:#2d2d2d;color:#9cdcfe;' +
+                                          'padding:1px 5px;border-radius:3px;' +
+                                          'font-family:\'Fira Code\',Consolas,monospace;' +
+                                          'font-size:11px;">' +
+                                    String(p).replace(/[&<>]/g, function (c) {
+                                      return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;';
+                                    }) +
+                                   '</code>';
+                          })
+                          .join(' ');
+    var more = postulates.length > 8 ? ' …' : '';
+    extra = '<div style="margin-top:14px;font-size:12px;color:#888;' +
+                       'text-align:left;line-height:1.9;">' +
+              '<div style="font-size:10px;text-transform:uppercase;' +
+                          'letter-spacing:0.08em;color:#666;margin-bottom:6px;">' +
+                'Postulates' +
+              '</div>' +
+              shown + more +
+            '</div>';
+  }
+  return '<div style="position:absolute;top:50%;left:50%;' +
+                     'transform:translate(-50%,-50%);' +
+                     'max-width:480px;padding:24px 28px;' +
+                     'background:#252526;border:1px solid #333;' +
+                     'border-radius:6px;color:#bbb;font-size:13px;' +
+                     'line-height:1.6;text-align:center;">' +
+           '<div style="font-size:10px;text-transform:uppercase;' +
+                       'letter-spacing:0.1em;color:#9cdcfe;margin-bottom:10px;">' +
+              reason + ' module' +
+           '</div>' +
+           (modName ? '<div style="font-size:14px;color:#d4d4d4;margin-bottom:12px;' +
+                                'font-family:\'Fira Code\',Consolas,monospace;">' +
+                       String(modName).replace(/[&<>]/g, function (c) {
+                         return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;';
+                       }) +
+                     '</div>'
+                   : '') +
+           '<div>' + reasonText + '</div>' +
+           extra +
+         '</div>';
+}
+
+// ── SNIPPET CACHE ─────────────────────────────────────────────────────────────
+var snippetCache = Object.create(null);
+
+async function loadSnippetBundle(g, modName) {
+  if (snippetCache[modName] !== undefined) return snippetCache[modName];
+  if (!g.bundleFiles || !g.bundleFiles[modName]) { snippetCache[modName] = null; return null; }
+  try {
+    var b = await fetchJson(g.bundleFiles[modName]);
+    var indexed = Object.create(null);
+    Object.keys(b).forEach(function (k) {
+      var entry = b[k];
+      var m = (entry.source || '').match(/<a id="([^"]+)"><\/a>/);
+      if (m) indexed[m[1]] = entry;
+      // also index by key directly as fallback
+      indexed[k] = entry;
+    });
+    snippetCache[modName] = indexed;
+    return indexed;
+  } catch (e) { snippetCache[modName] = {}; return {}; }
+}
+
+function lookupSnippet(bundle, modName, defFullName) {
+  if (!bundle) return null;
+  // try local name (strip module prefix)
+  var local = defFullName;
+  if (modName && defFullName.indexOf(modName + '.') === 0)
+    local = defFullName.substring(modName.length + 1);
+  return bundle[local] || bundle[defFullName] || null;
+}
+
+// ── RESIZER ───────────────────────────────────────────────────────────────────
+function makeResizer(resizerId, leftId, rightId, side) {
+  var el = document.getElementById(resizerId);
+  el.addEventListener('mousedown', function (e) {
+    e.preventDefault();
+    var startX = e.clientX;
+    var leftEl  = document.getElementById(leftId);
+    var rightEl = document.getElementById(rightId);
+    var startL  = leftEl.offsetWidth;
+    var startR  = rightEl.offsetWidth;
+    el.classList.add('active');
+    function onMove(e2) {
+      var dx = e2.clientX - startX;
+      if (side === 'left')
+        leftEl.style.width  = Math.max(140, startL + dx) + 'px';
+      else
+        rightEl.style.width = Math.max(160, startR - dx) + 'px';
+    }
+    function onUp() {
+      el.classList.remove('active');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup',   onUp);
+      if (window._tpCy) window._tpCy.resize();
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+var G = null;          // decoded graph
+var externalSet = new Set();
+var moduleStateCounts = [];   // [[d,p,h,f], ...]
+var moduleTree = [];          // [{name,parent,moduleIndex}]
+
+// For INLINE mode: decoded defs arrays
+var defNames   = null;  // string[]
+var defModules = null;  // Int32Array
+var defStates  = null;  // Int8Array
+var outOffsets = null;  // Int32Array
+var outTargets = null;  // Int32Array
+var inOffsets  = null;  // Int32Array
+var inTargets  = null;  // Int32Array
+
+// Per-module lazy detail cache (lazy mode)
+var detailCache = Object.create(null); // modName -> detail|null
+
+var focusedModule = null;
+var expandDepth = 1;
+var navHistory = [];
+var cy = null;
+
+// ── DECODE INLINE GRAPH ───────────────────────────────────────────────────────
+function decodeInline(g) {
+  if (!g.defs) return;
+  defNames   = g.defs.names;
+  defModules = b64ToInt32(g.defs.modules);
+  defStates  = b64ToInt8(g.defs.states);
+  if (g.edges) {
+    outOffsets = b64ToInt32(g.edges.outOffsets);
+    outTargets = b64ToInt32(g.edges.outTargets);
+    inOffsets  = b64ToInt32(g.edges.inOffsets);
+    inTargets  = b64ToInt32(g.edges.inTargets);
+  }
+}
+
+// ── TREE BUILDER ─────────────────────────────────────────────────────────────
+function stateDotHtml(counts, title) {
+  var d = counts[0], p = counts[1], h = counts[2], f = counts[3];
+  var html = '<span class="tp-dots" title="' + (title||'') + '">';
+  if (d) html += '<span class="tp-dot tp-dot-d" title="' + d + ' Defined"></span>';
+  if (p) html += '<span class="tp-dot tp-dot-p" title="' + p + ' Postulate"></span>';
+  if (h) html += '<span class="tp-dot tp-dot-h" title="' + h + ' Hole"></span>';
+  if (f) html += '<span class="tp-dot tp-dot-f" title="' + f + ' Failed"></span>';
+  html += '</span>';
+  return html;
+}
+
+// Build a nested object from the flat moduleTree list
+// Each node: { name, parent (idx into flat list or -1), moduleIndex }
+function buildTreeNodes(treeItems, filter) {
+  // Convert flat parent-pointer list to nested map
+  // We'll render depth-first
+  var lf = filter ? filter.toLowerCase().trim() : '';
+
+  // First, collect matching module indices (by full name)
+  var matchingModuleIdxs = null;
+  if (lf) {
+    matchingModuleIdxs = new Set();
+    treeItems.forEach(function (item, i) {
+      if (item.name.toLowerCase().indexOf(lf) >= 0) {
+        // mark self and all ancestors
+        var j = i;
+        while (j >= 0) {
+          matchingModuleIdxs.add(j);
+          j = treeItems[j].parent;
+        }
+      }
+    });
+  }
+
+  // Build children map
+  var children = new Array(treeItems.length);
+  var roots = [];
+  for (var i = 0; i < treeItems.length; i++) children[i] = [];
+  for (var i = 0; i < treeItems.length; i++) {
+    var p = treeItems[i].parent;
+    if (p < 0) roots.push(i);
+    else children[p].push(i);
+  }
+
+  function renderNode(i, depth) {
+    if (matchingModuleIdxs && !matchingModuleIdxs.has(i)) return '';
+    var item = treeItems[i];
+    var kids = children[i];
+    var pad = (depth * 12 + 12) + 'px';
+    var padSum = (depth * 12 + 24) + 'px';
+    var seg = item.name; // last segment (backend pre-computes this)
+    var modIdx = item.moduleIndex; // null for pure-folder nodes
+    var isModule = modIdx !== null && modIdx !== undefined;
+    var isExt = isModule && externalSet.has(modIdx);
+    var fullName = isModule ? G.modules[modIdx] : null;
+    var hasKids = kids.length > 0;
+    var counts = (isModule && moduleStateCounts[modIdx]) ? moduleStateCounts[modIdx] : [0,0,0,0];
+    var extClass = isExt ? ' tp-external' : '';
+
+    if (!hasKids && isModule) {
+      // leaf module row
+      return '<div class="tp-mod-row' + extClass + '" data-mod-idx="' + modIdx + '" style="padding-left:' + pad + '" title="' + fullName + '">'
+        + '<span class="tp-mod-icon">⬡</span>'
+        + '<span class="tp-mod-name">' + esc(seg) + '</span>'
+        + stateDotHtml(counts)
+        + '</div>';
+    }
+
+    // folder (possibly also a module)
+    var kidsHtml = '';
+    for (var j = 0; j < kids.length; j++) kidsHtml += renderNode(kids[j], depth + 1);
+
+    var autoOpen = matchingModuleIdxs ? ' open' : (depth < 2 ? ' open' : '');
+    var foldHtml = '<details class="tp-folder"' + autoOpen + '>'
+      + '<summary style="padding-left:' + pad + '">'
+      + '<span class="tp-folder-icon">📁</span>'
+      + '<span>' + esc(seg) + '</span>'
+      + (isModule ? stateDotHtml(counts) : '')
+      + '</summary>';
+    if (isModule) {
+      foldHtml += '<div class="tp-mod-row' + extClass + '" data-mod-idx="' + modIdx + '" style="padding-left:' + padSum + '" title="' + fullName + ' (module)">'
+        + '<span class="tp-mod-icon">⬡</span>'
+        + '<span class="tp-mod-name">' + esc(seg) + ' <span style="color:#555;font-size:11px">[mod]</span></span>'
+        + stateDotHtml(counts)
+        + '</div>';
+    }
+    foldHtml += kidsHtml + '</details>';
+    return foldHtml;
+  }
+
+  // Separate internal roots from external
+  // externalModules set contains indices. We split top-level roots.
+  var internalRoots = [], externalRoots = [];
+  roots.forEach(function (i) {
+    // A root is external if its moduleIndex (if any) is external, OR all its leaf descendants are external.
+    // Heuristic: check the item name against known external modules
+    if (isRootExternal(i)) externalRoots.push(i);
+    else internalRoots.push(i);
+  });
+
+  var html = '';
+  internalRoots.forEach(function (i) { html += renderNode(i, 0); });
+
+  if (externalRoots.length) {
+    var autoOpen = matchingModuleIdxs ? ' open' : '';
+    html += '<details class="tp-folder" style="margin-top:8px"' + autoOpen + '>'
+      + '<summary style="padding-left:12px;color:#666">'
+      + '<span class="tp-folder-icon" style="color:#555">📦</span>'
+      + '<span style="color:#666">External</span></summary>';
+    externalRoots.forEach(function (i) { html += renderNode(i, 1); });
+    html += '</details>';
+  }
+
+  if (!html) html = '<div style="padding:16px;color:#555;font-size:13px">No modules match</div>';
+  return html;
+}
+
+function isRootExternal(i) {
+  var item = moduleTree[i];
+  if (item.moduleIndex !== null && item.moduleIndex !== undefined) {
+    return externalSet.has(item.moduleIndex);
+  }
+  // folder with no moduleIndex: heuristic on the 'Agda.' name prefix.
+  return item.name.indexOf('Agda.') === 0;
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderTree(filter) {
+  var container = document.getElementById('tp-tree');
+  container.innerHTML = buildTreeNodes(moduleTree, filter);
+
+  container.querySelectorAll('.tp-mod-row').forEach(function (row) {
+    row.addEventListener('click', function () {
+      var idx = parseInt(row.getAttribute('data-mod-idx'), 10);
+      var name = G.modules[idx];
+      focusModule(name, true);
+    });
+  });
+
+  // highlight active
+  if (focusedModule !== null) {
+    var activeIdx = G.modules.indexOf(focusedModule);
+    if (activeIdx >= 0) {
+      container.querySelectorAll('[data-mod-idx="' + activeIdx + '"]').forEach(function (r) {
+        r.classList.add('tp-active');
+        var p = r.parentElement;
+        while (p && p !== container) {
+          if (p.tagName === 'DETAILS') p.open = true;
+          p = p.parentElement;
+        }
+      });
+    }
+  }
+}
+
+document.getElementById('tp-search').addEventListener('input', function (e) {
+  renderTree(e.target.value);
+});
+
+// ── SOURCE DRAWER ─────────────────────────────────────────────────────────────
+var STATE_BADGE = { 0:'d', 1:'p', 2:'h', 3:'f' };
+var STATE_LABEL = { 0:'Defined', 1:'Postulate', 2:'Hole', 3:'Failed' };
+
+function showDefSource(defGlobalIdx, modName) {
+  // Show header
+  var name = defNames ? defNames[defGlobalIdx] : String(defGlobalIdx);
+  var modIdx = defModules ? defModules[defGlobalIdx] : -1;
+  var state  = defStates  ? defStates[defGlobalIdx]  : 0;
+
+  document.getElementById('tp-right-hint').style.display = 'none';
+  var dh = document.getElementById('tp-def-hdr');
+  dh.style.display = 'block';
+  document.getElementById('tp-def-name').textContent = name;
+  document.getElementById('tp-def-mod').textContent  = modName || (modIdx >= 0 ? G.modules[modIdx] : '');
+  var badge = document.getElementById('tp-def-badge');
+  badge.textContent = STATE_LABEL[state] || 'Unknown';
+  badge.className   = 'tp-badge-' + (STATE_BADGE[state] || 'd');
+
+  // Clear source areas
+  document.getElementById('tp-src-html').innerHTML = '';
+  document.getElementById('tp-src-fallback').textContent = '';
+  document.getElementById('tp-src-fallback').style.display = 'none';
+  document.getElementById('tp-src-html').style.display = 'block';
+
+  var sc = document.getElementById('tp-src-container');
+  sc.style.display = 'block';
+
+  if (!WITH_SOURCE) {
+    document.getElementById('tp-src-html').style.display = 'none';
+    document.getElementById('tp-src-fallback').textContent = '-- Source not available\n-- Rerun with --with-source';
+    document.getElementById('tp-src-fallback').style.display = 'block';
+    return;
+  }
+
+  // load snippet asynchronously
+  var fullName = name;  // defNames stores pretty-printed full name
+  var mName = modName || (modIdx >= 0 ? G.modules[modIdx] : '');
+  loadSnippetBundle(G, mName).then(function (bundle) {
+    var entry = lookupSnippet(bundle, mName, fullName);
+    if (!entry) {
+      document.getElementById('tp-src-html').style.display = 'none';
+      document.getElementById('tp-src-fallback').textContent = '-- Source snippet not found';
+      document.getElementById('tp-src-fallback').style.display = 'block';
+      return;
+    }
+    document.getElementById('tp-src-html').innerHTML = entry.source || '';
+  });
+}
+
+function clearSource() {
+  document.getElementById('tp-right-hint').style.display = 'flex';
+  document.getElementById('tp-def-hdr').style.display = 'none';
+  document.getElementById('tp-src-container').style.display = 'none';
+}
+
+// ── GRAPH: get neighborhood data ──────────────────────────────────────────────
+// Returns { focusModIdx, neighborModIdxs (Set), defGlobalIdxs (Set), focusDefIdxs (Set) }
+async function getNeighborhood(modName, depth) {
+  var modIdx = G.modules.indexOf(modName);
+  if (modIdx < 0) return null;
+
+  var focusDefIdxs = new Set();
+  var allDefIdxs   = new Set();
+  var neighborMods = new Set([modIdx]);
+
+  // Collect defs for the focus module (inline or lazy)
+  if (!LAZY && defModules) {
+    for (var i = 0; i < defModules.length; i++) {
+      if (defModules[i] === modIdx) focusDefIdxs.add(i);
+    }
+  } else {
+    // lazy: fetch detail
+    var detail = await ensureModuleDetail(G, modName);
+    if (detail && detail.defs) {
+      // detail.defs.names: local names; defs are numbered 0..N-1 locally
+      // We need to correlate with global indices.
+      // In lazy detail: outEdges = [[localIdx, tgtGlobalIdx, tgtModIdx], ...]
+      // Store locally for this render; we'll use a synthetic index scheme.
+      return buildNeighborhoodFromDetail(modIdx, detail, depth);
+    }
+  }
+
+  // Inline: walk CSR
+  if (outOffsets && outTargets && defModules) {
+    // 1-hop: add all defs reachable from focusDefs' edges
+    var toExpand = new Set(focusDefIdxs);
+    focusDefIdxs.forEach(function (di) { allDefIdxs.add(di); });
+    toExpand.forEach(function (di) {
+      var start = outOffsets[di], end = outOffsets[di+1];
+      for (var j = start; j < end; j++) {
+        var t = outTargets[j];
+        allDefIdxs.add(t);
+        neighborMods.add(defModules[t]);
+      }
+    });
+    // incoming
+    toExpand.forEach(function (di) {
+      var start = inOffsets[di], end = inOffsets[di+1];
+      for (var j = start; j < end; j++) {
+        var s = inTargets[j];
+        allDefIdxs.add(s);
+        neighborMods.add(defModules[s]);
+      }
+    });
+
+    if (depth >= 2) {
+      var secondHop = new Set();
+      allDefIdxs.forEach(function (di) {
+        if (focusDefIdxs.has(di)) return;
+        var s1 = outOffsets[di], e1 = outOffsets[di+1];
+        for (var j = s1; j < e1; j++) { secondHop.add(outTargets[j]); }
+        var s2 = inOffsets[di], e2 = inOffsets[di+1];
+        for (var j = s2; j < e2; j++) { secondHop.add(inTargets[j]); }
+      });
+      secondHop.forEach(function (di) {
+        allDefIdxs.add(di);
+        neighborMods.add(defModules[di]);
+      });
+    }
+  }
+
+  return { focusModIdx: modIdx, neighborMods: neighborMods, defIdxs: allDefIdxs, focusDefIdxs: focusDefIdxs, isLazyDetail: false };
+}
+
+async function ensureModuleDetail(g, modName) {
+  if (detailCache[modName] !== undefined) return detailCache[modName];
+  var d = await loadModuleDetail(g, modName);
+  detailCache[modName] = d;
+  return d;
+}
+
+// Build neighborhood from a lazy detail object
+// detail = { defs:{names,states,x,y}, outEdges:[[localIdx,tgtGlobalIdx,tgtModIdx],...] }
+function buildNeighborhoodFromDetail(modIdx, detail, depth) {
+  var neighborMods = new Set([modIdx]);
+  var outEdges = detail.outEdges || [];
+
+  // Build synthetic def records keyed by "local:modIdx:localIdx" or "global:gIdx"
+  var localNames  = (detail.defs && detail.defs.names)  || [];
+  var localStates = detail.defs && detail.defs.states ? b64ToInt8(detail.defs.states) : null;
+
+  var focusDefIdxs = new Set();
+  var allDefIdxs   = new Set();
+  var defMap = {};  // id -> {id, name, modIdx, state, isFocus}
+  var edgeList = [];
+
+  // local defs
+  localNames.forEach(function (nm, li) {
+    var id = 'l:' + modIdx + ':' + li;
+    var st = localStates ? localStates[li] : 0;
+    defMap[id] = { id: id, name: nm, modIdx: modIdx, state: st, localIdx: li, isFocus: true };
+    focusDefIdxs.add(id);
+    allDefIdxs.add(id);
+  });
+
+  // outEdges: [[localIdx, tgtGlobalIdx, tgtModIdx], ...]
+  outEdges.forEach(function (e) {
+    var localIdx   = e[0];
+    var tgtGlobal  = e[1];
+    var tgtModIdx  = e[2];
+    neighborMods.add(tgtModIdx);
+    var srcId = 'l:' + modIdx + ':' + localIdx;
+    var tgtId = 'g:' + tgtGlobal;
+    if (!defMap[tgtId]) {
+      var tgtName = (defNames && defNames[tgtGlobal]) ? defNames[tgtGlobal] : String(tgtGlobal);
+      var tgtSt   = defStates ? defStates[tgtGlobal] : 0;
+      defMap[tgtId] = { id: tgtId, name: tgtName, modIdx: tgtModIdx, state: tgtSt, isFocus: false };
+    }
+    allDefIdxs.add(tgtId);
+    edgeList.push([srcId, tgtId]);
+  });
+
+  return { focusModIdx: modIdx, neighborMods: neighborMods, defIdxs: allDefIdxs, focusDefIdxs: focusDefIdxs, isLazyDetail: true, defMap: defMap, edgeList: edgeList };
+}
+
+// ── GRAPH RENDERER ────────────────────────────────────────────────────────────
+function clearPlaceholderOverlay() {
+  var midEl = document.getElementById('tp-mid');
+  var old = midEl.querySelector('.tp-placeholder-overlay');
+  if (old) old.parentNode.removeChild(old);
+}
+
+function showPlaceholderOverlay(detail) {
+  var midEl = document.getElementById('tp-mid');
+  clearPlaceholderOverlay();
+  var wrap = document.createElement('div');
+  wrap.className = 'tp-placeholder-overlay';
+  wrap.innerHTML = renderPlaceholderHTML(detail);
+  midEl.appendChild(wrap);
+}
+
+async function renderGraph() {
+  document.getElementById('tp-mid-hint').style.display = focusedModule ? 'none' : 'block';
+  clearPlaceholderOverlay();
+  if (!focusedModule) return;
+
+  document.getElementById('tp-breadcrumb').textContent = focusedModule + (expandDepth > 1 ? ' (2-hop)' : '');
+
+  // Lazy mode: pre-check for placeholder detail (external / failed / filtered)
+  // and render an IDE-style card in the middle pane instead of cytoscape.
+  if (LAZY) {
+    var preDetail = await ensureModuleDetail(G, focusedModule);
+    if (preDetail && preDetail.placeholder) {
+      if (cy) { cy.destroy(); cy = null; }
+      document.getElementById('tp-cy').innerHTML = '';
+      showPlaceholderOverlay(preDetail);
+      return;
+    }
+  }
+
+  var nb = await getNeighborhood(focusedModule, expandDepth);
+  if (!nb) return;
+
+  var elements = [];
+
+  if (nb.isLazyDetail) {
+    // Module compound nodes
+    nb.neighborMods.forEach(function (mi) {
+      var name = G.modules[mi] || String(mi);
+      elements.push({ data: {
+        id: 'mod:' + mi, label: name.split('.').pop(), fullName: name,
+        type: 'module', isFocus: mi === nb.focusModIdx,
+        isExternal: externalSet.has(mi),
+      }});
+    });
+    // Def nodes
+    nb.defIdxs.forEach(function (did) {
+      var def = nb.defMap[did];
+      if (!def) return;
+      var name = def.name;
+      elements.push({ data: {
+        id: did, label: name.split('.').pop(), fullName: name,
+        state: def.state, modIdx: def.modIdx, defLocalIdx: def.localIdx,
+        parent: 'mod:' + def.modIdx, type: 'def', isFocusDef: nb.focusDefIdxs.has(did),
+      }});
+    });
+    // Edges
+    nb.edgeList.forEach(function (e) {
+      elements.push({ data: { id: 'e:' + e[0] + ':' + e[1], source: e[0], target: e[1] }});
+    });
+  } else {
+    // Inline mode
+    nb.neighborMods.forEach(function (mi) {
+      var name = G.modules[mi] || String(mi);
+      elements.push({ data: {
+        id: 'mod:' + mi, label: name.split('.').pop(), fullName: name,
+        type: 'module', isFocus: mi === nb.focusModIdx,
+        isExternal: externalSet.has(mi),
+      }});
+    });
+    nb.defIdxs.forEach(function (di) {
+      if (!defNames) return;
+      var name  = defNames[di];
+      var mi    = defModules[di];
+      var state = defStates[di];
+      elements.push({ data: {
+        id: 'di:' + di, label: name ? name.split('.').pop() : String(di), fullName: name || String(di),
+        state: state, modIdx: mi, defGlobalIdx: di,
+        parent: 'mod:' + mi, type: 'def', isFocusDef: nb.focusDefIdxs.has(di),
+      }});
+    });
+    // edges from CSR
+    if (outOffsets && outTargets) {
+      nb.defIdxs.forEach(function (di) {
+        var s = outOffsets[di], e = outOffsets[di+1];
+        for (var j = s; j < e; j++) {
+          var t = outTargets[j];
+          if (nb.defIdxs.has(t)) {
+            elements.push({ data: { id: 'e:' + di + ':' + t, source: 'di:' + di, target: 'di:' + t }});
+          }
+        }
+      });
+    }
+  }
+
+  if (cy) { cy.destroy(); cy = null; }
+
+  cy = cytoscape({
+    container: document.getElementById('tp-cy'),
+    elements: elements,
+    style: buildCyStyle(),
+    layout: {
+      name: 'cose', padding: 30,
+      nodeRepulsion: 8000, idealEdgeLength: 60,
+      animate: false, randomize: false,
+    },
+    userZoomingEnabled: true,
+    userPanningEnabled: true,
+  });
+  window._tpCy = cy;
+
+  cy.on('tap', 'node[type="def"]', function (evt) {
+    var d = evt.target.data();
+    var modName = G.modules[d.modIdx] || focusedModule;
+    var idx = (d.defGlobalIdx !== undefined) ? d.defGlobalIdx : null;
+    if (idx !== null) showDefSource(idx, modName);
+    else {
+      // lazy mode: show by name
+      showDefSourceByName(d.fullName, modName, d.state);
+    }
+  });
+
+  cy.on('tap', 'node[type="module"]', function (evt) {
+    var mod = evt.target.data('fullName');
+    if (mod !== focusedModule) focusModule(mod, true);
+  });
+
+  cy.fit(null, 20);
+}
+
+function showDefSourceByName(fullName, modName, state) {
+  document.getElementById('tp-right-hint').style.display = 'none';
+  document.getElementById('tp-def-hdr').style.display = 'block';
+  document.getElementById('tp-def-name').textContent = fullName.split('.').pop();
+  document.getElementById('tp-def-mod').textContent  = modName;
+  var badge = document.getElementById('tp-def-badge');
+  var s = typeof state === 'number' ? state : 0;
+  badge.textContent = STATE_LABEL[s] || 'Unknown';
+  badge.className   = 'tp-badge-' + (STATE_BADGE[s] || 'd');
+  document.getElementById('tp-src-html').innerHTML = '';
+  document.getElementById('tp-src-fallback').style.display = 'none';
+  document.getElementById('tp-src-container').style.display = 'block';
+
+  if (!WITH_SOURCE) {
+    document.getElementById('tp-src-html').style.display = 'none';
+    document.getElementById('tp-src-fallback').textContent = '-- Source not available\n-- Rerun with --with-source';
+    document.getElementById('tp-src-fallback').style.display = 'block';
+    return;
+  }
+  loadSnippetBundle(G, modName).then(function (bundle) {
+    var entry = lookupSnippet(bundle, modName, fullName);
+    if (!entry) {
+      document.getElementById('tp-src-html').style.display = 'none';
+      document.getElementById('tp-src-fallback').textContent = '-- Snippet not found for: ' + fullName;
+      document.getElementById('tp-src-fallback').style.display = 'block';
+      return;
+    }
+    document.getElementById('tp-src-html').style.display = 'block';
+    document.getElementById('tp-src-html').innerHTML = entry.source || '';
+  });
+}
+
+function buildCyStyle() {
+  var cDef = getComputedStyle(document.documentElement).getPropertyValue('--c-defined').trim()   || '#4caf50';
+  var cPos = getComputedStyle(document.documentElement).getPropertyValue('--c-postulate').trim()  || '#f44336';
+  var cHol = getComputedStyle(document.documentElement).getPropertyValue('--c-hole').trim()       || '#9c27b0';
+  var cFail= getComputedStyle(document.documentElement).getPropertyValue('--c-failed').trim()     || '#ff9800';
+
+  function stateColor(field, prop) {
+    return function (ele) {
+      var s = ele.data('state');
+      if (s === 0) return cDef;
+      if (s === 1) return cPos;
+      if (s === 2) return cHol;
+      if (s === 3) return cFail;
+      return '#777';
+    };
+  }
+
+  return [
+    { selector: 'node[type="module"]', style: {
+      'background-color': '#2d2d2d', 'background-opacity': 0.9,
+      'border-color': function (e) { return e.data('isFocus') ? '#007acc' : (e.data('isExternal') ? '#555' : '#444'); },
+      'border-width': function (e) { return e.data('isFocus') ? 2 : 1; },
+      'label': 'data(label)', 'text-valign': 'top', 'text-halign': 'center',
+      'font-size': 11, 'font-weight': 'bold',
+      'color': function (e) { return e.data('isExternal') ? '#666' : '#9cdcfe'; },
+      'text-margin-y': -4, 'padding': 14, 'shape': 'roundrectangle',
+      'compound-sizing-wrt-labels': 'include',
+    }},
+    { selector: 'node[type="def"]', style: {
+      'background-color': function (e) {
+        var s = e.data('state');
+        if (s === 0) return '#1b4d1c'; if (s === 1) return '#4d1b1b';
+        if (s === 2) return '#2e1b4d'; if (s === 3) return '#3d2200'; return '#333';
+      },
+      'border-color': stateColor('state', 'border'),
+      'border-width': function (e) { return e.data('isFocusDef') ? 2.5 : 1.5; },
+      'label': 'data(label)', 'font-size': 10,
+      'color': stateColor('state', 'text'),
+      'text-valign': 'center', 'text-halign': 'center',
+      'width': 'label', 'height': 22, 'padding': 8, 'shape': 'roundrectangle',
+    }},
+    { selector: 'node[type="def"]:selected', style: { 'border-width': 3, 'border-color': '#fff' }},
+    { selector: 'edge', style: {
+      'width': 1.5, 'line-color': '#555', 'target-arrow-color': '#555',
+      'target-arrow-shape': 'triangle', 'curve-style': 'bezier',
+      'arrow-scale': 0.7, 'opacity': 0.7,
+    }},
+    { selector: 'edge:selected', style: { 'line-color': '#007acc', 'target-arrow-color': '#007acc', opacity: 1 }},
+  ];
+}
+
+// ── FOCUS MODULE ──────────────────────────────────────────────────────────────
+function focusModule(modName, push) {
+  if (push && focusedModule && focusedModule !== modName) navHistory.push(focusedModule);
+  focusedModule = modName;
+  expandDepth = 1;
+  document.getElementById('tp-btn-expand').textContent = 'Expand neighbors';
+  clearSource();
+  renderGraph();
+  renderTree(document.getElementById('tp-search').value);
+  document.getElementById('tp-btn-back').disabled = navHistory.length === 0;
+}
+
+// ── BUTTONS ───────────────────────────────────────────────────────────────────
+document.getElementById('tp-btn-back').addEventListener('click', function () {
+  if (!navHistory.length) return;
+  var prev = navHistory.pop();
+  focusedModule = null;
+  focusModule(prev, false);
+  document.getElementById('tp-btn-back').disabled = navHistory.length === 0;
+});
+
+document.getElementById('tp-btn-expand').addEventListener('click', function () {
+  if (!focusedModule) return;
+  expandDepth = expandDepth >= 2 ? 1 : expandDepth + 1;
+  this.textContent = expandDepth >= 2 ? 'Collapse neighbors' : 'Expand neighbors';
+  renderGraph();
+});
+
+document.getElementById('tp-btn-fit').addEventListener('click', function () {
+  if (cy) cy.fit(null, 20);
+});
+
+// ── RESIZERS ──────────────────────────────────────────────────────────────────
+makeResizer('tp-resizer-l', 'tp-left', 'tp-mid', 'left');
+makeResizer('tp-resizer-r', 'tp-mid', 'tp-right', 'right');
+
+// ── INIT ─────────────────────────────────────────────────────────────────────
+async function init() {
+  G = await loadGraph();
+
+  // Decode external module index set
+  if (G.externalModules) {
+    var extArr = b64ToInt32(G.externalModules);
+    for (var i = 0; i < extArr.length; i++) externalSet.add(extArr[i]);
+  }
+
+  // moduleStateCounts
+  moduleStateCounts = G.moduleStateCounts || [];
+
+  // moduleTree
+  moduleTree = G.moduleTree || [];
+  // moduleTree = [{name, parent: idx|-1, moduleIndex: idx|null}];
+  // `name` is the last path segment (the backend pre-computes this).
+
+  // Decode inline defs if present
+  if (!LAZY && G.defs) decodeInline(G);
+
+  // Entry module banner
+  if (G.entryModule) {
+    document.getElementById('tp-entry-label').textContent = 'Entry: ' + G.entryModule;
+  }
+
+  // Render tree
+  renderTree('');
+
+  // Auto-focus entry or first module
+  var autoFocus = G.entryModule || (G.modules && G.modules[0]);
+  if (autoFocus) focusModule(autoFocus, false);
+}
+
+document.addEventListener('DOMContentLoaded', init);
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>agda-deps · sigma</title>
+<script>window.__gzipEnabled = false;</script>
+<script>
+  if (window.__gzipEnabled && typeof DecompressionStream === 'undefined') {
+    document.write('<scr'+'ipt src="https://unpkg.com/pako@2.1.0/dist/pako_inflate.min.js"></scr'+'ipt>');
+  }
+</script>
+<!--
+  sigma v2.4 + graphology v0.25 are UMD builds (sigma v3 is ESM only).
+  The WebGL renderer is the whole point of this view: cytoscape's
+  Canvas/SVG starts struggling around 50k nodes; sigma comfortably
+  handles 1M+ once edges are kept thin.
+-->
+<script src="https://unpkg.com/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+<script src="https://unpkg.com/sigma@2.4.0/build/sigma.min.js"></script>
+<!-- dagre powers the DAG-pods (top-down) layout. Synchronous load
+     keeps the initial render simple; the script is ~50 KB minified
+     so the cost is negligible next to the sigma+graphology bundle. -->
+<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+<style>
+:root {
+  --c-defined:   #4caf50;
+  --c-postulate: #f44336;
+  --c-hole:      #9c27b0;
+  --c-failed:    #ff9800;
+  --c-external:  #9ca3af;
+  --bg:          #0f1115;
+  --panel:       #161922;
+  --border:      #262a36;
+  --text:        #e4e6eb;
+  --text2:       #9aa0a6;
+  --accent:      #60a5fa;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); }
+
+#topbar {
+  position: fixed; top: 0; left: 0; right: 0; height: 44px;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 14px; gap: 14px;
+  font-size: 13px; z-index: 10;
+}
+#topbar .logo  { font-weight: 700; color: var(--text); }
+#topbar .stats { color: var(--text2); font-family: var(--mono); font-size: 12px; }
+#topbar .spacer { flex: 1; }
+#topbar .group {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text2);
+}
+#topbar select, #topbar button {
+  background: #1f2330; color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 9px; font-size: 12px;
+  font-family: var(--sans); cursor: pointer; outline: none;
+}
+#topbar button:hover { border-color: var(--accent); }
+#topbar select:focus { border-color: var(--accent); }
+#topbar .legend { display: flex; gap: 12px; align-items: center; font-size: 11px; color: var(--text2); }
+#topbar .legend .swatch {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  margin-right: 4px; vertical-align: middle;
+}
+
+#canvas {
+  position: fixed; top: 44px; left: 0; right: 320px; bottom: 0;
+  background: var(--bg);
+}
+
+#info {
+  position: fixed; top: 44px; right: 0; bottom: 0; width: 320px;
+  background: var(--panel); border-left: 1px solid var(--border);
+  overflow: auto; padding: 16px;
+  font-size: 13px;
+}
+#info h2 {
+  font-size: 14px; font-weight: 600; margin-bottom: 8px;
+  word-break: break-all; font-family: var(--mono);
+}
+#info .meta { color: var(--text2); font-size: 12px; margin-bottom: 16px; }
+#info .meta b { color: var(--text); }
+#info h3 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text2); margin: 14px 0 6px;
+}
+#info ul { list-style: none; }
+#info li {
+  padding: 4px 6px; margin: 1px 0; border-radius: 3px;
+  font-family: var(--mono); font-size: 12px; cursor: pointer;
+  color: var(--text); word-break: break-all;
+}
+#info li:hover { background: var(--border); color: var(--accent); }
+#info .counts { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 12px; }
+#info .counts .c {
+  font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 10px;
+}
+#info .c.def  { background: rgba(76,175,80,0.15);  color: var(--c-defined); }
+#info .c.post { background: rgba(244,67,54,0.15);  color: var(--c-postulate); }
+#info .c.hole { background: rgba(156,39,176,0.15); color: var(--c-hole); }
+#info .c.fail { background: rgba(255,152,0,0.15);  color: var(--c-failed); }
+#info .placeholder { color: var(--text2); font-style: italic; }
+
+#loading {
+  position: fixed; inset: 0; display: flex; align-items: center;
+  justify-content: center; background: var(--bg); z-index: 100;
+  font-size: 14px; color: var(--text2);
+}
+#err {
+  position: fixed; inset: 0; display: none; align-items: center;
+  justify-content: center; background: var(--bg); z-index: 100;
+  padding: 24px; text-align: center;
+}
+#err.visible { display: flex; }
+#err pre {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; padding: 12px; font-family: var(--mono);
+  font-size: 12px; color: var(--c-postulate); max-width: 600px;
+  white-space: pre-wrap; text-align: left;
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <span class="logo">agda-deps · sigma</span>
+  <span class="stats" id="topbar-stats">loading…</span>
+  <span class="spacer"></span>
+  <span class="group">
+    <label for="layout-mode">layout</label>
+    <select id="layout-mode" title="Switch between layouts. DAG pods uses dagre for a top-down DAG; concentric arranges modules in BFS rings around the entry.">
+      <option value="dag">DAG pods (top-down)</option>
+      <option value="concentric">Concentric</option>
+    </select>
+    <button id="btn-fit" title="Fit camera to graph">fit</button>
+  </span>
+  <span class="legend">
+    <span><span class="swatch" style="background:var(--c-defined)"></span>defined</span>
+    <span><span class="swatch" style="background:var(--c-postulate)"></span>postulate</span>
+    <span><span class="swatch" style="background:var(--c-hole)"></span>hole</span>
+    <span><span class="swatch" style="background:var(--c-failed)"></span>failed</span>
+    <span><span class="swatch" style="background:var(--c-external)"></span>external</span>
+  </span>
+</div>
+
+<div id="canvas"></div>
+
+<div id="info">
+  <p class="placeholder">Click a module node to inspect.</p>
+</div>
+
+<div id="loading">Loading graph data…</div>
+<div id="err"><div><h2 style="margin-bottom:12px;color:var(--c-postulate)">Error</h2><pre id="err-body"></pre></div></div>
+
+<script>
+// ─── DATA LOADING PRELUDE ──────────────────────────────────────────────────
+var LAZY = false;
+var WITH_SOURCE = true;
+var GZIP_ENABLED = false;
+var AGDA_HTML_BASE = null;
+var GRAPH = {"v":2,"modules":["Agda.Builtin.Nat","Agda.Primitive","Agda.Primitive.Cubical","Bool","Bool.Bool","Coinductive","Coinductive.Stream","DeadPrivate","GoalsTest","Holes","List","List.List","Nat","Nat.Nat","Records","Records.Box","Records.Point","Test","Test.Exp","Where","Where._"],"files":["/home/mceresa/Repositories/Projects/AgdaDependencies/test/Bool.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Coinductive.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/DeadPrivate.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/GoalsTest.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Holes.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/List.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Nat.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Records.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Test.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Where.agda"],"moduleToFile":"////////////////AAAAAAAAAAABAAAAAQAAAP//////////BAAAAAUAAAAFAAAABgAAAAYAAAAHAAAABwAAAAcAAAAIAAAACAAAAAkAAAAJAAAA","fileToModules":[[3,4],[5,6],[],[],[9],[10,11],[12,13],[14,15,16],[17,18],[19,20]],"defs":{"names":["Records.Box.constructor","Bool.Bool","Test._++_","Holes.useMagic","Test.Exp.Plus","List.List.[]","Where._.sq","Test.Exp.Var","Test.eval\u0027","Test.Var-0","Nat.Nat.suc","List.List","Coinductive.Stream.tail","Nat._\u003c_","Where._.go","Test.eval","Records.double","Nat._-_","Where._.bump","Coinductive.Stream.head","Nat.Nat.zero","Holes.magic","Nat.suc-0","Records.Point.y","Records.Box.contents","Records.origin","Test.sum","List._∷_-1","Test.Int-0","Nat._*_","Nat.Nat","Nat._+_","Where.sumSquares","Records.Box","Records.mkPoint","Records.Box.count","Test.Exp.Int","Records.Point.constructor","Coinductive.zeros","Records.Point","Nat._==_","Records.Point.x","Test.Plus-1","Coinductive.Stream.constructor","Test.Exp","Where.weirdSum","Holes.unsolved#meta.3","Holes.incomplete","Test.Plus-0","Bool.Bool.true","List._∷_-0","Bool.Bool.false","Coinductive.mapSuc","Test.map","List.List._∷_","Records.sumCoords","Coinductive.Stream"],"modules":"DwAAAAMAAAARAAAACQAAABIAAAALAAAAFAAAABIAAAARAAAAEQAAAA0AAAAKAAAABgAAAAwAAAAUAAAAEQAAAA4AAAAMAAAAFAAAAAYAAAANAAAACQAAAAwAAAAQAAAADwAAAA4AAAARAAAACgAAABEAAAAMAAAADAAAAAwAAAATAAAADgAAAA4AAAAPAAAAEgAAABAAAAAFAAAADgAAAAwAAAAQAAAAEQAAAAYAAAARAAAAEwAAAAkAAAAJAAAAEQAAAAQAAAAKAAAABAAAAAUAAAARAAAACwAAAA4AAAAFAAAA","states":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAAAAAAAAAAAA","x":"7ny/P3S1DUB8m84+iGPdPwRWRkDVWys/TKaaP/32PUAFowpAz2ZZQBdIAECh80I/AU0YQBrAA0D3dZA/0gAaQL3jvD9pb/g/aW/QP40oDUCdEd0/HHzRP9xGE0BpAK8/bVbFP0p7uz9JLo8/zczMPGRdMEAwTM4/ih/TP1io1T8nMYg/QBOxP9nOrz/8GKs/ejYXQEvIlz+1pgFAqoKhP+Xy/z/4wqQ/mghjQCBjHkDAWyxAokXmP0Ot4T+Ybuo/wFtkQAu1BkAdWuQ9/BgTQNiBB0BxPbo+36YHP166sT+fzRJA","y":"ONucPimuCj4w9RM/BOecPw+cSz+Xizg/X5gcP6s+Dz8F3UY/nim0PtnOXz8EHCo/F7fRP+uQ+z7eAkE/F5pDP2tI7D7QD3M/n82SP0vI3z9hVFI/mbuuP3h6pT+J0pY/k29WPuM2ij98RFQ/n7BcP7hYcT4wEio/UMJMP3+8Zz/b3Bg/6Q6SPpjdoz8J/sc+uw8QP4/kij/IB60/zcyUP8Fu6D65jYY//fZtPynL+D8yrDI/RraLP+QUjT49Csc+FhM7Pwx5xD09LIw/0zBcPuoErD8F3TY/LJpWP1XZdz/c19k/"},"edges":{"outOffsets":"AAAAAAMAAAAFAAAACQAAAAwAAAAQAAAAEgAAABUAAAAYAAAAGwAAABsAAAAeAAAAIAAAACIAAAApAAAAMQAAADgAAAA8AAAAQAAAAEIAAABEAAAARgAAAEcAAABHAAAASgAAAE0AAABTAAAAWgAAAFoAAABaAAAAXwAAAGEAAABlAAAAaAAAAGwAAABxAAAAdAAAAHgAAAB7AAAAgQAAAIYAAACNAAAAkAAAAJAAAACSAAAAlQAAAJgAAACZAAAAmwAAAJsAAACdAAAAnQAAAJ8AAACmAAAAqgAAAK4AAAC0AAAAuQAAAA==","outTargets":"AAAAAB4AAAAhAAAAMQAAADMAAAACAAAABQAAAAsAAAA2AAAAFQAAAB4AAAAfAAAABAAAACoAAAAsAAAAMAAAAAUAAAALAAAACwAAAB0AAAAeAAAABwAAAAkAAAAsAAAAFAAAAB4AAAAsAAAACgAAABYAAAAeAAAABQAAADYAAAArAAAAOAAAAAEAAAAKAAAADQAAABQAAAAeAAAAMQAAADMAAAAFAAAABgAAAAsAAAAOAAAAFAAAAB4AAAAfAAAANgAAAAQAAAAHAAAADwAAAB4AAAAfAAAAJAAAACwAAAAdAAAAHgAAACEAAAAjAAAACgAAABEAAAAUAAAAHgAAAB4AAAAfAAAAKwAAADgAAAAUAAAAHgAAAB4AAAAeAAAAJQAAACcAAAAAAAAAHgAAACEAAAAUAAAAFwAAABkAAAAeAAAAJwAAACkAAAAFAAAACwAAABQAAAAaAAAAHgAAAB8AAAA2AAAACgAAABQAAAAdAAAAHgAAAB8AAAAKAAAAFAAAAAoAAAAUAAAAHgAAAB8AAAALAAAADgAAAB4AAAAAAAAAGAAAAB4AAAAjAAAAFwAAABkAAAAeAAAAJwAAACkAAAAAAAAAHgAAACEAAAAcAAAAHgAAACQAAAAsAAAAHgAAACUAAAAnAAAADAAAABMAAAAUAAAAHgAAACYAAAA4AAAAFwAAABkAAAAeAAAAJQAAACkAAAABAAAACgAAABQAAAAeAAAAKAAAADEAAAAzAAAAHgAAACUAAAAnAAAAKwAAADgAAAAEAAAABwAAACQAAAASAAAAHgAAAB8AAAAeAAAAHgAAAC4AAAABAAAAMQAAAAEAAAAzAAAACgAAAAwAAAATAAAAHgAAACYAAAA0AAAAOAAAAAUAAAALAAAANQAAADYAAAALAAAAGwAAADIAAAA2AAAAFwAAABkAAAAeAAAAHwAAACcAAAApAAAADAAAABMAAAAmAAAAKwAAADgAAAA=","inOffsets":"AAAAAAQAAAAIAAAACQAAAAkAAAAMAAAAEgAAABMAAAAWAAAAFgAAABcAAAAfAAAAJwAAACoAAAArAAAALQAAAC4AAAAuAAAALwAAADAAAAAzAAAAPwAAAEAAAABBAAAARQAAAEYAAABKAAAASwAAAEwAAABNAAAAUAAAAHIAAAB7AAAAewAAAH8AAAB/AAAAgQAAAIQAAACIAAAAiwAAAJEAAACSAAAAlgAAAJcAAACbAAAAoAAAAKAAAAChAAAAoQAAAKIAAACmAAAApwAAAKsAAACsAAAArQAAALMAAACzAAAAuQAAAA==","inTargets":"AAAAABgAAAAhAAAAIwAAAA0AAAAoAAAAMQAAADMAAAACAAAABAAAAA8AAAAsAAAAAgAAAAUAAAALAAAADgAAABoAAAA1AAAADgAAAAcAAAAPAAAALAAAAAcAAAAKAAAADQAAABEAAAAdAAAAHgAAAB8AAAAoAAAANAAAAAIAAAAFAAAABgAAAA4AAAAaAAAAIAAAADUAAAA2AAAAJgAAADQAAAA4AAAADQAAAA4AAAAgAAAADwAAABEAAAAtAAAAJgAAADQAAAA4AAAACAAAAA0AAAAOAAAAEQAAABQAAAAZAAAAGgAAAB0AAAAeAAAAHwAAACYAAAAoAAAAAwAAAAoAAAAZAAAAIgAAACcAAAA3AAAAIQAAABkAAAAiAAAAJwAAADcAAAAaAAAANgAAACQAAAAGAAAAEAAAAB0AAAAAAAAAAwAAAAYAAAAIAAAACgAAAA0AAAAOAAAADwAAABAAAAARAAAAEgAAABQAAAAVAAAAFwAAABgAAAAZAAAAGgAAAB0AAAAfAAAAIAAAACEAAAAiAAAAIwAAACQAAAAlAAAAJgAAACcAAAAoAAAAKQAAAC0AAAAuAAAALwAAADQAAAA3AAAAAwAAAA4AAAAPAAAAEgAAABoAAAAdAAAAHwAAAC0AAAA3AAAAAAAAABAAAAAYAAAAIwAAABAAAAAhAAAADwAAACQAAAAsAAAAFwAAACUAAAAnAAAAKQAAACYAAAA0AAAAOAAAABcAAAAZAAAAIgAAACUAAAApAAAANwAAACgAAAAZAAAAIgAAACcAAAA3AAAABAAAAAwAAAATAAAAKwAAADgAAAAEAAAABwAAAAgAAAAPAAAAJAAAAC8AAAAEAAAAAQAAAA0AAAAoAAAAMQAAADYAAAABAAAADQAAACgAAAAzAAAANAAAADUAAAACAAAACwAAAA4AAAAaAAAANQAAADYAAAAMAAAAEwAAACYAAAArAAAANAAAADgAAAA="},"definitionEdgesProvenance":"AQAAAQEBAQABAQABAQEAAQEAAAEAAQEAAQAAAQEAAQEBAAABAQEAAQEBAgACAQABAQEBAQABAQABAAABAQEBAAABAQABAAAAAQABAQABAQQBAAEBAAEBAAEBAQEBAAEBAQEBAAEAAgABAQEBAQQAAAEBAAABAAEAAAEAAQEBAAEAAQQBAQEAAQEAAQEBAAEAAQABAQECAAEAAAEAAQABAQEBAAQBAAEAAQEAAQEBAQQAAQABAQEEAQE=","transitiveEdges":"sAwAAIsMAACEDAAAowwAAJ4MAABzBAAAZgQAAOQCAADXAgAAywkAAL4JAACUCAAAiggAAK4IAACJCAAAgggAAJwIAACyCwAAzAsAAJ4LAACnCwAAoAsAALoLAADQCQAA8AkAANMJAAAQAQAA6AAAABQBAAAOAQAAIggAADAIAAAoCAAAIAgAALsBAACWAQAAmAEAAHUDAACDAwAAdgMAAFsDAAB7AwAAXgMAAOYBAADcAQAA6AUAAN4FAADVBQAA6QUAAM8FAAAABgAAfQAAAHcAAACoAAAA2AsAANILAAADDAAAzQgAANgIAADGCAAA1AgAAMgIAABICQAAPwkAAEYJAABGBQAAPQUAAEQFAABkCAAAWwgAAGIIAAC5BwAAsAcAALsHAACpBwAAqwcAAGYMAABdDAAAaAwAAFYMAABYDAAAuAUAAK8FAAClBQAAugUAAKgFAACqBQAAdwcAAHEHAAB8BwAAWQcAAHYFAAB5BQAAWAUAAOkHAADsBwAAywcAAB4AAAAhAAAAAAAAAK4DAACxAwAAswMAAJUKAADJAAAAbAAAAGoAAABcCwAAjgsAAOoKAAAaCwAAeAIAAKkCAAAoAQAAIgEAABEMAAA8DAAAOAwAACEMAADCBgAAuAYAAJIEAACIBAAAWAIAAEQCAABQAgAABQcAAPsGAADxBgAA5wMAAN0DAADTAwAAkwYAAIkGAAB/BgAAlAYAAOkIAAAGCQAAGwkAAPwIAAAZCQAA8ggAAOYCAAADAwAAGAMAAPkCAAAWAwAA7wIAAD4HAAArBwAAdAEAADwDAAAyAwAAKQMAAD0DAAAkAwAAIwMAAFQDAAAjCgAAJAoAACAEAAA=","moduleEdges":[[2,1],[3,1],[3,4],[4,3],[5,1],[5,6],[5,12],[5,13],[6,5],[7,0],[8,10],[8,12],[9,1],[9,12],[10,1],[10,11],[11,10],[12,1],[12,3],[12,4],[12,13],[13,12],[14,1],[14,12],[14,13],[14,15],[14,16],[15,12],[15,14],[16,12],[16,14],[17,1],[17,5],[17,9],[17,10],[17,11],[17,12],[17,13],[17,14],[17,18],[17,19],[18,12],[18,17],[19,1],[19,10],[19,12],[19,20],[20,10],[20,11],[20,12],[20,13]],"transitiveModuleEdges":[[3,1],[5,1],[5,12],[5,13],[9,1],[10,1],[12,1],[12,3],[12,4],[14,1],[14,12],[14,13],[14,15],[14,16],[15,12],[16,12],[17,1],[17,5],[17,9],[17,10],[17,11],[17,12],[17,13],[17,14],[17,19],[18,12],[19,1],[19,10],[19,12],[20,10],[20,11],[20,12],[20,13]],"moduleStates":"AAAAAAAAAAAAAAAAAAAAAAAAAAAA","moduleStateCounts":[[0,0,0,0],[0,0,0,0],[0,0,0,0],[1,0,0,0],[2,0,0,0],[3,0,0,0],[3,0,0,0],[0,0,0,0],[0,0,0,0],[1,1,2,0],[3,0,0,0],[2,0,0,0],[7,0,0,0],[2,0,0,0],[6,0,0,0],[3,0,0,0],[3,0,0,0],[10,0,0,0],[3,0,0,0],[2,0,0,0],[3,0,0,0]],"moduleDepth":"/////wEAAAD/////AgAAAAIAAAABAAAAAgAAAP//////////AQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAgAAAAIAAAAAAAAAAQAAAAEAAAACAAAA","modulePodLayout":"AIDewwAABEMAAEhDAABQQgAAV8MAAARDAABIQwAAUEIAgPLEAAAAAAAASEMAAFBCAMDVxAAAAAAAAEhDAABQQgAAucQAAAAAAABIQwAAUEIAQJzEAAAAAAAASEMAAFBCAAB/xAAAAAAAAEhDAABQQgCARcQAAAAAAABIQwAAUEIAAAzEAAAAAAAASEMAAFBCAAClwwAAAAAAAEhDAABQQgAAcEEAAARDAABIQwAAUEIAAMjCAAAAAAAASEMAAFBCAAB1QwAABEMAAEhDAABQQgAAAkMAAAAAAABIQwAAUEIAALRDAAAAAAAASEMAAFBCAIATRAAAAAAAAEhDAABQQgAATUQAAAAAAABIQwAAUEIAQINEAAAAAAAASEMAAFBCAACgRAAAAAAAAEhDAABQQgDAvEQAAAAAAABIQwAAUEIAgNlEAAAAAAAASEMAAFBC","fileTree":[{"name":"home","parent":-1,"fileIndex":null},{"name":"mceresa","parent":0,"fileIndex":null},{"name":"Repositories","parent":1,"fileIndex":null},{"name":"Projects","parent":2,"fileIndex":null},{"name":"AgdaDependencies","parent":3,"fileIndex":null},{"name":"test","parent":4,"fileIndex":null},{"name":"Bool.agda","parent":5,"fileIndex":0},{"name":"Coinductive.agda","parent":5,"fileIndex":1},{"name":"DeadPrivate.agda","parent":5,"fileIndex":2},{"name":"GoalsTest.agda","parent":5,"fileIndex":3},{"name":"Holes.agda","parent":5,"fileIndex":4},{"name":"List.agda","parent":5,"fileIndex":5},{"name":"Nat.agda","parent":5,"fileIndex":6},{"name":"Records.agda","parent":5,"fileIndex":7},{"name":"Test.agda","parent":5,"fileIndex":8},{"name":"Where.agda","parent":5,"fileIndex":9}],"moduleTree":[{"name":"Agda","parent":-1,"moduleIndex":null},{"name":"Builtin","parent":0,"moduleIndex":null},{"name":"Nat","parent":1,"moduleIndex":0},{"name":"Primitive","parent":0,"moduleIndex":1},{"name":"Cubical","parent":3,"moduleIndex":2},{"name":"Bool","parent":-1,"moduleIndex":3},{"name":"Bool","parent":5,"moduleIndex":4},{"name":"Coinductive","parent":-1,"moduleIndex":5},{"name":"Stream","parent":7,"moduleIndex":6},{"name":"DeadPrivate","parent":-1,"moduleIndex":7},{"name":"GoalsTest","parent":-1,"moduleIndex":8},{"name":"Holes","parent":-1,"moduleIndex":9},{"name":"List","parent":-1,"moduleIndex":10},{"name":"List","parent":12,"moduleIndex":11},{"name":"Nat","parent":-1,"moduleIndex":12},{"name":"Nat","parent":14,"moduleIndex":13},{"name":"Records","parent":-1,"moduleIndex":14},{"name":"Box","parent":16,"moduleIndex":15},{"name":"Point","parent":16,"moduleIndex":16},{"name":"Test","parent":-1,"moduleIndex":17},{"name":"Exp","parent":19,"moduleIndex":18},{"name":"Where","parent":-1,"moduleIndex":19},{"name":"_","parent":21,"moduleIndex":20}],"entryModule":"Test","externalModules":"AAAAAAEAAAACAAAA","bundleFiles":{"Bool":"snippets/Bool.json","Bool.Bool":"snippets/Bool.Bool.json","Coinductive":"snippets/Coinductive.json","Coinductive.Stream":"snippets/Coinductive.Stream.json","Holes":"snippets/Holes.json","List":"snippets/List.json","List.List":"snippets/List.List.json","Nat":"snippets/Nat.json","Nat.Nat":"snippets/Nat.Nat.json","Records":"snippets/Records.json","Records.Box":"snippets/Records.Box.json","Records.Point":"snippets/Records.Point.json","Test":"snippets/Test.json","Test.Exp":"snippets/Test.Exp.json","Where":"snippets/Where.json","Where._":"snippets/Where._.json"},"searchIndex":{"names":["agda.builtin.nat","agda.primitive","agda.primitive.cubical","bool","bool.bool","coinductive","coinductive.stream","deadprivate","goalstest","holes","list","list.list","nat","nat.nat","records","records.box","records.point","test","test.exp","where","where._","records.box.constructor","bool.bool","test._++_","holes.usemagic","test.exp.plus","list.list.[]","where._.sq","test.exp.var","test.eval\u0027","test.var-0","nat.nat.suc","list.list","coinductive.stream.tail","nat._\u003c_","where._.go","test.eval","records.double","nat._-_","where._.bump","coinductive.stream.head","nat.nat.zero","holes.magic","nat.suc-0","records.point.y","records.box.contents","records.origin","test.sum","list._∷_-1","test.int-0","nat._*_","nat.nat","nat._+_","where.sumsquares","records.box","records.mkpoint","records.box.count","test.exp.int","records.point.constructor","coinductive.zeros","records.point","nat._==_","records.point.x","test.plus-1","coinductive.stream.constructor","test.exp","where.weirdsum","holes.unsolved#meta.3","holes.incomplete","test.plus-0","bool.bool.true","list._∷_-0","bool.bool.false","coinductive.mapsuc","test.map","list.list._∷_","records.sumcoords","coinductive.stream"],"kinds":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB","bigrams":{"#m":[67],"*_":[50],"++":[23],"+_":[23,52],"-0":[30,43,49,69,71],"-1":[48,63],"-_":[38],".3":[67],".[":[26],"._":[20,23,27,34,35,38,39,48,50,52,61,71,75],".b":[0,4,15,21,22,39,45,54,56,70,72],".c":[2,21,45,56,58,64],".d":[37],".e":[18,25,28,29,36,57,65],".f":[72],".g":[35],".h":[40],".i":[49,57,68],".l":[11,26,32,75],".m":[42,55,73,74],".n":[0,13,31,41,51],".o":[46],".p":[1,2,16,25,44,58,60,62,63,69],".s":[6,27,31,33,40,43,47,53,64,76,77],".t":[33,70],".u":[24,67],".v":[28,30],".w":[66],".x":[62],".y":[44],".z":[41,59],"\u003c_":[34],"==":[61],"=_":[61],"[]":[26],"_*":[50],"_+":[23,52],"_-":[38,48,71],"_.":[27,35,39],"_\u003c":[34],"_=":[61],"_∷":[48,71,75],"a.":[0,1,2,67],"ad":[7,40],"ag":[0,1,2,24,42],"ai":[33],"al":[2,8,29,36,72],"am":[6,33,40,64,77],"ap":[73,74],"ar":[28,30,53],"at":[0,7,12,13,31,34,38,41,43,50,51,52,61],"bi":[2],"bl":[37],"bo":[3,4,15,21,22,45,54,56,70,72],"bu":[0,39],"c-":[43],"ca":[2],"co":[5,6,14,15,16,21,33,37,40,44,45,46,54,55,56,58,59,60,62,64,68,73,76,77],"ct":[5,6,21,33,40,58,59,64,73,77],"cu":[2],"d#":[67],"da":[0,1,2],"de":[7],"do":[37],"dp":[7],"ds":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,66,76],"du":[5,6,33,40,59,64,73,77],"e.":[2,6,20,27,33,35,39,40,53,59,64,66,73,77],"ea":[6,7,33,40,64,77],"ec":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,76],"ed":[67],"ei":[66],"em":[24],"en":[45],"er":[19,20,27,35,39,41,53,59,66],"es":[8,9,17,18,23,24,25,28,29,30,36,42,47,49,53,57,63,65,67,68,69,74],"et":[67,68],"ev":[29,36],"ex":[18,25,28,57,65],"fa":[72],"gd":[0,1,2],"gi":[24,42,46],"go":[8,35],"he":[19,20,27,35,39,40,53,66],"ho":[9,24,42,67,68],"ic":[2,24,42],"ig":[46],"il":[0,33],"im":[1,2],"in":[0,5,6,16,33,40,44,46,49,55,57,58,59,60,62,64,68,73,77],"ir":[66],"is":[10,11,26,32,48,71,75],"it":[1,2],"iv":[1,2,5,6,7,33,40,59,64,73,77],"kp":[55],"l\u0027":[29],"l.":[4,22,70,72],"le":[9,24,37,42,67,68],"li":[10,11,26,32,48,71,75],"ls":[8,72],"lt":[0],"lu":[25,63,69],"lv":[67],"m.":[33,40,64],"ma":[24,42,73,74],"mc":[76],"me":[67],"mi":[1,2],"mk":[55],"mp":[39,68],"ms":[53],"n.":[0],"na":[0,12,13,31,34,38,41,43,50,51,52,61],"nc":[68],"nd":[5,6,33,40,59,64,73,77],"ns":[21,58,64,67],"nt":[16,44,45,49,55,56,57,58,60,62],"oa":[8],"oi":[5,6,16,33,40,44,55,58,59,60,62,64,73,77],"ol":[3,4,9,22,24,42,67,68,70,72],"om":[68],"on":[21,45,58,64],"oo":[3,4,22,70,72,76],"or":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,64,76],"os":[59],"ou":[37,56],"ox":[15,21,45,54,56],"p.":[25,28,57],"pl":[25,63,68,69],"po":[16,44,55,58,60,62],"pr":[1,2,7],"ps":[73],"qu":[53],"r-":[30],"rd":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,66,76],"re":[6,14,15,16,19,20,21,27,33,35,37,39,40,44,45,46,53,54,55,56,58,60,62,64,66,76,77],"ri":[1,2,7,46],"ro":[41,59],"ru":[21,58,64,70],"s-":[63,69],"s.":[15,16,21,24,37,42,44,45,46,54,55,56,58,60,62,67,68,76],"se":[24,72],"so":[67],"sq":[27,53],"st":[6,8,10,11,17,18,21,23,25,26,28,29,30,32,33,36,40,47,48,49,57,58,63,64,65,69,71,74,75,77],"su":[31,43,47,53,66,73,76],"t-":[49],"t.":[11,13,18,23,25,26,28,29,30,31,32,34,36,38,41,43,44,47,48,49,50,51,52,57,58,61,62,63,65,69,71,74,75],"ta":[33,67],"te":[7,8,17,18,23,25,28,29,30,36,45,47,49,57,63,65,68,69,74],"ti":[0,1,2,5,6,33,40,59,64,73,77],"to":[21,58,64],"tr":[6,21,33,40,58,64,70,77],"ts":[45],"ua":[53],"ub":[2,37],"uc":[5,6,21,31,33,40,43,58,59,64,73,77],"ue":[70],"ui":[0],"um":[39,47,53,66,76],"un":[56,67],"us":[24,25,63,69],"va":[7,28,29,30,36],"ve":[1,2,5,6,33,40,59,64,67,73,77],"we":[66],"wh":[19,20,27,35,39,53,66],"x.":[21,45,56],"xp":[18,25,28,57,65],"ze":[41,59],"∷_":[48,71,75]}}};
+var GRAPH_URL = null;
+var SNIPPETS_BASE = null;
+var MODULES_BASE = null;
+
+// ─── BASE64 DECODERS ───────────────────────────────────────────────────────
+function b64Bytes(b64) {
+  if (!b64) return new Uint8Array(0);
+  var bin = atob(b64), out = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64I32(b64)   { return new Int32Array(b64Bytes(b64).buffer); }
+function b64I8(b64)    { return new Int8Array(b64Bytes(b64).buffer); }
+function b64F32(b64)   { return new Float32Array(b64Bytes(b64).buffer); }
+
+// ─── FETCH HELPERS ─────────────────────────────────────────────────────────
+async function fetchJson(url) {
+  if (GZIP_ENABLED && window.pako) {
+    try {
+      var r = await fetch(url + '.gz');
+      if (r.ok) {
+        var ab = await r.arrayBuffer();
+        var txt = pako.inflate(new Uint8Array(ab), {to:'string'});
+        return JSON.parse(txt);
+      }
+    } catch(e) {}
+  }
+  var r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching ' + url);
+  return r.json();
+}
+
+function showErr(msg) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('err-body').textContent = msg;
+  document.getElementById('err').classList.add('visible');
+}
+
+// ─── APP STATE ─────────────────────────────────────────────────────────────
+var g = null;
+var modules = [];
+var moduleCounts = [];        // [[d, p, h, f], …] per module
+var moduleDepth = null;       // Int32Array | null
+var moduleStates = null;      // Int8Array (failed flag) | null
+var externalSet = new Set();
+var entryIdx = -1;
+var outByMod = null;          // Map<int, int[]>  (i → [j…])
+var inByMod  = null;          // Map<int, int[]>
+var sigmaRenderer = null;
+var graphologyGraph = null;
+var selectedNode = null;
+var currentLayout = 'dag';     // 'dag' | 'concentric'
+
+// Above this many modules we don't even try dagre — it's
+// quadratic-ish in practice and the page would lock up.
+var DAG_LAYOUT_THRESHOLD = 3000;
+
+// ─── INIT ──────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    g = LAZY ? await fetchJson(GRAPH_URL) : GRAPH;
+  } catch(e) {
+    showErr('Failed to load graph data: ' + e.message +
+            (LAZY ? '\n\nThe lazy bundle uses fetch(); make sure you serve via HTTP (e.g. `python -m http.server`), not file://.' : ''));
+    return;
+  }
+
+  modules      = g.modules || [];
+  moduleCounts = g.moduleStateCounts || [];
+  moduleDepth  = g.moduleDepth ? b64I32(g.moduleDepth) : null;
+  moduleStates = g.moduleStates ? b64I8(g.moduleStates) : null;
+  if (g.externalModules) {
+    var arr = b64I32(g.externalModules);
+    for (var i = 0; i < arr.length; i++) externalSet.add(arr[i]);
+  }
+  entryIdx = g.entryModule ? modules.indexOf(g.entryModule) : -1;
+
+  // Build adjacency for the side-panel imports / imported-by lists.
+  outByMod = new Map();
+  inByMod  = new Map();
+  (g.moduleEdges || []).forEach(function(e) {
+    var s = e[0], t = e[1];
+    if (!outByMod.has(s)) outByMod.set(s, []);
+    if (!inByMod.has(t))  inByMod.set(t,  []);
+    outByMod.get(s).push(t);
+    inByMod.get(t).push(s);
+  });
+
+  document.getElementById('loading').style.display = 'none';
+
+  if (modules.length === 0) {
+    showErr('Graph contains no modules. Nothing to render.');
+    return;
+  }
+
+  // Default to concentric when DAG isn't viable so the initial render
+  // matches the picked option. The selector reflects the actual choice.
+  if (modules.length > DAG_LAYOUT_THRESHOLD) {
+    currentLayout = 'concentric';
+    var sel = document.getElementById('layout-mode');
+    if (sel) sel.value = 'concentric';
+  }
+
+  buildAndRender();
+  updateTopbar();
+  wireTopbar();
+}
+
+function wireTopbar() {
+  var sel = document.getElementById('layout-mode');
+  if (sel) {
+    sel.value = currentLayout;
+    sel.addEventListener('change', function() {
+      currentLayout = sel.value;
+      relayout();
+    });
+  }
+  var fit = document.getElementById('btn-fit');
+  if (fit) fit.addEventListener('click', fitCamera);
+}
+
+// ─── LAYOUT ────────────────────────────────────────────────────────────────
+// Two layouts ship with this view:
+//
+//   * 'dag' (default): the dag-pods concept from the legacy
+//     module-dag-pods view, ported to sigma. dagre lays the
+//     module-level DAG out top-to-bottom and module-node sizes
+//     scale with definition count, giving each module a sense of
+//     being its own "pod" on the canvas. Falls back to concentric
+//     when there are too many modules for dagre, or when dagre
+//     hasn't loaded.
+//
+//   * 'concentric': BFS rings around the entry module. O(V) and
+//     deterministic — the fallback when DAG is unsuitable.
+function computePositions(layout) {
+  if (layout === 'dag') {
+    if (modules.length > DAG_LAYOUT_THRESHOLD) {
+      console.warn('agda-deps/sigma: ' + modules.length +
+        ' modules exceeds DAG threshold (' + DAG_LAYOUT_THRESHOLD +
+        '); falling back to concentric.');
+      return concentricPositions();
+    }
+    if (typeof dagre === 'undefined') {
+      console.warn('agda-deps/sigma: dagre not loaded; falling back to concentric.');
+      return concentricPositions();
+    }
+    return dagPodsPositions();
+  }
+  return concentricPositions();
+}
+
+// dagre layout over the module-level DAG. Module node sizes are
+// proportional to def count so visually larger modules form bigger
+// "pods" on the canvas.
+function dagPodsPositions() {
+  var n = modules.length;
+  var xs = new Float32Array(n);
+  var ys = new Float32Array(n);
+
+  // 'transitiveModuleEdges' are redundant in a DAG layout (they
+  // create false depth). Drop them if the schema reports them so
+  // dagre ranks each module by its shortest-path depth.
+  var transRedundant = new Set();
+  (g.transitiveModuleEdges || []).forEach(function(e) {
+    transRedundant.add(e[0] + '|' + e[1]);
+  });
+
+  var dg = new dagre.graphlib.Graph();
+  dg.setGraph({
+    rankdir:  'TB',
+    nodesep:  40,
+    ranksep:  60,
+    marginx:  20,
+    marginy:  20,
+    ranker:   'tight-tree'
+  });
+  dg.setDefaultEdgeLabel(function() { return {}; });
+
+  for (var i = 0; i < n; i++) {
+    var sz = moduleSize(i);
+    // dagre wants the node's bounding box; we use a square scaled
+    // off the visual size sigma will give the node.
+    var box = Math.max(20, sz * 5);
+    dg.setNode(String(i), { width: box, height: box });
+  }
+  (g.moduleEdges || []).forEach(function(e) {
+    var key = e[0] + '|' + e[1];
+    if (transRedundant.has(key)) return;
+    dg.setEdge(String(e[0]), String(e[1]));
+  });
+
+  dagre.layout(dg);
+
+  // dagre returns positions in pixel space; sigma uses arbitrary
+  // units. We rescale to roughly [-1, 1] on the longer axis so the
+  // initial 'fit' camera lands in a reasonable place across project
+  // sizes.
+  var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (var i = 0; i < n; i++) {
+    var v = dg.node(String(i));
+    if (!v) continue;
+    if (v.x < minX) minX = v.x;
+    if (v.x > maxX) maxX = v.x;
+    if (v.y < minY) minY = v.y;
+    if (v.y > maxY) maxY = v.y;
+  }
+  var w = Math.max(1, maxX - minX);
+  var h = Math.max(1, maxY - minY);
+  var scale = 2.0 / Math.max(w, h);
+  var cx = (minX + maxX) / 2;
+  var cy = (minY + maxY) / 2;
+
+  for (var i = 0; i < n; i++) {
+    var v = dg.node(String(i));
+    if (!v) { xs[i] = 0; ys[i] = 0; continue; }
+    xs[i] = (v.x - cx) * scale;
+    // Sigma's Y is screen-down; dagre's Y grows downward too — but
+    // sigma flips Y in WebGL so a positive dagre Y ends up at the
+    // bottom of the canvas. That's what we want for TB layout
+    // ("roots above") so leave the sign alone, then negate so dagre's
+    // top (smaller Y) lands at the top of the sigma viewport.
+    ys[i] = -(v.y - cy) * scale;
+  }
+
+  return { xs: xs, ys: ys };
+}
+
+// Concentric layout by BFS depth from the entry module. Unreachable
+// modules sit on an outer ring. Deterministic, fast (O(V)).
+function concentricPositions() {
+  var n = modules.length;
+  var xs = new Float32Array(n);
+  var ys = new Float32Array(n);
+
+  // Group module indices by depth (or -1 for unreachable / no entry).
+  var byDepth = new Map();
+  for (var i = 0; i < n; i++) {
+    var d = moduleDepth ? moduleDepth[i] : -1;
+    if (d == null) d = -1;
+    if (!byDepth.has(d)) byDepth.set(d, []);
+    byDepth.get(d).push(i);
+  }
+
+  // Concentric: depth 0 at centre, deeper levels on wider rings.
+  // Unreachable (-1) goes to a far outer ring drawn lighter so it
+  // doesn't dominate visually.
+  var depths = Array.from(byDepth.keys()).sort(function(a,b){return a-b;});
+  var maxDepth = depths[depths.length - 1] || 0;
+  if (maxDepth < 1) maxDepth = 1;
+
+  depths.forEach(function(d) {
+    var idxs = byDepth.get(d);
+    var k = idxs.length;
+    // Sort within a ring by module name for stable layout.
+    idxs.sort(function(a, b) {
+      var na = modules[a], nb = modules[b];
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+    var radius;
+    if (d < 0) {
+      radius = 1.6 * Math.max(2.0, maxDepth);   // unreachable outer halo
+    } else if (d === 0) {
+      radius = 0;
+    } else {
+      radius = Math.max(0.7, d) * 0.9;
+    }
+    if (k === 1 && d >= 0) {
+      xs[idxs[0]] = radius; ys[idxs[0]] = 0;
+      return;
+    }
+    var step = (2 * Math.PI) / Math.max(k, 1);
+    // Offset each ring slightly so successive layers don't perfectly line up
+    var phase = d * 0.35;
+    for (var j = 0; j < k; j++) {
+      var ang = phase + j * step;
+      xs[idxs[j]] = radius * Math.cos(ang);
+      ys[idxs[j]] = radius * Math.sin(ang);
+    }
+  });
+
+  return { xs: xs, ys: ys };
+}
+
+// ─── COLOUR + SIZE ─────────────────────────────────────────────────────────
+function moduleColor(i) {
+  if (externalSet.has(i)) return 'var(--c-external)';
+  var c = moduleCounts[i] || [0, 0, 0, 0];
+  var failed = (c[3] > 0) || (moduleStates && moduleStates[i] === 1);
+  if (failed)               return getComputedStyle(document.documentElement).getPropertyValue('--c-failed').trim();
+  if (c[2] > 0)             return getComputedStyle(document.documentElement).getPropertyValue('--c-hole').trim();
+  if (c[1] > 0 && c[1] >= c[0]) return getComputedStyle(document.documentElement).getPropertyValue('--c-postulate').trim();
+  return getComputedStyle(document.documentElement).getPropertyValue('--c-defined').trim();
+}
+
+function externalColor() {
+  return getComputedStyle(document.documentElement).getPropertyValue('--c-external').trim();
+}
+
+function moduleSize(i) {
+  var c = moduleCounts[i] || [0, 0, 0, 0];
+  var total = c[0] + c[1] + c[2] + c[3];
+  // Sub-linear scaling so a Prelude with 5k defs doesn't dwarf
+  // everything else.
+  return Math.max(2.0, Math.min(14.0, 2.0 + Math.sqrt(total)));
+}
+
+// ─── BUILD GRAPHOLOGY + SIGMA ──────────────────────────────────────────────
+function buildAndRender() {
+  var pos = computePositions(currentLayout);
+
+  graphologyGraph = new graphology.MultiDirectedGraph();
+
+  // CSS-var colour resolution once, then cache.
+  var COLOR = {
+    defined:   getComputedStyle(document.documentElement).getPropertyValue('--c-defined').trim(),
+    postulate: getComputedStyle(document.documentElement).getPropertyValue('--c-postulate').trim(),
+    hole:      getComputedStyle(document.documentElement).getPropertyValue('--c-hole').trim(),
+    failed:    getComputedStyle(document.documentElement).getPropertyValue('--c-failed').trim(),
+    external:  getComputedStyle(document.documentElement).getPropertyValue('--c-external').trim(),
+    edge:      '#2f3344'
+  };
+
+  function pickColor(i) {
+    if (externalSet.has(i)) return COLOR.external;
+    var c = moduleCounts[i] || [0, 0, 0, 0];
+    var failed = (c[3] > 0) || (moduleStates && moduleStates[i] === 1);
+    if (failed)                    return COLOR.failed;
+    if (c[2] > 0)                  return COLOR.hole;
+    if (c[1] > 0 && c[1] >= c[0])  return COLOR.postulate;
+    return COLOR.defined;
+  }
+
+  for (var i = 0; i < modules.length; i++) {
+    graphologyGraph.addNode(String(i), {
+      label: modules[i],
+      x:     pos.xs[i],
+      y:     pos.ys[i],
+      size:  moduleSize(i),
+      color: pickColor(i),
+      // Hide labels for external + unreachable to keep the canvas
+      // readable at scale. Entry gets a forced label.
+      forceLabel: (i === entryIdx)
+    });
+  }
+
+  (g.moduleEdges || []).forEach(function(e) {
+    var s = String(e[0]), t = String(e[1]);
+    // We can't assume both endpoints exist (defensive: the edge
+    // builder should never emit dangling refs, but a future schema
+    // change shouldn't crash the renderer).
+    if (graphologyGraph.hasNode(s) && graphologyGraph.hasNode(t)) {
+      graphologyGraph.addEdge(s, t, {
+        size:  0.5,
+        color: COLOR.edge,
+        type:  'arrow'
+      });
+    }
+  });
+
+  var container = document.getElementById('canvas');
+  sigmaRenderer = new Sigma(graphologyGraph, container, {
+    renderEdgeLabels: false,
+    defaultEdgeType:  'arrow',
+    labelDensity:     0.07,
+    labelGridCellSize: 80,
+    labelRenderedSizeThreshold: 6,
+    labelFont:         '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    labelColor:        { color: '#cbd5e1' },
+    labelSize:         11,
+    minCameraRatio:    0.02,
+    maxCameraRatio:    20
+  });
+
+  sigmaRenderer.on('clickNode',     function(ev) { selectNode(parseInt(ev.node, 10)); });
+  sigmaRenderer.on('clickStage',    function()    { selectNode(-1); });
+  sigmaRenderer.on('enterNode',     function(ev) { container.style.cursor = 'pointer'; });
+  sigmaRenderer.on('leaveNode',     function()    { container.style.cursor = 'default'; });
+
+  if (entryIdx >= 0) selectNode(entryIdx);
+}
+
+// Recompute positions for the current layout and update the live
+// graph in-place. Cheaper than rebuilding the whole sigma renderer
+// since graphology/sigma re-render on attribute changes.
+function relayout() {
+  if (!graphologyGraph) return;
+  var pos = computePositions(currentLayout);
+  for (var i = 0; i < modules.length; i++) {
+    if (!graphologyGraph.hasNode(String(i))) continue;
+    graphologyGraph.setNodeAttribute(String(i), 'x', pos.xs[i]);
+    graphologyGraph.setNodeAttribute(String(i), 'y', pos.ys[i]);
+  }
+  fitCamera();
+}
+
+// Fit the sigma camera to the current node spread. Uses the
+// renderer's "reset camera" semantics which sigma keeps in sync with
+// graphology's positions.
+function fitCamera() {
+  if (!sigmaRenderer) return;
+  var cam = sigmaRenderer.getCamera();
+  cam.animatedReset({ duration: 350 });
+}
+
+// ─── SIDE PANEL ────────────────────────────────────────────────────────────
+function selectNode(i) {
+  selectedNode = i;
+  var info = document.getElementById('info');
+  if (i < 0 || i >= modules.length) {
+    info.innerHTML = '<p class="placeholder">Click a module node to inspect.</p>';
+    return;
+  }
+  var c = moduleCounts[i] || [0, 0, 0, 0];
+  var d = moduleDepth ? moduleDepth[i] : null;
+  var depthLabel = (d == null || d < 0) ? 'unreachable' : String(d);
+  var isExt = externalSet.has(i);
+  var isEntry = (i === entryIdx);
+
+  var html = '<h2>' + escapeHtml(modules[i]) + '</h2>';
+  html += '<div class="meta">';
+  if (isEntry) html += '<b>entry module</b> · ';
+  if (isExt)   html += '<b>external</b> · ';
+  html += 'depth from entry: <b>' + depthLabel + '</b>';
+  html += '</div>';
+
+  html += '<div class="counts">';
+  html += '<span class="c def">'  + c[0] + ' defined</span>';
+  html += '<span class="c post">' + c[1] + ' postulate</span>';
+  html += '<span class="c hole">' + c[2] + ' hole</span>';
+  html += '<span class="c fail">' + c[3] + ' failed</span>';
+  html += '</div>';
+
+  var imps = outByMod.get(i) || [];
+  var revs = inByMod.get(i)  || [];
+
+  html += '<h3>imports (' + imps.length + ')</h3>';
+  if (imps.length === 0) html += '<p class="placeholder">none</p>';
+  else                   html += '<ul>' + renderModList(imps) + '</ul>';
+
+  html += '<h3>imported by (' + revs.length + ')</h3>';
+  if (revs.length === 0) html += '<p class="placeholder">none</p>';
+  else                   html += '<ul>' + renderModList(revs) + '</ul>';
+
+  info.innerHTML = html;
+  Array.prototype.forEach.call(info.querySelectorAll('li[data-idx]'), function(el) {
+    el.addEventListener('click', function() {
+      var idx = parseInt(el.dataset.idx, 10);
+      selectNode(idx);
+      if (sigmaRenderer) {
+        var disp = sigmaRenderer.getNodeDisplayData(String(idx));
+        if (disp) {
+          sigmaRenderer.getCamera().animate(
+            { x: disp.x, y: disp.y, ratio: 0.4 },
+            { duration: 500 }
+          );
+        }
+      }
+    });
+  });
+}
+
+function renderModList(idxs) {
+  // Stable alphabetic order for readability; cap at 200 entries to
+  // keep the panel responsive on hub-modules like a Prelude with
+  // hundreds of importers.
+  var copy = idxs.slice().sort(function(a, b) {
+    return modules[a] < modules[b] ? -1 : modules[a] > modules[b] ? 1 : 0;
+  });
+  var truncated = '';
+  if (copy.length > 200) {
+    truncated = '<li class="placeholder">(' + (copy.length - 200) + ' more — open in another viewer)</li>';
+    copy = copy.slice(0, 200);
+  }
+  return copy.map(function(i) {
+    return '<li data-idx="' + i + '">' + escapeHtml(modules[i]) + '</li>';
+  }).join('') + truncated;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' })[c];
+  });
+}
+
+// ─── TOPBAR ────────────────────────────────────────────────────────────────
+function updateTopbar() {
+  var nM = modules.length;
+  var nE = (g.moduleEdges || []).length;
+  var nT = nM > 0 ? moduleCounts.reduce(function(a, c) { return a + c[0] + c[1] + c[2] + c[3]; }, 0) : 0;
+  var s  = nM.toLocaleString() + ' modules · ' +
+           nE.toLocaleString() + ' edges · ' +
+           nT.toLocaleString() + ' defs';
+  if (g.entryModule) s += ' · entry: ' + g.entryModule;
+  document.getElementById('topbar-stats').textContent = s;
+}
+
+init();
+</script>
+</body>
+</html>

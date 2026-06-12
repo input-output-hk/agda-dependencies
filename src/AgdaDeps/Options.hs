@@ -1,0 +1,410 @@
+{-# LANGUAGE FlexibleContexts #-}
+-- | Backend configuration: 'Options', its CLI parsers, and the
+-- supporting palette / output-format / def-state types.
+module AgdaDeps.Options
+  ( -- * Output format
+    OutputFormat(..)
+
+    -- * JSON emission mode
+  , JsonMode(..)
+
+    -- * HTML view
+  , View(..)
+  , viewSlug
+
+    -- * Definition state
+  , DefState(..)
+  , colorFor
+
+    -- * Colour palette
+  , ColorPalette(..)
+  , defaultPalette
+
+    -- * Options
+  , Options(..)
+  , defaultOptions
+
+    -- * CLI option parsers
+  , outdirOpt
+  , formatOpt
+  , viewOpt
+  , withSourceOpt
+  , agdaHtmlDirOpt
+  , lazyOpt
+  , colorOpt
+  , excludeOpt
+  , noSourceForOpt
+  , maxSnippetBytesOpt
+  , gzipOpt
+  , keepGoingOpt
+  , skipAgdaOpt
+  , quietOpt
+  , noExternalsOpt
+  , jsonModeOpt
+  , lenientImportsOpt, resolveDepsOpt
+  , withTermHashesOpt
+  , minTermDepthOpt
+  , withSignaturesOpt
+  , normaliseSignaturesOpt
+  , showImplicitOpt
+
+    -- * Module-exclusion predicate
+  , isExcludedModule
+  ) where
+
+import Control.DeepSeq ( NFData(..) )
+import Control.Monad.Except ( MonadError(throwError) )
+
+import AgdaDeps.Util ( isValidHexColor )
+
+-- | DOT, HTML, or JSON output.
+data OutputFormat = FmtDot | FmtHtml | FmtJson
+  deriving (Show, Eq)
+
+-- | How @--format=json@ emits the v2 graph. The packed form keeps
+-- adjacency in CSR form and per-def state as base64 typed arrays. The
+-- expanded form is definitions as an array of records and edges as
+-- pairs of qnames.
+data JsonMode = JsonPacked | JsonExpanded
+  deriving (Show, Eq)
+
+instance NFData JsonMode where
+  rnf JsonPacked   = ()
+  rnf JsonExpanded = ()
+
+instance NFData OutputFormat where
+  rnf FmtDot  = ()
+  rnf FmtHtml = ()
+  rnf FmtJson = ()
+
+-- | HTML view variant. Selects which JS app the @--format=html@ output
+-- ships. All views consume the same v2 @graph.json@ payload built by
+-- "AgdaDeps.Backend.GraphJson"; only the template differs.
+data View
+  = ViewCytoscape       -- ^ Original cytoscape-compound-graph viewer.
+  | ViewIdeThreePane    -- ^ Concept 01: file tree + focused subgraph + source.
+  | ViewModuleDagPods   -- ^ Concept 02: top-down DAG of expandable module pods.
+  | ViewSourceCentric   -- ^ Concept 06: code-first with minimap.
+  | ViewNotionDoc       -- ^ Concept 09: scrollable cross-linked document.
+  | ViewWikiBacklinks   -- ^ Concept 10: single-page focus with depends-on / used-by.
+  | ViewSigma           -- ^ WebGL module-level renderer via sigma.js + graphology.
+  | ViewBigModuleDagPods
+    -- ^ Scaling variant of 'ViewModuleDagPods': pre-computed module-DAG
+    -- layout (Haskell-side, see 'buildModuleDagLayout') + viewport
+    -- virtualisation in the browser. Targets ~100k modules.
+  | ViewCriticalPathHoles      -- ^ Concept 12: kanban of proof obligations.
+  | ViewProgressDashboard      -- ^ Concept 14: Grafana-style KPI board.
+  | ViewCartographicAtlas      -- ^ Concept 15: topographic map metaphor.
+  | ViewSunburstHierarchy      -- ^ Concept 16: D3 sunburst over dotted-module tree.
+  | ViewReadingOrderNarrative  -- ^ Concept 17: textbook-style topo-ordered scroll.
+  | ViewPixelGridOverview      -- ^ Concept 20: every def is a colored tile.
+  deriving (Show, Eq)
+
+instance NFData View where
+  rnf ViewCytoscape              = ()
+  rnf ViewIdeThreePane           = ()
+  rnf ViewModuleDagPods          = ()
+  rnf ViewSourceCentric          = ()
+  rnf ViewNotionDoc              = ()
+  rnf ViewWikiBacklinks          = ()
+  rnf ViewSigma                  = ()
+  rnf ViewBigModuleDagPods       = ()
+  rnf ViewCriticalPathHoles      = ()
+  rnf ViewProgressDashboard      = ()
+  rnf ViewCartographicAtlas      = ()
+  rnf ViewSunburstHierarchy      = ()
+  rnf ViewReadingOrderNarrative  = ()
+  rnf ViewPixelGridOverview      = ()
+
+-- | Canonical CLI slug for a 'View'. Kept in sync with 'viewOpt'.
+viewSlug :: View -> String
+viewSlug ViewCytoscape        = "cytoscape"
+viewSlug ViewIdeThreePane     = "ide-three-pane"
+viewSlug ViewModuleDagPods    = "module-dag-pods"
+viewSlug ViewSourceCentric    = "source-centric"
+viewSlug ViewNotionDoc        = "notion-doc"
+viewSlug ViewWikiBacklinks    = "wiki-backlinks"
+viewSlug ViewSigma            = "sigma"
+viewSlug ViewBigModuleDagPods       = "big-module-dag-pods"
+viewSlug ViewCriticalPathHoles      = "critical-path-holes"
+viewSlug ViewProgressDashboard      = "progress-dashboard"
+viewSlug ViewCartographicAtlas      = "cartographic-atlas"
+viewSlug ViewSunburstHierarchy      = "sunburst-hierarchy"
+viewSlug ViewReadingOrderNarrative  = "reading-order-narrative"
+viewSlug ViewPixelGridOverview      = "pixel-grid-overview"
+
+
+-- | The state of a definition for the purpose of node colouring.
+--
+-- 'Failed' is synthetic: there is no real 'Definition' behind it. It
+-- tags a bare-module node emitted when Agda's type-checker raised a
+-- 'TCErr' under @--keep-going@ (see 'AgdaDeps.Backend.failedModulesRef').
+data DefState = Defined | Postulate | Hole | Failed
+  deriving (Show, Eq)
+
+instance NFData DefState where
+  rnf Defined   = ()
+  rnf Postulate = ()
+  rnf Hole      = ()
+  rnf Failed    = ()
+
+-- | Hex (\"#rrggbb\") colours for each 'DefState'.
+data ColorPalette = ColorPalette
+  { colorDefined   :: String
+  , colorPostulate :: String
+  , colorHole      :: String
+  , colorFailed    :: String
+  } deriving (Show, Eq)
+
+instance NFData ColorPalette where
+  rnf (ColorPalette a b c d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` ()
+
+defaultPalette :: ColorPalette
+defaultPalette = ColorPalette
+  { colorDefined   = "#4caf50"
+  , colorPostulate = "#f44336"
+  , colorHole      = "#9c27b0"
+  , colorFailed    = "#ff9800"
+  }
+
+-- | Pick a hex colour from a palette for a given 'DefState'.
+colorFor :: ColorPalette -> DefState -> String
+colorFor p Defined   = colorDefined   p
+colorFor p Postulate = colorPostulate p
+colorFor p Hole      = colorHole      p
+colorFor p Failed    = colorFailed    p
+
+-- | The full set of backend options, populated from CLI flags.
+data Options = Options
+  { optOutDir     :: Maybe FilePath
+  , optFormat     :: OutputFormat
+  , optView       :: View
+  , optColors     :: ColorPalette
+  , optWithSource :: Bool
+  , optLazy       :: Bool
+  , optExcludeModules :: [String]
+  , optNoSourceFor :: [String]
+  , optMaxSnippetBytes :: Maybe Int
+  , optGzip :: Bool
+  , optKeepGoing :: Bool
+  , optSkipAgda :: Bool
+  , optQuiet :: Bool
+  , optNoExternals :: Bool
+  , optJsonMode :: JsonMode
+  , optLenientImports :: Bool
+  , optWithTermHashes :: Bool
+    -- ^ When 'True', compute a canonical-form hash for every subterm
+    -- walked in @compileDefAD@ and emit the per-def array as
+    -- @definitionSubtermHashes@ in expanded JSON. Off by default. See
+    -- 'AgdaDeps.TermCanon'.
+  , optMinTermDepth   :: !Int
+    -- ^ Minimum AST depth at which a subterm's hash gets emitted.
+    -- Default 3; @1@ disables filtering. Ignored when
+    -- 'optWithTermHashes' is 'False'.
+  , optWithSignatures :: Bool
+    -- ^ When 'True', render each definition's type signature (reify of
+    -- @defType@ via @prettyTCM@) and emit it as the per-def @"type"@
+    -- field in expanded JSON. Rendered as-written: not normalised, with
+    -- Agda's default printing (no @--show-implicit@; implicit binders in
+    -- the signature still appear). Off by default.
+  , optNormaliseSignatures :: Bool
+    -- ^ @--normalise-signatures@: 'normalise' each definition's type
+    -- before rendering it under 'optWithSignatures', yielding the
+    -- fully-reduced form. Off by default. No effect unless
+    -- 'optWithSignatures' is also set.
+  , optShowImplicit   :: Bool
+    -- ^ @--signature-implicits@ (named to avoid clashing with Agda's own
+    -- @--show-implicit@): render type signatures with implicit (and
+    -- irrelevant) arguments shown, via 'withShowAllArguments'. Off by
+    -- default. No effect unless 'optWithSignatures' is also set.
+  , optAgdaHtmlDir    :: Maybe FilePath
+    -- ^ @--agda-html-dir=DIR@: location of the syntax-highlighted pages
+    -- written by @agda --html@, interpreted by the browser relative to
+    -- the generated HTML file. When 'Just', HTML views surface an "Open
+    -- source" link that opens @DIR\/\<Module.Name\>.html@; the value
+    -- reaches the views as the @AGDA_HTML_BASE@ prelude var. 'Nothing'
+    -- disables the affordance.
+  }
+
+instance NFData Options where
+  rnf (Options d f v c s l e ns ms g k sa q ne jm li wth mtd wsig nsig simp ahd) =
+        rnf d  `seq` rnf f  `seq` rnf v  `seq` rnf c  `seq` rnf s
+    `seq` rnf l  `seq` rnf e  `seq` rnf ns `seq` rnf ms
+    `seq` rnf g  `seq` rnf k  `seq` rnf sa
+    `seq` rnf q  `seq` rnf ne `seq` rnf jm `seq` rnf li
+    `seq` rnf wth `seq` rnf mtd `seq` rnf wsig
+    `seq` rnf nsig `seq` rnf simp `seq` rnf ahd
+    `seq` ()
+
+defaultOptions :: Options
+defaultOptions = Options
+  { optOutDir          = Nothing
+  , optFormat          = FmtDot
+  , optView            = ViewModuleDagPods
+  , optColors          = defaultPalette
+  , optWithSource      = False
+  , optLazy            = False
+  , optExcludeModules  = []
+  , optNoSourceFor     = []
+  , optMaxSnippetBytes = Just 1000000
+  , optGzip            = False
+  , optKeepGoing       = False
+  , optSkipAgda        = False
+  , optQuiet           = False
+  , optNoExternals     = False
+  , optJsonMode        = JsonPacked
+  , optLenientImports  = False
+  , optWithTermHashes  = False
+  , optMinTermDepth    = 3
+  , optWithSignatures  = False
+  , optNormaliseSignatures = False
+  , optShowImplicit    = False
+  , optAgdaHtmlDir     = Nothing
+  }
+
+-- | True when the given module name matches any of the configured
+-- exclusion prefixes.
+isExcludedModule :: [String] -> String -> Bool
+isExcludedModule excludes m = any matches excludes
+  where
+    matches p = p == m || (p ++ ".") `isPrefixOfStr` m
+    isPrefixOfStr p s = take (length p) s == p
+
+-- ** CLI option parsers
+
+outdirOpt :: Monad m => FilePath -> Options -> m Options
+outdirOpt dir opts = return opts{ optOutDir = Just dir }
+
+withSourceOpt :: Monad m => Options -> m Options
+withSourceOpt opts = return opts{ optWithSource = True }
+
+-- | @--agda-html-dir=DIR@. Stored verbatim; the browser interprets it
+-- relative to the generated HTML file, so a relative path is expected.
+agdaHtmlDirOpt :: Monad m => String -> Options -> m Options
+agdaHtmlDirOpt dir opts = return opts{ optAgdaHtmlDir = Just dir }
+
+lazyOpt :: Monad m => Options -> m Options
+lazyOpt opts = return opts{ optLazy = True }
+
+excludeOpt :: Monad m => String -> Options -> m Options
+excludeOpt p opts = return opts{ optExcludeModules = p : optExcludeModules opts }
+
+noSourceForOpt :: Monad m => String -> Options -> m Options
+noSourceForOpt p opts = return opts{ optNoSourceFor = p : optNoSourceFor opts }
+
+maxSnippetBytesOpt :: MonadError String m => String -> Options -> m Options
+maxSnippetBytesOpt s opts = case reads s :: [(Int, String)] of
+  [(n, "")] | n == 0 -> return opts{ optMaxSnippetBytes = Nothing }
+            | n >  0 -> return opts{ optMaxSnippetBytes = Just n }
+  _ -> throwError $
+    "Invalid value for --max-snippet-bytes: " ++ show s
+      ++ ". Expected a non-negative integer (0 disables the cap)."
+
+gzipOpt :: Monad m => Options -> m Options
+gzipOpt opts = return opts{ optGzip = True }
+
+keepGoingOpt :: Monad m => Options -> m Options
+keepGoingOpt opts = return opts{ optKeepGoing = True }
+
+skipAgdaOpt :: Monad m => Options -> m Options
+skipAgdaOpt opts = return opts{ optSkipAgda = True }
+
+quietOpt :: Monad m => Options -> m Options
+quietOpt opts = return opts{ optQuiet = True }
+
+noExternalsOpt :: Monad m => Options -> m Options
+noExternalsOpt opts = return opts{ optNoExternals = True }
+
+jsonModeOpt :: MonadError String m => String -> Options -> m Options
+jsonModeOpt s opts = case s of
+  "packed"   -> return opts{ optJsonMode = JsonPacked }
+  "expanded" -> return opts{ optJsonMode = JsonExpanded }
+  _ -> throwError $ "Unknown --json-mode value: " ++ show s
+                ++ ". Expected one of: packed, expanded."
+
+-- | Parser for @--lenient-imports@. The flag is rewritten to
+-- @--allow-unsolved-metas@ in 'Main.hs' before Agda's option parser
+-- runs; this entry surfaces it in @--help@.
+lenientImportsOpt :: Monad m => Options -> m Options
+lenientImportsOpt opts = return opts{ optLenientImports = True }
+
+-- | No-op parser. @--resolve-deps@ is consumed in 'Main.hs' (it
+-- expands into @--no-libraries -i …@); this entry surfaces it in
+-- @--help@.
+resolveDepsOpt :: Monad m => Options -> m Options
+resolveDepsOpt opts = return opts
+
+-- | Enable subterm-hash emission. Off by default. See
+-- 'AgdaDeps.TermCanon' for the canonicalisation contract.
+withTermHashesOpt :: Monad m => Options -> m Options
+withTermHashesOpt opts = return opts{ optWithTermHashes = True }
+
+-- | Enable rendered type-signature emission (the per-def @"type"@ field
+-- in expanded JSON). Off by default. See 'optWithSignatures'.
+withSignaturesOpt :: Monad m => Options -> m Options
+withSignaturesOpt opts = return opts{ optWithSignatures = True }
+
+-- | Normalise type signatures before rendering (semantic form). Off by
+-- default. Implies nothing on its own — only meaningful with
+-- @--with-signatures@. See 'optNormaliseSignatures'.
+normaliseSignaturesOpt :: Monad m => Options -> m Options
+normaliseSignaturesOpt opts = return opts{ optNormaliseSignatures = True }
+
+-- | Render type signatures with implicit (and irrelevant) arguments
+-- shown. Off by default. Only meaningful with @--with-signatures@. See
+-- 'optShowImplicit'.
+showImplicitOpt :: Monad m => Options -> m Options
+showImplicitOpt opts = return opts{ optShowImplicit = True }
+
+-- | Set the minimum subterm AST depth for hash emission.
+-- Validates that the value is a positive integer.
+minTermDepthOpt :: MonadError String m => String -> Options -> m Options
+minTermDepthOpt s opts = case reads s :: [(Int, String)] of
+  [(n, "")] | n >= 1 -> return opts{ optMinTermDepth = n }
+  _ -> throwError $
+    "Invalid value for --min-term-depth: " ++ show s
+      ++ ". Expected a positive integer (1 disables the filter)."
+
+formatOpt :: MonadError String m => String -> Options -> m Options
+formatOpt s opts = case s of
+  "dot"  -> return opts{ optFormat = FmtDot }
+  "html" -> return opts{ optFormat = FmtHtml }
+  "json" -> return opts{ optFormat = FmtJson }
+  _      -> throwError $ "Unknown --format value: " ++ show s
+                ++ ". Expected one of: dot, html, json."
+
+viewOpt :: MonadError String m => String -> Options -> m Options
+viewOpt s opts = case s of
+  "cytoscape"       -> return opts{ optView = ViewCytoscape }
+  "ide-three-pane"  -> return opts{ optView = ViewIdeThreePane }
+  "module-dag-pods" -> return opts{ optView = ViewModuleDagPods }
+  "source-centric"  -> return opts{ optView = ViewSourceCentric }
+  "notion-doc"      -> return opts{ optView = ViewNotionDoc }
+  "wiki-backlinks"  -> return opts{ optView = ViewWikiBacklinks }
+  "sigma"           -> return opts{ optView = ViewSigma }
+  "big-module-dag-pods" -> return opts{ optView = ViewBigModuleDagPods }
+  "critical-path-holes"     -> return opts{ optView = ViewCriticalPathHoles }
+  "progress-dashboard"      -> return opts{ optView = ViewProgressDashboard }
+  "cartographic-atlas"      -> return opts{ optView = ViewCartographicAtlas }
+  "sunburst-hierarchy"      -> return opts{ optView = ViewSunburstHierarchy }
+  "reading-order-narrative" -> return opts{ optView = ViewReadingOrderNarrative }
+  "pixel-grid-overview"     -> return opts{ optView = ViewPixelGridOverview }
+  _ -> throwError $ "Unknown --view value: " ++ show s
+       ++ ". Expected one of: cytoscape, ide-three-pane, module-dag-pods, "
+       ++ "source-centric, notion-doc, wiki-backlinks, sigma, "
+       ++ "big-module-dag-pods, critical-path-holes, progress-dashboard, "
+       ++ "cartographic-atlas, sunburst-hierarchy, reading-order-narrative, "
+       ++ "pixel-grid-overview."
+
+-- | Build a CLI option parser that updates a single slot of 'optColors',
+-- validating the hex syntax.
+colorOpt
+  :: MonadError String m
+  => String                                   -- ^ flag name (for error message)
+  -> (ColorPalette -> String -> ColorPalette) -- ^ palette setter
+  -> String -> Options -> m Options
+colorOpt flagName setter s opts
+  | isValidHexColor s = return opts{ optColors = setter (optColors opts) s }
+  | otherwise = throwError $
+      "Invalid value for --" ++ flagName ++ ": " ++ show s
+        ++ ". Expected a hex colour of the form #RRGGBB."

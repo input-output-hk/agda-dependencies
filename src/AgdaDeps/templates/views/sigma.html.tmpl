@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- agda-deps · sigma view: WebGL dependency graph (sigma.js) for large corpora. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>agda-deps · sigma</title>
+<script>window.__gzipEnabled = __GZIP_ENABLED__;</script>
+<script>
+  if (window.__gzipEnabled && typeof DecompressionStream === 'undefined') {
+    document.write('<scr'+'ipt src="https://unpkg.com/pako@2.1.0/dist/pako_inflate.min.js"></scr'+'ipt>');
+  }
+</script>
+<!--
+  sigma v2.4 + graphology v0.25 are UMD builds (sigma v3 is ESM only).
+  The WebGL renderer is the whole point of this view: cytoscape's
+  Canvas/SVG starts struggling around 50k nodes; sigma comfortably
+  handles 1M+ once edges are kept thin.
+-->
+<script src="https://unpkg.com/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+<script src="https://unpkg.com/sigma@2.4.0/build/sigma.min.js"></script>
+<!-- dagre powers the DAG-pods (top-down) layout. Synchronous load
+     keeps the initial render simple; the script is ~50 KB minified
+     so the cost is negligible next to the sigma+graphology bundle. -->
+<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+<style>
+:root {
+  --c-defined:   __COLOR_DEFINED__;
+  --c-postulate: __COLOR_POSTULATE__;
+  --c-hole:      __COLOR_HOLE__;
+  --c-failed:    __COLOR_FAILED__;
+  --c-external:  #9ca3af;
+  --bg:          #0f1115;
+  --panel:       #161922;
+  --border:      #262a36;
+  --text:        #e4e6eb;
+  --text2:       #9aa0a6;
+  --accent:      #60a5fa;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); }
+
+#topbar {
+  position: fixed; top: 0; left: 0; right: 0; height: 44px;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 14px; gap: 14px;
+  font-size: 13px; z-index: 10;
+}
+#topbar .logo  { font-weight: 700; color: var(--text); }
+#topbar .stats { color: var(--text2); font-family: var(--mono); font-size: 12px; }
+#topbar .spacer { flex: 1; }
+#topbar .group {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text2);
+}
+#topbar select, #topbar button {
+  background: #1f2330; color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 9px; font-size: 12px;
+  font-family: var(--sans); cursor: pointer; outline: none;
+}
+#topbar button:hover { border-color: var(--accent); }
+#topbar select:focus { border-color: var(--accent); }
+#topbar .legend { display: flex; gap: 12px; align-items: center; font-size: 11px; color: var(--text2); }
+#topbar .legend .swatch {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  margin-right: 4px; vertical-align: middle;
+}
+
+#canvas {
+  position: fixed; top: 44px; left: 0; right: 320px; bottom: 0;
+  background: var(--bg);
+}
+
+#info {
+  position: fixed; top: 44px; right: 0; bottom: 0; width: 320px;
+  background: var(--panel); border-left: 1px solid var(--border);
+  overflow: auto; padding: 16px;
+  font-size: 13px;
+}
+#info h2 {
+  font-size: 14px; font-weight: 600; margin-bottom: 8px;
+  word-break: break-all; font-family: var(--mono);
+}
+#info .meta { color: var(--text2); font-size: 12px; margin-bottom: 16px; }
+#info .meta b { color: var(--text); }
+#info h3 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text2); margin: 14px 0 6px;
+}
+#info ul { list-style: none; }
+#info li {
+  padding: 4px 6px; margin: 1px 0; border-radius: 3px;
+  font-family: var(--mono); font-size: 12px; cursor: pointer;
+  color: var(--text); word-break: break-all;
+}
+#info li:hover { background: var(--border); color: var(--accent); }
+#info .counts { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 12px; }
+#info .counts .c {
+  font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 10px;
+}
+#info .c.def  { background: rgba(76,175,80,0.15);  color: var(--c-defined); }
+#info .c.post { background: rgba(244,67,54,0.15);  color: var(--c-postulate); }
+#info .c.hole { background: rgba(156,39,176,0.15); color: var(--c-hole); }
+#info .c.fail { background: rgba(255,152,0,0.15);  color: var(--c-failed); }
+#info .placeholder { color: var(--text2); font-style: italic; }
+
+#loading {
+  position: fixed; inset: 0; display: flex; align-items: center;
+  justify-content: center; background: var(--bg); z-index: 100;
+  font-size: 14px; color: var(--text2);
+}
+#err {
+  position: fixed; inset: 0; display: none; align-items: center;
+  justify-content: center; background: var(--bg); z-index: 100;
+  padding: 24px; text-align: center;
+}
+#err.visible { display: flex; }
+#err pre {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; padding: 12px; font-family: var(--mono);
+  font-size: 12px; color: var(--c-postulate); max-width: 600px;
+  white-space: pre-wrap; text-align: left;
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <span class="logo">agda-deps · sigma</span>
+  <span class="stats" id="topbar-stats">loading…</span>
+  <span class="spacer"></span>
+  <span class="group">
+    <label for="layout-mode">layout</label>
+    <select id="layout-mode" title="Switch between layouts. DAG pods uses dagre for a top-down DAG; concentric arranges modules in BFS rings around the entry.">
+      <option value="dag">DAG pods (top-down)</option>
+      <option value="concentric">Concentric</option>
+    </select>
+    <button id="btn-fit" title="Fit camera to graph">fit</button>
+  </span>
+  <span class="legend">
+    <span><span class="swatch" style="background:var(--c-defined)"></span>defined</span>
+    <span><span class="swatch" style="background:var(--c-postulate)"></span>postulate</span>
+    <span><span class="swatch" style="background:var(--c-hole)"></span>hole</span>
+    <span><span class="swatch" style="background:var(--c-failed)"></span>failed</span>
+    <span><span class="swatch" style="background:var(--c-external)"></span>external</span>
+  </span>
+</div>
+
+<div id="canvas"></div>
+
+<div id="info">
+  <p class="placeholder">Click a module node to inspect.</p>
+</div>
+
+<div id="loading">Loading graph data…</div>
+<div id="err"><div><h2 style="margin-bottom:12px;color:var(--c-postulate)">Error</h2><pre id="err-body"></pre></div></div>
+
+<script>
+// ─── DATA LOADING PRELUDE ──────────────────────────────────────────────────
+__DATA_LOADING_PRELUDE__
+
+// ─── BASE64 DECODERS ───────────────────────────────────────────────────────
+function b64Bytes(b64) {
+  if (!b64) return new Uint8Array(0);
+  var bin = atob(b64), out = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64I32(b64)   { return new Int32Array(b64Bytes(b64).buffer); }
+function b64I8(b64)    { return new Int8Array(b64Bytes(b64).buffer); }
+function b64F32(b64)   { return new Float32Array(b64Bytes(b64).buffer); }
+
+// ─── FETCH HELPERS ─────────────────────────────────────────────────────────
+async function fetchJson(url) {
+  if (GZIP_ENABLED && window.pako) {
+    try {
+      var r = await fetch(url + '.gz');
+      if (r.ok) {
+        var ab = await r.arrayBuffer();
+        var txt = pako.inflate(new Uint8Array(ab), {to:'string'});
+        return JSON.parse(txt);
+      }
+    } catch(e) {}
+  }
+  var r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching ' + url);
+  return r.json();
+}
+
+function showErr(msg) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('err-body').textContent = msg;
+  document.getElementById('err').classList.add('visible');
+}
+
+// ─── APP STATE ─────────────────────────────────────────────────────────────
+var g = null;
+var modules = [];
+var moduleCounts = [];        // [[d, p, h, f], …] per module
+var moduleDepth = null;       // Int32Array | null
+var moduleStates = null;      // Int8Array (failed flag) | null
+var externalSet = new Set();
+var entryIdx = -1;
+var outByMod = null;          // Map<int, int[]>  (i → [j…])
+var inByMod  = null;          // Map<int, int[]>
+var sigmaRenderer = null;
+var graphologyGraph = null;
+var selectedNode = null;
+var currentLayout = 'dag';     // 'dag' | 'concentric'
+
+// Above this many modules we don't even try dagre — it's
+// quadratic-ish in practice and the page would lock up.
+var DAG_LAYOUT_THRESHOLD = 3000;
+
+// ─── INIT ──────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    g = LAZY ? await fetchJson(GRAPH_URL) : GRAPH;
+  } catch(e) {
+    showErr('Failed to load graph data: ' + e.message +
+            (LAZY ? '\n\nThe lazy bundle uses fetch(); make sure you serve via HTTP (e.g. `python -m http.server`), not file://.' : ''));
+    return;
+  }
+
+  modules      = g.modules || [];
+  moduleCounts = g.moduleStateCounts || [];
+  moduleDepth  = g.moduleDepth ? b64I32(g.moduleDepth) : null;
+  moduleStates = g.moduleStates ? b64I8(g.moduleStates) : null;
+  if (g.externalModules) {
+    var arr = b64I32(g.externalModules);
+    for (var i = 0; i < arr.length; i++) externalSet.add(arr[i]);
+  }
+  entryIdx = g.entryModule ? modules.indexOf(g.entryModule) : -1;
+
+  // Build adjacency for the side-panel imports / imported-by lists.
+  outByMod = new Map();
+  inByMod  = new Map();
+  (g.moduleEdges || []).forEach(function(e) {
+    var s = e[0], t = e[1];
+    if (!outByMod.has(s)) outByMod.set(s, []);
+    if (!inByMod.has(t))  inByMod.set(t,  []);
+    outByMod.get(s).push(t);
+    inByMod.get(t).push(s);
+  });
+
+  document.getElementById('loading').style.display = 'none';
+
+  if (modules.length === 0) {
+    showErr('Graph contains no modules. Nothing to render.');
+    return;
+  }
+
+  // Default to concentric when DAG isn't viable so the initial render
+  // matches the picked option. The selector reflects the actual choice.
+  if (modules.length > DAG_LAYOUT_THRESHOLD) {
+    currentLayout = 'concentric';
+    var sel = document.getElementById('layout-mode');
+    if (sel) sel.value = 'concentric';
+  }
+
+  buildAndRender();
+  updateTopbar();
+  wireTopbar();
+}
+
+function wireTopbar() {
+  var sel = document.getElementById('layout-mode');
+  if (sel) {
+    sel.value = currentLayout;
+    sel.addEventListener('change', function() {
+      currentLayout = sel.value;
+      relayout();
+    });
+  }
+  var fit = document.getElementById('btn-fit');
+  if (fit) fit.addEventListener('click', fitCamera);
+}
+
+// ─── LAYOUT ────────────────────────────────────────────────────────────────
+// Two layouts ship with this view:
+//
+//   * 'dag' (default): the dag-pods concept from the legacy
+//     module-dag-pods view, ported to sigma. dagre lays the
+//     module-level DAG out top-to-bottom and module-node sizes
+//     scale with definition count, giving each module a sense of
+//     being its own "pod" on the canvas. Falls back to concentric
+//     when there are too many modules for dagre, or when dagre
+//     hasn't loaded.
+//
+//   * 'concentric': BFS rings around the entry module. O(V) and
+//     deterministic — the fallback when DAG is unsuitable.
+function computePositions(layout) {
+  if (layout === 'dag') {
+    if (modules.length > DAG_LAYOUT_THRESHOLD) {
+      console.warn('agda-deps/sigma: ' + modules.length +
+        ' modules exceeds DAG threshold (' + DAG_LAYOUT_THRESHOLD +
+        '); falling back to concentric.');
+      return concentricPositions();
+    }
+    if (typeof dagre === 'undefined') {
+      console.warn('agda-deps/sigma: dagre not loaded; falling back to concentric.');
+      return concentricPositions();
+    }
+    return dagPodsPositions();
+  }
+  return concentricPositions();
+}
+
+// dagre layout over the module-level DAG. Module node sizes are
+// proportional to def count so visually larger modules form bigger
+// "pods" on the canvas.
+function dagPodsPositions() {
+  var n = modules.length;
+  var xs = new Float32Array(n);
+  var ys = new Float32Array(n);
+
+  // 'transitiveModuleEdges' are redundant in a DAG layout (they
+  // create false depth). Drop them if the schema reports them so
+  // dagre ranks each module by its shortest-path depth.
+  var transRedundant = new Set();
+  (g.transitiveModuleEdges || []).forEach(function(e) {
+    transRedundant.add(e[0] + '|' + e[1]);
+  });
+
+  var dg = new dagre.graphlib.Graph();
+  dg.setGraph({
+    rankdir:  'TB',
+    nodesep:  40,
+    ranksep:  60,
+    marginx:  20,
+    marginy:  20,
+    ranker:   'tight-tree'
+  });
+  dg.setDefaultEdgeLabel(function() { return {}; });
+
+  for (var i = 0; i < n; i++) {
+    var sz = moduleSize(i);
+    // dagre wants the node's bounding box; we use a square scaled
+    // off the visual size sigma will give the node.
+    var box = Math.max(20, sz * 5);
+    dg.setNode(String(i), { width: box, height: box });
+  }
+  (g.moduleEdges || []).forEach(function(e) {
+    var key = e[0] + '|' + e[1];
+    if (transRedundant.has(key)) return;
+    dg.setEdge(String(e[0]), String(e[1]));
+  });
+
+  dagre.layout(dg);
+
+  // dagre returns positions in pixel space; sigma uses arbitrary
+  // units. We rescale to roughly [-1, 1] on the longer axis so the
+  // initial 'fit' camera lands in a reasonable place across project
+  // sizes.
+  var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (var i = 0; i < n; i++) {
+    var v = dg.node(String(i));
+    if (!v) continue;
+    if (v.x < minX) minX = v.x;
+    if (v.x > maxX) maxX = v.x;
+    if (v.y < minY) minY = v.y;
+    if (v.y > maxY) maxY = v.y;
+  }
+  var w = Math.max(1, maxX - minX);
+  var h = Math.max(1, maxY - minY);
+  var scale = 2.0 / Math.max(w, h);
+  var cx = (minX + maxX) / 2;
+  var cy = (minY + maxY) / 2;
+
+  for (var i = 0; i < n; i++) {
+    var v = dg.node(String(i));
+    if (!v) { xs[i] = 0; ys[i] = 0; continue; }
+    xs[i] = (v.x - cx) * scale;
+    // Sigma's Y is screen-down; dagre's Y grows downward too — but
+    // sigma flips Y in WebGL so a positive dagre Y ends up at the
+    // bottom of the canvas. That's what we want for TB layout
+    // ("roots above") so leave the sign alone, then negate so dagre's
+    // top (smaller Y) lands at the top of the sigma viewport.
+    ys[i] = -(v.y - cy) * scale;
+  }
+
+  return { xs: xs, ys: ys };
+}
+
+// Concentric layout by BFS depth from the entry module. Unreachable
+// modules sit on an outer ring. Deterministic, fast (O(V)).
+function concentricPositions() {
+  var n = modules.length;
+  var xs = new Float32Array(n);
+  var ys = new Float32Array(n);
+
+  // Group module indices by depth (or -1 for unreachable / no entry).
+  var byDepth = new Map();
+  for (var i = 0; i < n; i++) {
+    var d = moduleDepth ? moduleDepth[i] : -1;
+    if (d == null) d = -1;
+    if (!byDepth.has(d)) byDepth.set(d, []);
+    byDepth.get(d).push(i);
+  }
+
+  // Concentric: depth 0 at centre, deeper levels on wider rings.
+  // Unreachable (-1) goes to a far outer ring drawn lighter so it
+  // doesn't dominate visually.
+  var depths = Array.from(byDepth.keys()).sort(function(a,b){return a-b;});
+  var maxDepth = depths[depths.length - 1] || 0;
+  if (maxDepth < 1) maxDepth = 1;
+
+  depths.forEach(function(d) {
+    var idxs = byDepth.get(d);
+    var k = idxs.length;
+    // Sort within a ring by module name for stable layout.
+    idxs.sort(function(a, b) {
+      var na = modules[a], nb = modules[b];
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+    var radius;
+    if (d < 0) {
+      radius = 1.6 * Math.max(2.0, maxDepth);   // unreachable outer halo
+    } else if (d === 0) {
+      radius = 0;
+    } else {
+      radius = Math.max(0.7, d) * 0.9;
+    }
+    if (k === 1 && d >= 0) {
+      xs[idxs[0]] = radius; ys[idxs[0]] = 0;
+      return;
+    }
+    var step = (2 * Math.PI) / Math.max(k, 1);
+    // Offset each ring slightly so successive layers don't perfectly line up
+    var phase = d * 0.35;
+    for (var j = 0; j < k; j++) {
+      var ang = phase + j * step;
+      xs[idxs[j]] = radius * Math.cos(ang);
+      ys[idxs[j]] = radius * Math.sin(ang);
+    }
+  });
+
+  return { xs: xs, ys: ys };
+}
+
+// ─── COLOUR + SIZE ─────────────────────────────────────────────────────────
+function moduleColor(i) {
+  if (externalSet.has(i)) return 'var(--c-external)';
+  var c = moduleCounts[i] || [0, 0, 0, 0];
+  var failed = (c[3] > 0) || (moduleStates && moduleStates[i] === 1);
+  if (failed)               return getComputedStyle(document.documentElement).getPropertyValue('--c-failed').trim();
+  if (c[2] > 0)             return getComputedStyle(document.documentElement).getPropertyValue('--c-hole').trim();
+  if (c[1] > 0 && c[1] >= c[0]) return getComputedStyle(document.documentElement).getPropertyValue('--c-postulate').trim();
+  return getComputedStyle(document.documentElement).getPropertyValue('--c-defined').trim();
+}
+
+function externalColor() {
+  return getComputedStyle(document.documentElement).getPropertyValue('--c-external').trim();
+}
+
+function moduleSize(i) {
+  var c = moduleCounts[i] || [0, 0, 0, 0];
+  var total = c[0] + c[1] + c[2] + c[3];
+  // Sub-linear scaling so a Prelude with 5k defs doesn't dwarf
+  // everything else.
+  return Math.max(2.0, Math.min(14.0, 2.0 + Math.sqrt(total)));
+}
+
+// ─── BUILD GRAPHOLOGY + SIGMA ──────────────────────────────────────────────
+function buildAndRender() {
+  var pos = computePositions(currentLayout);
+
+  graphologyGraph = new graphology.MultiDirectedGraph();
+
+  // CSS-var colour resolution once, then cache.
+  var COLOR = {
+    defined:   getComputedStyle(document.documentElement).getPropertyValue('--c-defined').trim(),
+    postulate: getComputedStyle(document.documentElement).getPropertyValue('--c-postulate').trim(),
+    hole:      getComputedStyle(document.documentElement).getPropertyValue('--c-hole').trim(),
+    failed:    getComputedStyle(document.documentElement).getPropertyValue('--c-failed').trim(),
+    external:  getComputedStyle(document.documentElement).getPropertyValue('--c-external').trim(),
+    edge:      '#2f3344'
+  };
+
+  function pickColor(i) {
+    if (externalSet.has(i)) return COLOR.external;
+    var c = moduleCounts[i] || [0, 0, 0, 0];
+    var failed = (c[3] > 0) || (moduleStates && moduleStates[i] === 1);
+    if (failed)                    return COLOR.failed;
+    if (c[2] > 0)                  return COLOR.hole;
+    if (c[1] > 0 && c[1] >= c[0])  return COLOR.postulate;
+    return COLOR.defined;
+  }
+
+  for (var i = 0; i < modules.length; i++) {
+    graphologyGraph.addNode(String(i), {
+      label: modules[i],
+      x:     pos.xs[i],
+      y:     pos.ys[i],
+      size:  moduleSize(i),
+      color: pickColor(i),
+      // Hide labels for external + unreachable to keep the canvas
+      // readable at scale. Entry gets a forced label.
+      forceLabel: (i === entryIdx)
+    });
+  }
+
+  (g.moduleEdges || []).forEach(function(e) {
+    var s = String(e[0]), t = String(e[1]);
+    // We can't assume both endpoints exist (defensive: the edge
+    // builder should never emit dangling refs, but a future schema
+    // change shouldn't crash the renderer).
+    if (graphologyGraph.hasNode(s) && graphologyGraph.hasNode(t)) {
+      graphologyGraph.addEdge(s, t, {
+        size:  0.5,
+        color: COLOR.edge,
+        type:  'arrow'
+      });
+    }
+  });
+
+  var container = document.getElementById('canvas');
+  sigmaRenderer = new Sigma(graphologyGraph, container, {
+    renderEdgeLabels: false,
+    defaultEdgeType:  'arrow',
+    labelDensity:     0.07,
+    labelGridCellSize: 80,
+    labelRenderedSizeThreshold: 6,
+    labelFont:         '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    labelColor:        { color: '#cbd5e1' },
+    labelSize:         11,
+    minCameraRatio:    0.02,
+    maxCameraRatio:    20
+  });
+
+  sigmaRenderer.on('clickNode',     function(ev) { selectNode(parseInt(ev.node, 10)); });
+  sigmaRenderer.on('clickStage',    function()    { selectNode(-1); });
+  sigmaRenderer.on('enterNode',     function(ev) { container.style.cursor = 'pointer'; });
+  sigmaRenderer.on('leaveNode',     function()    { container.style.cursor = 'default'; });
+
+  if (entryIdx >= 0) selectNode(entryIdx);
+}
+
+// Recompute positions for the current layout and update the live
+// graph in-place. Cheaper than rebuilding the whole sigma renderer
+// since graphology/sigma re-render on attribute changes.
+function relayout() {
+  if (!graphologyGraph) return;
+  var pos = computePositions(currentLayout);
+  for (var i = 0; i < modules.length; i++) {
+    if (!graphologyGraph.hasNode(String(i))) continue;
+    graphologyGraph.setNodeAttribute(String(i), 'x', pos.xs[i]);
+    graphologyGraph.setNodeAttribute(String(i), 'y', pos.ys[i]);
+  }
+  fitCamera();
+}
+
+// Fit the sigma camera to the current node spread. Uses the
+// renderer's "reset camera" semantics which sigma keeps in sync with
+// graphology's positions.
+function fitCamera() {
+  if (!sigmaRenderer) return;
+  var cam = sigmaRenderer.getCamera();
+  cam.animatedReset({ duration: 350 });
+}
+
+// ─── SIDE PANEL ────────────────────────────────────────────────────────────
+function selectNode(i) {
+  selectedNode = i;
+  var info = document.getElementById('info');
+  if (i < 0 || i >= modules.length) {
+    info.innerHTML = '<p class="placeholder">Click a module node to inspect.</p>';
+    return;
+  }
+  var c = moduleCounts[i] || [0, 0, 0, 0];
+  var d = moduleDepth ? moduleDepth[i] : null;
+  var depthLabel = (d == null || d < 0) ? 'unreachable' : String(d);
+  var isExt = externalSet.has(i);
+  var isEntry = (i === entryIdx);
+
+  var html = '<h2>' + escapeHtml(modules[i]) + '</h2>';
+  html += '<div class="meta">';
+  if (isEntry) html += '<b>entry module</b> · ';
+  if (isExt)   html += '<b>external</b> · ';
+  html += 'depth from entry: <b>' + depthLabel + '</b>';
+  html += '</div>';
+
+  html += '<div class="counts">';
+  html += '<span class="c def">'  + c[0] + ' defined</span>';
+  html += '<span class="c post">' + c[1] + ' postulate</span>';
+  html += '<span class="c hole">' + c[2] + ' hole</span>';
+  html += '<span class="c fail">' + c[3] + ' failed</span>';
+  html += '</div>';
+
+  var imps = outByMod.get(i) || [];
+  var revs = inByMod.get(i)  || [];
+
+  html += '<h3>imports (' + imps.length + ')</h3>';
+  if (imps.length === 0) html += '<p class="placeholder">none</p>';
+  else                   html += '<ul>' + renderModList(imps) + '</ul>';
+
+  html += '<h3>imported by (' + revs.length + ')</h3>';
+  if (revs.length === 0) html += '<p class="placeholder">none</p>';
+  else                   html += '<ul>' + renderModList(revs) + '</ul>';
+
+  info.innerHTML = html;
+  Array.prototype.forEach.call(info.querySelectorAll('li[data-idx]'), function(el) {
+    el.addEventListener('click', function() {
+      var idx = parseInt(el.dataset.idx, 10);
+      selectNode(idx);
+      if (sigmaRenderer) {
+        var disp = sigmaRenderer.getNodeDisplayData(String(idx));
+        if (disp) {
+          sigmaRenderer.getCamera().animate(
+            { x: disp.x, y: disp.y, ratio: 0.4 },
+            { duration: 500 }
+          );
+        }
+      }
+    });
+  });
+}
+
+function renderModList(idxs) {
+  // Stable alphabetic order for readability; cap at 200 entries to
+  // keep the panel responsive on hub-modules like a Prelude with
+  // hundreds of importers.
+  var copy = idxs.slice().sort(function(a, b) {
+    return modules[a] < modules[b] ? -1 : modules[a] > modules[b] ? 1 : 0;
+  });
+  var truncated = '';
+  if (copy.length > 200) {
+    truncated = '<li class="placeholder">(' + (copy.length - 200) + ' more — open in another viewer)</li>';
+    copy = copy.slice(0, 200);
+  }
+  return copy.map(function(i) {
+    return '<li data-idx="' + i + '">' + escapeHtml(modules[i]) + '</li>';
+  }).join('') + truncated;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' })[c];
+  });
+}
+
+// ─── TOPBAR ────────────────────────────────────────────────────────────────
+function updateTopbar() {
+  var nM = modules.length;
+  var nE = (g.moduleEdges || []).length;
+  var nT = nM > 0 ? moduleCounts.reduce(function(a, c) { return a + c[0] + c[1] + c[2] + c[3]; }, 0) : 0;
+  var s  = nM.toLocaleString() + ' modules · ' +
+           nE.toLocaleString() + ' edges · ' +
+           nT.toLocaleString() + ' defs';
+  if (g.entryModule) s += ' · entry: ' + g.entryModule;
+  document.getElementById('topbar-stats').textContent = s;
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+_build
+dist
+dist-newstyle
+dist-agda28
+*~
+*.agdai
+*.hi
+*.o
+*.bak
+Res.dot
+test/source/
+test/deps.dot
+test/deps.html
+
+# agda-explore daemon's generated graph (default --out-dir)
+.agda-explore/
+
+# Local Claude Code agent definitions
+.claude/

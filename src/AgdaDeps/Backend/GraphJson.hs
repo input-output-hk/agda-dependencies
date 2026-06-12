@@ -1,0 +1,1472 @@
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+-- | v2 graph.json schema emitter — single source of truth for the
+-- wire shape.
+--
+-- 'buildGraphJson' emits the packed form (CSR adjacency, base64 typed
+-- arrays) consumed by the HTML viewer; 'buildExpandedJson' emits the
+-- record-array form for @--json-mode=expanded@. 'buildModuleDetails'
+-- produces the per-module detail files for lazy mode. The lazy-ingest
+-- filename scheme ('moduleDetailFilename', 'snippetBundleFilename') is
+-- shared with "AgdaDeps.Backend.Html".
+--
+-- See @CLAUDE.md@'s "v2 graph.json schema" section for the full
+-- field-by-field documentation.
+module AgdaDeps.Backend.GraphJson
+  ( -- * Inputs gathered from the backend
+    GraphInput(..)
+
+    -- * Outputs
+  , GraphJsonOutput(..)
+  , ModuleDetailJson(..)
+
+    -- * Externals summary (emitted only under @--no-externals@)
+  , ExternalsSummary(..)
+  , buildExternalsSummary
+
+    -- * Top-level emission
+  , buildGraphJson
+
+    -- * Expanded JSON shape (--json-mode=expanded)
+  , buildExpandedJson
+
+    -- * Lazy-ingest filename scheme (shared with "AgdaDeps.Backend.Html")
+  , moduleDetailFilename
+  , snippetBundleFilename
+  ) where
+
+import Control.DeepSeq ( NFData(..) )
+import Data.Char ( isAlphaNum, toLower )
+import Data.Int ( Int32, Int8 )
+import Data.List ( foldl', intercalate, sort, sortBy, sortOn )
+import Data.Word ( Word64 )
+import qualified Data.Map.Strict as M
+import qualified Data.IntMap.Strict as IM
+import qualified Data.IntSet as IS
+import qualified Data.Sequence as Seq
+import Data.Set ( Set )
+import qualified Data.Set as S
+
+import Agda.Syntax.Abstract.Name ( QName )
+import Agda.Syntax.Internal ( qnameModule )
+import Agda.Syntax.Common.Pretty ( prettyShow )
+import Agda.Utils.Hash ( hashString )
+
+import AgdaDeps.Csr
+  ( buildCsr, reverseCsr
+  , encodeInt32LE, encodeInt8LE, encodeFloat32LE
+  , dedupSortedInt
+  )
+import AgdaDeps.Deps    ( ADDef(..), DefKind(..), DefAccess(..)
+                        , EdgeProv(..), provTag
+                        , nodeKey, nodeKeyVersion, hashQName, collectAllQNames )
+import BuildInfo        ( buildFingerprint )
+import AgdaDeps.Layout  ( Position(..) )
+import AgdaDeps.Options ( DefState(..) )
+import AgdaDeps.Util    ( jsString )
+
+-- | Where graph data goes in the lazy split.
+data EmitMode
+  = EmitInline   -- ^ defs + edges live in graph.json
+  | EmitLazy     -- ^ defs + edges live in per-module detail files
+
+-- | Strict per-module {defined, postulate, hole, failed} accumulator
+-- used by 'moduleStateCounts'.
+data Counts = Counts !Int !Int !Int !Int
+
+-- | Diagnostic summary of the external modules that @--no-externals@
+-- stripped from the graph.
+--
+-- Emitted at the top level as @externals_summary@ only when the
+-- producer was run with @--no-externals@; absent otherwise. Carried by
+-- both @packed@ and @expanded@ JSON modes.
+--
+-- JSON shape:
+--
+-- @
+--   { "modules": ["Agda.Builtin.Bool", ...],
+--     "postulates_by_module": {
+--       "Agda.Builtin.Bool": ["true", "false"], ... } }
+-- @
+data ExternalsSummary = ExternalsSummary
+  { esModules            :: !(Set String)
+    -- ^ Every module classified external and dropped.
+  , esPostulatesByModule :: !(M.Map String [String])
+    -- ^ Per dropped module, the *unqualified* postulate names (last
+    -- dot-component).
+  } deriving (Show)
+
+instance NFData ExternalsSummary where
+  rnf (ExternalsSummary ms pm) = rnf ms `seq` rnf pm
+
+-- | Build the externals summary from the def list and the classified
+-- external module set. One strict 'Map' fold over 'giDefs', keyed by
+-- 'qnameModule'. Unqualified postulate names are 'shortNameOf'.
+--
+-- Called from 'postCompileAD' before 'dropExternalDefs', while the
+-- postulate defs are still in scope.
+buildExternalsSummary :: Set String -> [ADDef] -> ExternalsSummary
+buildExternalsSummary externals defs =
+  let -- Per external module, accumulate the postulate short-names.
+      bumpDef !acc d
+        | not isExt           = acc
+        | _state d /= Postulate = acc
+        | otherwise =
+            M.insertWith
+              (\new old -> head new : old)
+              m
+              [shortNameOf (prettyShow (_name d))]
+              acc
+        where
+          !m     = prettyShow (qnameModule (_name d))
+          isExt  = S.member m externals
+      !rawByMod = foldl' bumpDef M.empty defs
+      -- Dedup + ascending-sort each list for deterministic wire order.
+      !byMod    = M.map (S.toAscList . S.fromList) rawByMod
+  in ExternalsSummary
+       { esModules            = externals
+       , esPostulatesByModule = byMod
+       }
+  where
+    -- Unqualified name: last dot-component, or the whole name if no dot.
+    shortNameOf :: String -> String
+    shortNameOf s = case break (== '.') (reverse s) of
+      (revLast, "")        -> reverse revLast
+      (revLast, _revDotty) -> reverse revLast
+
+-- | JSON for 'ExternalsSummary'. Snake-case keys ('modules',
+-- 'postulates_by_module').
+externalsSummaryJson :: ExternalsSummary -> String
+externalsSummaryJson (ExternalsSummary mods byMod) =
+  "{\"modules\":" ++ stringArrayJson (S.toAscList mods)
+  ++ ",\"postulates_by_module\":"
+  ++ "{" ++ intercalate ","
+         [ jsString k ++ ":" ++ stringArrayJson v
+         | (k, v) <- M.toAscList byMod
+         ]
+  ++ "}"
+  ++ "}"
+
+-- | All the inputs the schema emitter needs.
+data GraphInput = GraphInput
+  { giDefs            :: [ADDef]
+  , giStateMap        :: M.Map QName DefState
+  , giImportEdges     :: [(String, String)]
+  , giSourceFiles     :: [FilePath]
+  , giModuleFile      :: M.Map String FilePath
+  , giEntryModule     :: Maybe String
+  , giExternalModules :: Set String
+  , giFailedModules   :: Set String
+  , giPositions       :: M.Map QName Position
+  , giWithSource      :: Bool
+  , giSnippetModules  :: [String]
+  , giLazy            :: Bool
+  , giExtraModules    :: Set String
+    -- ^ Module names to include in the graph even if they have no
+    -- defs, no import edges, and aren't the entry. Used by
+    -- 'AgdaDeps.SkipAgda' to surface modules discovered by the
+    -- source-file scan that happen to be orphans in the import graph.
+  , giReExports       :: ![(String, String, [String])]
+    -- ^ Per (host-module, source-module) the fully-qualified names the
+    -- host module re-exports via @open … public@. Dedup-sorted by the
+    -- producer. Emitted in expanded JSON only.
+  , giExternalsSummary :: !(Maybe ExternalsSummary)
+    -- ^ Diagnostic summary of the externals stripped under
+    -- @--no-externals@; carried in both packed and expanded output.
+    -- 'Nothing' when @--no-externals@ wasn't passed, in which case the
+    -- field is omitted from the JSON.
+  }
+
+-- | Output of the v2 emitter, ready for the backend to write to disk.
+data GraphJsonOutput = GraphJsonOutput
+  { gjoGraphJson      :: String
+  , gjoModuleDetails  :: [ModuleDetailJson]
+  , gjoModuleNames    :: [String]
+  }
+
+-- | One per-module detail file in lazy mode.
+data ModuleDetailJson = ModuleDetailJson
+  { mdjModuleName :: String
+  , mdjFileName   :: FilePath
+  , mdjContent    :: String
+  }
+
+-- ** Emission
+
+buildGraphJson :: GraphInput -> GraphJsonOutput
+buildGraphJson GraphInput{..} =
+  let mode = if giLazy then EmitLazy else EmitInline
+
+      -- (1) Definition list ---------------------------------------------
+      allQNames :: [QName]
+      allQNames = collectAllQNames giDefs
+
+      -- Sort by hashQName for deterministic byte output across runs.
+      defsList :: [QName]
+      defsList = sortOn hashQName allQNames
+
+      -- Edge endpoints index by canonical 'nodeKey' string (so deps
+      -- resolve by the same key the consumer uses, not by 'QName' 'Ord').
+      defKeyIndexMap :: M.Map String Int
+      defKeyIndexMap = M.fromList (zip (map nodeKey defsList) [0..])
+
+      nDefs :: Int
+      nDefs = length defsList
+
+      defNames     :: [String]
+      defNames     = map nodeKey defsList
+
+      defModuleNames :: [String]
+      defModuleNames = map (prettyShow . qnameModule) defsList
+
+      -- (2) Module list -------------------------------------------------
+      -- Union of def modules, import-edge endpoints, the entry module,
+      -- failed modules, and extra modules. 'S.toAscList' is sorted.
+      modulesSet :: S.Set String
+      modulesSet =
+        let !s0 = S.fromList defModuleNames
+            !s1 = foldl' (\s (a, b) -> S.insert b (S.insert a s)) s0 giImportEdges
+            !s2 = case giEntryModule of
+                    Just m  -> S.insert m s1
+                    Nothing -> s1
+            !s3 = S.union s2 giFailedModules
+        in S.union s3 giExtraModules
+
+      modules :: [String]
+      modules = S.toAscList modulesSet
+
+      moduleIndexMap :: M.Map String Int
+      moduleIndexMap = M.fromList (zip modules [0..])
+
+      nModules :: Int
+      nModules = length modules
+
+      moduleOf :: QName -> Int
+      moduleOf qn = case M.lookup (prettyShow (qnameModule qn)) moduleIndexMap of
+        Just i  -> i
+        Nothing -> -1
+
+      defModuleIdxs :: [Int32]
+      defModuleIdxs = [ fromIntegral (moduleOf qn) | qn <- defsList ]
+
+      -- (3) Per-def states + positions ---------------------------------
+      defState :: QName -> DefState
+      defState qn = M.findWithDefault Defined qn giStateMap
+
+      defStateBytes :: [Int8]
+      defStateBytes = [ encodeDefState (defState qn) | qn <- defsList ]
+
+      defPositions :: [(Float, Float)]
+      defPositions =
+        [ case M.lookup qn giPositions of
+            Just p  -> (posX p, posY p)
+            Nothing -> (0, 0)
+        | qn <- defsList
+        ]
+
+      defXs :: [Float]
+      defXs = map fst defPositions
+      defYs :: [Float]
+      defYs = map snd defPositions
+
+      -- (4) File list + module/file maps -------------------------------
+      moduleFilePathMap :: M.Map String FilePath
+      moduleFilePathMap = giModuleFile
+
+      allFilesSet :: S.Set FilePath
+      allFilesSet = S.fromList $
+        giSourceFiles ++ M.elems moduleFilePathMap
+
+      files :: [FilePath]
+      files = sort (S.toList allFilesSet)
+
+      fileIndexMap :: M.Map FilePath Int
+      fileIndexMap = M.fromList (zip files [0..])
+
+      moduleToFile :: [Int32]
+      moduleToFile =
+        [ case M.lookup m moduleFilePathMap >>= (`M.lookup` fileIndexMap) of
+            Just i  -> fromIntegral i
+            Nothing -> -1
+        | m <- modules
+        ]
+
+      fileToModules :: [[Int]]
+      fileToModules =
+        let byFile = foldl' insertModule IM.empty (zip [0..] modules)
+            insertModule acc (mi, m) = case M.lookup m moduleFilePathMap of
+              Just p  -> case M.lookup p fileIndexMap of
+                Just fi -> IM.insertWith (++) fi [mi] acc
+                Nothing -> acc
+              Nothing -> acc
+        in [ sort (IM.findWithDefault [] i byFile)
+           | i <- [0 .. length files - 1]
+           ]
+
+      -- (5) Edges --------------------------------------------------------
+      adjList :: [(Int, [Int])]
+      adjList =
+        [ (srcGi, [ ti
+                  | t <- S.toList (_deps d)
+                  , Just ti <- [M.lookup (nodeKey t) defKeyIndexMap]
+                  ])
+        | d <- giDefs
+        , Just srcGi <- [M.lookup (nodeKey (_name d)) defKeyIndexMap]
+        ]
+
+      (outOffsets, outTargets) = buildCsr nDefs adjList
+      (inOffsets,  inTargets)  = reverseCsr nDefs adjList
+
+      -- Per-edge provenance, keyed @(srcGi, tgtGi) -> Int8@, for the
+      -- byte array aligned to 'outTargets'. Encoding:
+      --
+      -- @
+      --   0 = signature  (ESignature)
+      --   1 = body       (EBody)
+      --   2 = where      (EWhere)
+      --   3 = with       (EWith)
+      --   4 = unknown    (EUnknown)
+      -- @
+      defProvByPair :: IM.IntMap (IM.IntMap Int8)
+      defProvByPair = foldl' addDefEdges IM.empty giDefs
+        where
+          addDefEdges !acc d = case M.lookup (nodeKey (_name d)) defKeyIndexMap of
+            Nothing    -> acc
+            Just srcGi ->
+              let !inner =
+                    M.foldlWithKey'
+                      (\ !m tgt prov -> case M.lookup (nodeKey tgt) defKeyIndexMap of
+                          Nothing -> m
+                          Just ti -> IM.insert ti (encodeEdgeProv prov) m)
+                      IM.empty
+                      (_depsProv d)
+              in if IM.null inner
+                   then acc
+                   else IM.insert srcGi inner acc
+
+      -- Per-edge provenance bytes aligned to 'outTargets'. Streams
+      -- through 'outTargets' once, recovering each source bucket from
+      -- the per-source bucket-size list and emitting the provenance
+      -- byte per (srcGi, tgtGi) pair; 'EUnknown' (4) for any miss.
+      outTargetsProv :: [Int8]
+      outTargetsProv = goBucket 0 bucketSizes outTargets
+        where
+          -- Adjacent-pair differences over outOffsets give each
+          -- bucket's size (0..nDefs-1).
+          bucketSizes :: [Int]
+          bucketSizes = case outOffsets of
+            (o0 : rest) -> zipWith (\a b -> fromIntegral (b - a)) (o0 : rest) rest
+            []          -> []
+
+          goBucket :: Int -> [Int] -> [Int32] -> [Int8]
+          goBucket _ _ [] = []
+          goBucket !_ [] _ = []
+          goBucket !srcGi (sz : szs) tgts =
+            let !innerMap = IM.findWithDefault IM.empty srcGi defProvByPair
+                go n acc ts
+                  | n == 0    = (reverse acc, ts)
+                  | otherwise = case ts of
+                      []      -> (reverse acc, [])
+                      (t : r) ->
+                        let !b = IM.findWithDefault
+                                    (encodeEdgeProv EUnknown)
+                                    (fromIntegral t)
+                                    innerMap
+                        in go (n - 1) (b : acc) r
+                (here, after) = go sz [] tgts
+            in here ++ goBucket (srcGi + 1) szs after
+
+      -- Skip the def-level transitive reduction above this size
+      -- threshold (it's O(V·(V+E))). The JS viewer treats an empty
+      -- 'transitiveEdges' array as "no reduction precomputed" and shows
+      -- every edge.
+      defTransitiveThreshold :: Int
+      defTransitiveThreshold = 3000
+
+      defTransitivePacked :: [Int32]
+      defTransitivePacked
+        | nDefs > defTransitiveThreshold = []
+        | otherwise =
+            [ fromIntegral (s * nDefs + t)
+            | (s, t) <- transitiveDefEdges adjList
+            ]
+
+      -- (6) Module edges -----------------------------------------------
+      -- Fold leaf edges directly into a 'Set (Int, Int)' of distinct
+      -- module pairs, then add import edges.
+      moduleEdgeSet :: S.Set (Int, Int)
+      moduleEdgeSet =
+        let addLeafEdges !acc d =
+              let !sMod = moduleOf (_name d)
+              in if sMod < 0 then acc
+                 else S.foldl'
+                        (\ !s t ->
+                          let !tMod = moduleOf t
+                          in if tMod < 0 || sMod == tMod
+                               then s
+                               else S.insert (sMod, tMod) s)
+                        acc (_deps d)
+            !leafSet = foldl' addLeafEdges S.empty giDefs
+            addImpEdge !acc (s, t) =
+              case M.lookup s moduleIndexMap of
+                Nothing -> acc
+                Just i  -> case M.lookup t moduleIndexMap of
+                  Nothing -> acc
+                  Just j
+                    | i == j    -> acc
+                    | otherwise -> S.insert (i, j) acc
+        in foldl' addImpEdge leafSet giImportEdges
+
+      moduleEdgePairs :: [(Int, Int)]
+      moduleEdgePairs = S.toAscList moduleEdgeSet
+
+      transitiveModuleEdgePairs :: [(Int, Int)]
+      transitiveModuleEdgePairs =
+        transitiveEdgesInt moduleEdgePairs
+
+      -- (7) Module states ----------------------------------------------
+      moduleStateBytes :: [Int8]
+      moduleStateBytes =
+        [ if S.member m giFailedModules then 1 else 0
+        | m <- modules
+        ]
+
+      -- (7b) Per-module {defined, postulate, hole, failed} counts ------
+      -- Lets views render a per-module state-mix bar without
+      -- re-scanning every def in JS.
+      moduleStateCounts :: [[Int]]
+      moduleStateCounts =
+        let zero = Counts 0 0 0 0
+            bump (Counts d p h f) s = case s of
+              Defined   -> Counts (d + 1) p       h       f
+              Postulate -> Counts d       (p + 1) h       f
+              Hole      -> Counts d       p       (h + 1) f
+              Failed    -> Counts d       p       h       (f + 1)
+            byMod = foldl' addQ M.empty defsList
+              where
+                addQ !acc qn =
+                  let !m  = prettyShow (qnameModule qn)
+                      !st = defState qn
+                  in M.insertWith add4 m (bump zero st) acc
+                add4 (Counts a b c d) (Counts e f g h) =
+                  Counts (a + e) (b + f) (c + g) (d + h)
+            tup m = M.findWithDefault zero m byMod
+            withFailed m =
+              let !c0@(Counts d p h f) = tup m
+              in if S.member m giFailedModules
+                   then Counts d p h (f + 1)
+                   else c0
+        in [ let Counts d p h f = withFailed m in [d, p, h, f] | m <- modules ]
+
+      -- (7c) Topological depth from entry per module -------------------
+      -- BFS from the entry module's index over the module edge set.
+      -- -1 for modules unreachable from the entry, or when no entry is
+      -- known.
+      moduleDepth :: [Int32]
+      moduleDepth = case giEntryModule >>= (`M.lookup` moduleIndexMap) of
+        Nothing       -> replicate nModules (-1)
+        Just entryIdx ->
+          let adj :: IM.IntMap IS.IntSet
+              adj = IM.fromListWith IS.union
+                [ (s, IS.singleton t) | (s, t) <- moduleEdgePairs ]
+              depths = bfsDepths adj entryIdx
+          in [ fromIntegral (IM.findWithDefault (-1) i depths)
+             | i <- [0 .. nModules - 1]
+             ]
+
+      -- (7d) Module-DAG layout for the big-module-dag-pods view --------
+      -- Pre-computed pod bounding boxes (x, y, width, height) per
+      -- module, packed as a flat Float32 array of length 4 * nModules.
+      -- Rank assignment from sources (in-degree 0), then column-pack
+      -- within each rank centred on x=0, with fixed pod width /
+      -- collapsed height. O(V+E).
+      modulePodLayout :: [Float]
+      modulePodLayout = buildModuleDagLayout nModules moduleEdgePairs
+
+      -- (8) Externals ---------------------------------------------------
+      externalModuleIdxs :: [Int32]
+      externalModuleIdxs = sort
+        [ fromIntegral i
+        | (i, m) <- zip [0..] modules
+        , S.member m giExternalModules
+        ]
+
+      -- (9) Trees -------------------------------------------------------
+      fileTreeJson :: String
+      fileTreeJson = renderFileTree files
+
+      moduleTreeJson :: String
+      moduleTreeJson = renderModuleTree modules
+
+      -- (10) Bundle / module-detail filename maps ----------------------
+      moduleFilesMap :: M.Map String FilePath
+      moduleFilesMap
+        | giLazy    = M.fromList
+            [ (m, "modules/" ++ moduleDetailFilename m) | m <- modules ]
+        | otherwise = M.empty
+
+      bundleFilesMap :: M.Map String FilePath
+      bundleFilesMap
+        | giWithSource = M.fromList
+            [ (m, "snippets/" ++ snippetBundleFilename m)
+            | m <- giSnippetModules
+            ]
+        | otherwise = M.empty
+
+      -- (11) Search index ----------------------------------------------
+      (searchNames, searchKinds, searchBigrams) =
+        buildSearchIndex modules defNames
+
+      -- (12) Module detail files (lazy mode) ---------------------------
+      moduleDetails :: [ModuleDetailJson]
+      moduleDetails
+        | giLazy = buildModuleDetails
+                     defsList moduleOf adjList
+                     defStateBytes defXs defYs moduleIndexMap
+                     giExternalModules giFailedModules giExternalsSummary
+        | otherwise = []
+
+      -- (13) Assemble graph.json --------------------------------------
+      defsJson = case mode of
+        EmitInline ->
+          ",\"defs\":" ++ defsObjectJson defNames defModuleIdxs defStateBytes defXs defYs
+        EmitLazy   -> ""
+
+      edgesJson = case mode of
+        EmitInline ->
+          ",\"edges\":" ++ edgesObjectJson outOffsets outTargets inOffsets inTargets
+        EmitLazy   -> ""
+
+      -- Per-edge 'EdgeProv' as packed int8, parallel to 'outTargets'.
+      -- Inline mode only.
+      defEdgesProvJson = case mode of
+        EmitInline ->
+          ",\"definitionEdgesProvenance\":" ++ jsB64Int8 outTargetsProv
+        EmitLazy   -> ""
+
+      transitiveJson = case mode of
+        EmitInline ->
+          ",\"transitiveEdges\":" ++ jsB64Int32 defTransitivePacked
+        EmitLazy   -> ""
+
+      _ = nModules
+
+      -- Optional diagnostic field; absent when @--no-externals@ wasn't
+      -- passed.
+      externalsSummaryField = case giExternalsSummary of
+        Just es -> ",\"externals_summary\":" ++ externalsSummaryJson es
+        Nothing -> ""
+
+      graphJson = "{\"v\":2"
+        ++ ",\"nodeKeyVersion\":" ++ show nodeKeyVersion
+        ++ ",\"producer\":"     ++ jsString buildFingerprint
+        ++ ",\"modules\":"      ++ stringArrayJson modules
+        ++ ",\"files\":"        ++ stringArrayJson files
+        ++ ",\"moduleToFile\":" ++ jsB64Int32 moduleToFile
+        ++ ",\"fileToModules\":" ++ intArrayArrayJson fileToModules
+        ++ defsJson
+        ++ edgesJson
+        ++ defEdgesProvJson
+        ++ transitiveJson
+        ++ ",\"moduleEdges\":" ++ pairArrayJson moduleEdgePairs
+        ++ ",\"transitiveModuleEdges\":" ++ pairArrayJson transitiveModuleEdgePairs
+        ++ ",\"moduleStates\":" ++ jsB64Int8 moduleStateBytes
+        ++ ",\"moduleStateCounts\":" ++ intArrayArrayJson moduleStateCounts
+        ++ ",\"moduleDepth\":" ++ jsB64Int32 moduleDepth
+        ++ ",\"modulePodLayout\":" ++ jsB64Float32 modulePodLayout
+        ++ ",\"fileTree\":"     ++ fileTreeJson
+        ++ ",\"moduleTree\":"   ++ moduleTreeJson
+        ++ ",\"entryModule\":"  ++ maybe "null" jsString giEntryModule
+        ++ ",\"externalModules\":" ++ jsB64Int32 externalModuleIdxs
+        ++ (if M.null bundleFilesMap then "" else
+            ",\"bundleFiles\":" ++ stringMapJson bundleFilesMap)
+        ++ (if M.null moduleFilesMap then "" else
+            ",\"moduleFiles\":" ++ stringMapJson moduleFilesMap)
+        ++ ",\"searchIndex\":" ++ searchIndexJson searchNames searchKinds searchBigrams
+        ++ externalsSummaryField
+        ++ "}"
+
+  in GraphJsonOutput
+       { gjoGraphJson     = graphJson
+       , gjoModuleDetails = moduleDetails
+       , gjoModuleNames   = modules
+       }
+
+-- ** Per-module detail emission
+
+-- | Build per-module detail JSON files for lazy mode. Emits one
+-- 'ModuleDetailJson' per /real/ module (at least one kept def in
+-- 'defsList') plus a /placeholder/ detail file for every module
+-- declared in 'moduleFiles' with no kept defs (so lazy-mode fetches
+-- don't 404).
+--
+-- The placeholder shape matches a normal detail file but additionally
+-- carries:
+--
+-- * @"placeholder": true@ — discriminator the consumer JS reads.
+-- * @"module": "<name>"@ — for display.
+-- * @"reason": "external" | "failed" | "filtered"@ — why the module
+--   has no kept defs:
+--     - @"external"@: module sits outside the project root (in
+--       'externalMods').
+--     - @"failed"@:   module's type-check raised @TCErr@ under
+--       @--keep-going@ ('failedMods').
+--     - @"filtered"@: module is inside the project but every def was
+--       dropped by 'ignoreDef' / privacy filtering.
+-- * @"externalPostulates": [\"true\",\"false\",…]@ — for
+--   @"external"@ modules that 'ExternalsSummary' tagged. Absent
+--   otherwise.
+buildModuleDetails
+  :: [QName]
+  -> (QName -> Int)
+  -> [(Int, [Int])]
+  -> [Int8]
+  -> [Float]
+  -> [Float]
+  -> M.Map String Int
+  -> S.Set String           -- ^ externalModules (from 'GraphInput').
+  -> S.Set String           -- ^ failedModules (from 'GraphInput').
+  -> Maybe ExternalsSummary -- ^ for @"externalPostulates"@ on stubs.
+  -> [ModuleDetailJson]
+buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
+                   externalMods failedMods mExtSummary =
+  let defsArr     :: IM.IntMap QName
+      defsArr     = IM.fromList (zip [0..] defsList)
+
+      statesArr   :: IM.IntMap Int8
+      statesArr   = IM.fromList (zip [0..] stateBytes)
+
+      xsArr       :: IM.IntMap Float
+      xsArr       = IM.fromList (zip [0..] xs)
+
+      ysArr       :: IM.IntMap Float
+      ysArr       = IM.fromList (zip [0..] ys)
+
+      outByDef :: IM.IntMap [Int]
+      outByDef = IM.fromList adjList
+
+      indexToModule :: IM.IntMap String
+      indexToModule = IM.fromList
+        [ (i, m) | (m, i) <- M.toList moduleIndexMap ]
+
+      -- Group def indices by their module index.
+      defsByModule :: IM.IntMap [Int]
+      defsByModule = foldl' insertDef IM.empty (zip [0..] defsList)
+        where
+          insertDef acc (gi, qn) =
+            let mi = moduleOfQ qn
+            in if mi < 0 then acc
+               else IM.insertWith (++) mi [gi] acc
+
+      moduleOfDef :: Int -> Int
+      moduleOfDef gi = case IM.lookup gi defsArr of
+        Just qn -> moduleOfQ qn
+        Nothing -> -1
+
+      renderOne :: String -> [Int] -> String
+      renderOne _modName giList =
+        let sortedGis = sort giList
+            names  = [ nodeKey (defsArr IM.! gi) | gi <- sortedGis ]
+            stsM   = [ statesArr IM.! gi | gi <- sortedGis ]
+            xsM    = [ xsArr     IM.! gi | gi <- sortedGis ]
+            ysM    = [ ysArr     IM.! gi | gi <- sortedGis ]
+            outEs  = concat
+              [ [ (li, tgtGi, moduleOfDef tgtGi)
+                | tgtGi <- IM.findWithDefault [] srcGi outByDef
+                ]
+              | (li, srcGi) <- zip [0..] sortedGis
+              ]
+        in "{\"defs\":" ++ defsObjectJsonModule names stsM xsM ysM
+        ++ ",\"outEdges\":" ++ outEdgesJson outEs
+        ++ "}"
+
+      realDetails :: [ModuleDetailJson]
+      !realDetails =
+        [ ModuleDetailJson
+            { mdjModuleName = m
+            , mdjFileName   = moduleDetailFilename m
+            , mdjContent    = renderOne m gis
+            }
+        | (mi, gis) <- IM.toList defsByModule
+        , Just m <- [IM.lookup mi indexToModule]
+        ]
+
+      -- Modules listed in 'moduleIndexMap' with zero kept defs; each
+      -- gets a placeholder detail file per the rules on
+      -- 'buildModuleDetails'.
+      modulesWithDefsIdx :: IM.IntMap ()
+      !modulesWithDefsIdx = IM.map (const ()) defsByModule
+
+      classifyEmpty :: String -> String
+      classifyEmpty m
+        | S.member m failedMods   = "failed"
+        | S.member m externalMods = "external"
+        | otherwise               = "filtered"
+
+      externalPostulatesFor :: String -> [String]
+      externalPostulatesFor m = case mExtSummary of
+        Just (ExternalsSummary _ byMod) ->
+          M.findWithDefault [] m byMod
+        Nothing -> []
+
+      renderPlaceholder :: String -> String
+      renderPlaceholder m =
+        let !reason = classifyEmpty m
+            !ps     = externalPostulatesFor m
+            extField
+              | null ps   = ""
+              | otherwise = ",\"externalPostulates\":" ++ stringArrayJson ps
+        in "{\"defs\":"     ++ defsObjectJsonModule [] [] [] []
+        ++ ",\"outEdges\":" ++ outEdgesJson []
+        ++ ",\"placeholder\":true"
+        ++ ",\"module\":"   ++ jsString m
+        ++ ",\"reason\":"   ++ jsString reason
+        ++ extField
+        ++ "}"
+
+      placeholderDetails :: [ModuleDetailJson]
+      !placeholderDetails =
+        [ ModuleDetailJson
+            { mdjModuleName = m
+            , mdjFileName   = moduleDetailFilename m
+            , mdjContent    = renderPlaceholder m
+            }
+        | (m, mi) <- M.toAscList moduleIndexMap
+        , not (IM.member mi modulesWithDefsIdx)
+        ]
+  in realDetails ++ placeholderDetails
+
+-- ** JSON shape helpers
+
+defsObjectJson :: [String] -> [Int32] -> [Int8] -> [Float] -> [Float] -> String
+defsObjectJson names mods states xs ys =
+  "{\"names\":"      ++ stringArrayJson names
+  ++ ",\"modules\":" ++ jsB64Int32   mods
+  ++ ",\"states\":"  ++ jsB64Int8    states
+  ++ ",\"x\":"       ++ jsB64Float32 xs
+  ++ ",\"y\":"       ++ jsB64Float32 ys
+  ++ "}"
+
+defsObjectJsonModule :: [String] -> [Int8] -> [Float] -> [Float] -> String
+defsObjectJsonModule names states xs ys =
+  "{\"names\":"      ++ stringArrayJson names
+  ++ ",\"states\":"  ++ jsB64Int8    states
+  ++ ",\"x\":"       ++ jsB64Float32 xs
+  ++ ",\"y\":"       ++ jsB64Float32 ys
+  ++ "}"
+
+edgesObjectJson :: [Int32] -> [Int32] -> [Int32] -> [Int32] -> String
+edgesObjectJson outOff outTgt inOff inTgt =
+  "{\"outOffsets\":"   ++ jsB64Int32 outOff
+  ++ ",\"outTargets\":" ++ jsB64Int32 outTgt
+  ++ ",\"inOffsets\":"  ++ jsB64Int32 inOff
+  ++ ",\"inTargets\":"  ++ jsB64Int32 inTgt
+  ++ "}"
+
+outEdgesJson :: [(Int, Int, Int)] -> String
+outEdgesJson xs = "[" ++ intercalate "," (map one xs) ++ "]"
+  where
+    one (a, b, c) = "[" ++ show a ++ "," ++ show b ++ "," ++ show c ++ "]"
+
+stringArrayJson :: [String] -> String
+stringArrayJson xs = "[" ++ intercalate "," (map jsString xs) ++ "]"
+
+stringMapJson :: M.Map String FilePath -> String
+stringMapJson m =
+  "{" ++ intercalate ","
+    [ jsString k ++ ":" ++ jsString v | (k, v) <- M.toList m ]
+  ++ "}"
+
+pairArrayJson :: [(Int, Int)] -> String
+pairArrayJson xs = "[" ++ intercalate "," (map p xs) ++ "]"
+  where
+    p (a, b) = "[" ++ show a ++ "," ++ show b ++ "]"
+
+intArrayArrayJson :: [[Int]] -> String
+intArrayArrayJson xss = "[" ++ intercalate "," (map row xss) ++ "]"
+  where
+    row xs = "[" ++ intercalate "," (map show xs) ++ "]"
+
+jsB64Int32 :: [Int32] -> String
+jsB64Int32 = jsString . encodeInt32LE
+
+jsB64Int8 :: [Int8] -> String
+jsB64Int8 = jsString . encodeInt8LE
+
+jsB64Float32 :: [Float] -> String
+jsB64Float32 = jsString . encodeFloat32LE
+
+-- ** State encoding
+
+encodeDefState :: DefState -> Int8
+encodeDefState Defined   = 0
+encodeDefState Postulate = 1
+encodeDefState Hole      = 2
+encodeDefState Failed    = 3
+
+-- | Wire encoding for 'EdgeProv' in the packed JSON form. See
+-- 'outTargetsProv' for the documented mapping.
+encodeEdgeProv :: EdgeProv -> Int8
+encodeEdgeProv ESignature = 0
+encodeEdgeProv EBody      = 1
+encodeEdgeProv EWhere     = 2
+encodeEdgeProv EWith      = 3
+encodeEdgeProv EUnknown   = 4
+
+-- ** File tree
+
+renderFileTree :: [FilePath] -> String
+renderFileTree files =
+  let tokens :: [(FilePath, [String])]
+      tokens = [ (f, splitPath' f) | f <- files ]
+
+      -- Set-based dedup avoids the O(n^2) of 'nub'.
+      allPaths :: [[String]]
+      allPaths = S.toAscList . S.fromList $
+        concatMap (\(_, comps) -> filter (not . null) (inits' comps)) tokens
+
+      fileLookup :: M.Map [String] FilePath
+      fileLookup = M.fromList [ (comps, f) | (f, comps) <- tokens ]
+
+      fileIndex :: M.Map FilePath Int
+      fileIndex = M.fromList (zip files [0..])
+
+      treeIdx :: M.Map [String] Int
+      treeIdx = M.fromList (zip allPaths [0..])
+
+      parentOf :: [String] -> Int
+      parentOf [] = -1
+      parentOf comps = case init comps of
+        [] -> -1
+        p  -> M.findWithDefault (-1) p treeIdx
+
+      entry :: [String] -> String
+      entry comps =
+        let name = if null comps then "" else last comps
+            parent = parentOf comps
+            fIdx = case M.lookup comps fileLookup of
+              Just f  -> show (M.findWithDefault (-1) f fileIndex)
+              Nothing -> "null"
+        in "{\"name\":" ++ jsString name
+        ++ ",\"parent\":" ++ show parent
+        ++ ",\"fileIndex\":" ++ fIdx
+        ++ "}"
+  in "[" ++ intercalate "," (map entry allPaths) ++ "]"
+
+inits' :: [a] -> [[a]]
+inits' []     = [[]]
+inits' (x:xs) = [] : map (x:) (inits' xs)
+
+splitPath' :: FilePath -> [String]
+splitPath' = filter (not . null) . splitOn '/'
+
+splitOn :: Char -> String -> [String]
+splitOn c s = case break (== c) s of
+  (chunk, [])     -> [chunk]
+  (chunk, _:rest) -> chunk : splitOn c rest
+
+-- ** Module tree
+
+renderModuleTree :: [String] -> String
+renderModuleTree modules =
+  let moduleIdx :: M.Map String Int
+      moduleIdx = M.fromList (zip modules [0..])
+
+      -- Set-dedup over the union of prefixes and module names.
+      prefixSet :: S.Set String
+      prefixSet = foldl'
+        (\acc m -> foldl' (flip S.insert) acc (properPrefixes m))
+        S.empty modules
+
+      treeNames :: [String]
+      treeNames = S.toAscList (foldl' (flip S.insert) prefixSet modules)
+
+      treeIdx :: M.Map String Int
+      treeIdx = M.fromList (zip treeNames [0..])
+
+      parentOf :: String -> Int
+      parentOf m = case reverse (properPrefixes m) of
+        []     -> -1
+        (p:ps) -> case M.lookup p treeIdx of
+          Just i  -> i
+          Nothing -> findFirst ps
+        where
+          findFirst []     = -1
+          findFirst (q:qs) = case M.lookup q treeIdx of
+            Just i  -> i
+            Nothing -> findFirst qs
+
+      lastComponent :: String -> String
+      lastComponent s = case reverse (splitOn '.' s) of
+        []    -> s
+        (x:_) -> x
+
+      entry :: String -> String
+      entry name =
+        "{\"name\":" ++ jsString (lastComponent name)
+        ++ ",\"parent\":" ++ show (parentOf name)
+        ++ ",\"moduleIndex\":" ++ maybe "null" show (M.lookup name moduleIdx)
+        ++ "}"
+
+  in "[" ++ intercalate "," (map entry treeNames) ++ "]"
+
+properPrefixes :: String -> [String]
+properPrefixes "" = []
+properPrefixes s  = go [] [] s
+  where
+    go acc _   []       = reverse acc
+    go acc cur (c:cs)
+      | c == '.'  =
+          let prefix = reverse cur
+          in go (prefix : acc) (c : cur) cs
+      | otherwise = go acc (c : cur) cs
+
+-- ** Search index
+
+buildSearchIndex :: [String] -> [String] -> ([String], [Int8], M.Map String [Int])
+buildSearchIndex modules defs =
+  let modLower = map (map toLower) modules
+      defLower = map (map toLower) defs
+      names    = modLower ++ defLower
+      kinds    = replicate (length modLower) 0 ++ replicate (length defLower) 1
+
+      bigramsOf :: String -> [String]
+      bigramsOf s
+        | length s < 2 = []
+        | otherwise    = zipWith (\a b -> [a, b]) s (tail s)
+
+      -- Build the posting lists with O(1) cons per insert, then sort +
+      -- dedup once per bigram.
+      bigramMap :: M.Map String [Int]
+      bigramMap
+        -- Above 'bigramThreshold' total names, emit an empty map; the
+        -- JS search falls back to a linear scan over 'names'.
+        | length names > bigramThreshold = M.empty
+        | otherwise = M.map dedupSortedInt $
+            foldl' insertNameBigrams M.empty (zip [0..] names)
+        where
+          insertNameBigrams !acc (i, name) =
+            foldl' (\m bg -> M.insertWith (++) bg [i] m)
+                   acc
+                   (S.toList (S.fromList (bigramsOf name)))
+
+  in (names, kinds, bigramMap)
+
+-- | Above this many combined module+def names the bigram postings map
+-- is skipped; the JS falls back to a linear scan over 'names'.
+bigramThreshold :: Int
+bigramThreshold = 50000
+
+searchIndexJson :: [String] -> [Int8] -> M.Map String [Int] -> String
+searchIndexJson names kinds bigrams =
+  "{\"names\":"      ++ stringArrayJson names
+  ++ ",\"kinds\":"   ++ jsB64Int8 kinds
+  ++ ",\"bigrams\":" ++ bigramObj
+  ++ "}"
+  where
+    bigramObj =
+      "{" ++ intercalate ","
+        [ jsString bg ++ ":[" ++ intercalate "," (map show is) ++ "]"
+        | (bg, is) <- M.toList bigrams
+        ]
+      ++ "}"
+
+-- ** Filename helpers
+
+-- | Filesystem-safe filename for a module: the module name verbatim
+-- when every character is safe, else a @\<prefix\>\<hash\>@ fallback.
+-- The lazy-ingest manifest and the on-disk files both derive names
+-- through this.
+safeFilename :: String -> String -> FilePath
+safeFilename prefix m
+  | all isSafeChar m && not (null m) = m ++ ".json"
+  | otherwise = prefix ++ show (hashString m) ++ ".json"
+  where
+    isSafeChar c = isAlphaNum c || c == '.' || c == '_' || c == '-'
+
+moduleDetailFilename :: String -> FilePath
+moduleDetailFilename = safeFilename "detail-"
+
+snippetBundleFilename :: String -> FilePath
+snippetBundleFilename = safeFilename "bundle-"
+
+-- ** Transitive-edge helpers
+
+-- | Definition-level transitive reduction over an adjacency list.
+transitiveDefEdges :: [(Int, [Int])] -> [(Int, Int)]
+transitiveDefEdges adjList =
+  let adj :: IM.IntMap IS.IntSet
+      adj = IM.fromListWith IS.union
+        [ (s, IS.fromList ts) | (s, ts) <- adjList, not (null ts) ]
+
+      reach :: IM.IntMap IS.IntSet
+      reach = IM.fromList [ (u, bfsFrom adj u) | u <- IM.keys adj ]
+
+      isTransitive u v =
+        let others = IS.delete v (IM.findWithDefault IS.empty u adj)
+        in any (\w -> IS.member v (IM.findWithDefault IS.empty w reach))
+               (IS.toList others)
+
+  in [ (s, t)
+     | (s, ts) <- adjList
+     , t <- ts
+     , isTransitive s t
+     ]
+
+transitiveEdgesInt :: [(Int, Int)] -> [(Int, Int)]
+transitiveEdgesInt edges =
+  let adj :: IM.IntMap IS.IntSet
+      adj = IM.fromListWith IS.union
+        [ (s, IS.singleton t) | (s, t) <- edges ]
+
+      reach :: IM.IntMap IS.IntSet
+      reach = IM.fromList [ (u, bfsFrom adj u) | u <- IM.keys adj ]
+
+      isTransitive u v =
+        let others = IS.delete v (IM.findWithDefault IS.empty u adj)
+        in any (\w -> IS.member v (IM.findWithDefault IS.empty w reach))
+               (IS.toList others)
+
+  in [ (s, t) | (s, t) <- edges, isTransitive s t ]
+
+-- | Reachable set from @start@ via a stack-style traversal (no level
+-- order).
+bfsFrom :: IM.IntMap IS.IntSet -> Int -> IS.IntSet
+bfsFrom adj start = go IS.empty [start]
+  where
+    go !visited [] = visited
+    go !visited (cur : rest)
+      | IS.member cur visited = go visited rest
+      | otherwise =
+          let neighbors = IM.findWithDefault IS.empty cur adj
+              !rest' = IS.foldr (:) rest neighbors
+          in go (IS.insert cur visited) rest'
+
+-- | BFS distances from a single source, as a map node -> depth. The
+-- source has depth 0; unreachable nodes are omitted. Uses a 'Seq'
+-- queue for amortised-constant enqueue.
+bfsDepths :: IM.IntMap IS.IntSet -> Int -> IM.IntMap Int
+bfsDepths adj start = go (IM.singleton start 0) (Seq.singleton (start, 0))
+  where
+    go !acc q = case Seq.viewl q of
+      Seq.EmptyL -> acc
+      (cur, d) Seq.:< rest ->
+        let neighbors = IM.findWithDefault IS.empty cur adj
+            (acc', next) = IS.foldl' step (acc, rest) neighbors
+            step (!m, !qq) n
+              | IM.member n m = (m, qq)
+              | otherwise     = (IM.insert n (d + 1) m, qq Seq.|> (n, d + 1))
+        in go acc' next
+
+-- ** Module-DAG layout (for the big-module-dag-pods view)
+
+-- | Pod dimensions (graph-space units, also used as device pixels at
+-- zoom = 1). Shared with the JS template.
+podWidth, podHeight, podColGap, podRowGap :: Float
+podWidth  = 200
+podHeight = 52
+podColGap = 30
+podRowGap = 80
+
+-- | Compute a top-down DAG layout for the module-level graph and
+-- pack it as @[x0, y0, w0, h0, x1, y1, w1, h1, …]@ (flat 'Float'
+-- list, one quadruple per module in module-index order).
+--
+-- Longest-path rank assignment via Kahn's topological order. Within
+-- each rank, modules are column-packed centred on @x = 0@, sorted by
+-- index. Rows stack top-to-bottom with a uniform 'podRowGap'
+-- separator. @O(V + E)@.
+buildModuleDagLayout :: Int -> [(Int, Int)] -> [Float]
+buildModuleDagLayout nMods edges
+  | nMods <= 0 = []
+  | otherwise =
+      let -- adjacency: out-neighbours per source
+          adjOut :: IM.IntMap IS.IntSet
+          adjOut = IM.fromListWith IS.union
+            [ (s, IS.singleton t) | (s, t) <- edges, s /= t ]
+
+          -- in-degree per node (only counts nodes with edges).
+          inDeg :: IM.IntMap Int
+          inDeg = foldl' bump IM.empty edges
+            where bump !m (s, t)
+                    | s == t    = m
+                    | otherwise = IM.insertWith (+) t 1 m
+
+          -- Longest-path rank via Kahn's algorithm: source nodes get
+          -- rank 0, every other node gets max(rank predecessors) + 1.
+          rank :: IM.IntMap Int
+          rank = kahnRanks nMods adjOut inDeg
+
+          -- Group module indices by rank. IntMap of [moduleIdx],
+          -- prepended in iteration order so the within-rank ordering
+          -- stays deterministic.
+          byRank :: IM.IntMap [Int]
+          byRank = foldl' add IM.empty [0 .. nMods - 1]
+            where
+              add !acc i =
+                let !r = IM.findWithDefault 0 i rank
+                in IM.insertWith (++) r [i] acc
+
+          -- Position map: moduleIdx -> (x, y, w, h).
+          positions :: IM.IntMap (Float, Float, Float, Float)
+          positions = snd $ IM.foldlWithKey' placeRank (0, IM.empty) byRank
+
+          placeRank
+            :: (Float, IM.IntMap (Float, Float, Float, Float))
+            -> Int -> [Int]
+            -> (Float, IM.IntMap (Float, Float, Float, Float))
+          placeRank (!yOff, !acc) _ idxs =
+            let -- Sort within a rank by index for stable layout.
+                sorted  = sort idxs
+                k       = length sorted
+                totalW  = fromIntegral k * podWidth
+                        + fromIntegral (max 0 (k - 1)) * podColGap
+                xStart  = -totalW / 2
+                step i  = xStart + fromIntegral i * (podWidth + podColGap)
+                acc'    = foldl'
+                  (\ !m (i, mi) ->
+                    IM.insert mi (step i, yOff, podWidth, podHeight) m)
+                  acc
+                  (zip [0..] sorted)
+                yOff'   = yOff + podHeight + podRowGap
+            in (yOff', acc')
+      in concatMap
+           (\i -> case IM.lookup i positions of
+                    Just (x, y, w, h) -> [x, y, w, h]
+                    Nothing           -> [0, 0, podWidth, podHeight])
+           [0 .. nMods - 1]
+
+-- | Longest-path rank assignment via Kahn's algorithm. Nodes with no
+-- in-edges end up at rank 0; every other node sits one rank below the
+-- max of its predecessors. Nodes in a cycle never get enqueued and
+-- collapse to rank 0.
+kahnRanks :: Int -> IM.IntMap IS.IntSet -> IM.IntMap Int -> IM.IntMap Int
+kahnRanks nMods adjOut inDeg0 =
+  let initialFrontier =
+        [ i | i <- [0 .. nMods - 1], IM.findWithDefault 0 i inDeg0 == 0 ]
+      seed = foldl' (\m i -> IM.insert i 0 m) IM.empty initialFrontier
+  in go seed inDeg0 (Seq.fromList initialFrontier)
+  where
+    go !ranks !inDeg q = case Seq.viewl q of
+      Seq.EmptyL -> ranks
+      cur Seq.:< rest ->
+        let !rCur     = IM.findWithDefault 0 cur ranks
+            neighbors = IM.findWithDefault IS.empty cur adjOut
+            (ranks', inDeg', enq) =
+              IS.foldl' step (ranks, inDeg, []) neighbors
+
+            step (!rs, !ids, !buf) n =
+              let !rNew      = max (IM.findWithDefault 0 n rs) (rCur + 1)
+                  !rs'       = IM.insert n rNew rs
+                  !newInDeg  = IM.findWithDefault 0 n ids - 1
+                  !ids'      = IM.insert n newInDeg ids
+              in if newInDeg <= 0
+                   then (rs', ids', n : buf)
+                   else (rs', ids', buf)
+
+            q' = foldl' (Seq.|>) rest enq
+        in go ranks' inDeg' q'
+
+-- ** Expanded JSON shape
+
+-- | Emit the v2 graph as an "expanded" JSON object: arrays of
+-- records keyed by qname / module-name, no base64-encoded typed
+-- arrays, no CSR adjacency. Directly readable with @JSON.parse@ and
+-- no decoders, at a size cost versus the packed form on large
+-- projects.
+--
+-- Schema (top-level keys):
+--
+-- @
+--   { "v": 2,
+--     "schemaVersion": 2,
+--     "mode": "expanded",
+--     "modules": [<string>, …],
+--     "entryModule": <string|null>,
+--     "externalModules": [<string>, …],
+--     "failedModules": [<string>, …],
+--     "definitions": [
+--       { "id": <int>,
+--         "name": <qname>,
+--         "module": <module>,
+--         "state": "D"|"P"|"H"|"F",
+--         "kind": "function"|"projection"|"datatype"|"record"
+--               |"constructor"|"postulate"|"primitive"|"other",
+--         "x": <float|null>,
+--         "y": <float|null>
+--       }, …
+--     ],
+--     "definitionEdges": [[<srcQName>, <dstQName>], …],
+--     "moduleEdges": [[<srcModule>, <dstModule>], …],
+--     "transitiveModuleEdges": [[<srcModule>, <dstModule>], …],
+--     "moduleFiles": { <moduleName>: <filePath>, … },
+--     "sourceFiles": [<filePath>, …]
+--   }
+-- @
+buildExpandedJson :: GraphInput -> String
+buildExpandedJson GraphInput{..} =
+  let allQNames :: [QName]
+      allQNames = collectAllQNames giDefs
+
+      defsList :: [QName]
+      defsList = sortOn hashQName allQNames
+
+      defIndexMap :: M.Map QName Int
+      defIndexMap = M.fromList (zip defsList [0..])
+
+      -- Node set as wire-name strings. An edge survives iff its
+      -- target's 'nodeKey' names a node here.
+      defKeySet :: S.Set String
+      defKeySet = S.fromList (map nodeKey defsList)
+
+      defState :: QName -> DefState
+      defState qn = M.findWithDefault Defined qn giStateMap
+
+      -- Structural kind, keyed by QName. Names that don't have an
+      -- ADDef of their own (external library references) get 'DKOther'.
+      defKindMap :: M.Map QName DefKind
+      defKindMap = M.fromList [ (_name d, _kind d) | d <- giDefs ]
+
+      defKind :: QName -> DefKind
+      defKind qn = M.findWithDefault DKOther qn defKindMap
+
+      -- Source-line + access lookups. Both 'Nothing' for QNames not
+      -- backed by an ADDef in 'giDefs' (e.g. external-library
+      -- references).
+      defLineMap :: M.Map QName Int
+      defLineMap = M.fromList
+        [ (_name d, ln) | d <- giDefs, Just ln <- [_line d] ]
+
+      defLine :: QName -> Maybe Int
+      defLine qn = M.lookup qn defLineMap
+
+      defAccessMap :: M.Map QName DefAccess
+      defAccessMap = M.fromList
+        [ (_name d, a) | d <- giDefs, Just a <- [_access d] ]
+
+      defAccess :: QName -> Maybe DefAccess
+      defAccess qn = M.lookup qn defAccessMap
+
+      -- Rendered type signatures (only populated under --with-signatures).
+      defSigMap :: M.Map QName String
+      defSigMap = M.fromList
+        [ (_name d, s) | d <- giDefs, Just s <- [_sig d] ]
+
+      defSig :: QName -> Maybe String
+      defSig qn = M.lookup qn defSigMap
+
+      defModuleOf  = map (prettyShow . qnameModule) defsList
+
+      -- modules: same union as buildGraphJson so the two shapes agree.
+      modulesSet :: S.Set String
+      modulesSet =
+        let !s0 = S.fromList defModuleOf
+            !s1 = foldl' (\s (a, b) -> S.insert b (S.insert a s)) s0 giImportEdges
+            !s2 = case giEntryModule of
+                    Just m  -> S.insert m s1
+                    Nothing -> s1
+            !s3 = S.union s2 giFailedModules
+        in S.union s3 giExtraModules
+
+      modules    = S.toAscList modulesSet
+      externals  = S.toAscList giExternalModules
+      failedMods = S.toAscList giFailedModules
+
+      -- Definition edges as qname pairs with parallel provenance tags,
+      -- filtered to deps present in 'defKeySet'. 'definitionEdges' and
+      -- 'definitionEdgesProvenance' share length and order, so the
+      -- combined list is sorted once and unzipped.
+      defEdgesWithProv :: [((String, String), EdgeProv)]
+      defEdgesWithProv = sortOn fst
+        [ ((sKey, tKey), prov)
+        | d <- giDefs
+        , let sKey = nodeKey (_name d)
+        , (t, prov) <- M.toAscList (_depsProv d)
+        , let tKey = nodeKey t
+        , S.member tKey defKeySet
+        ]
+
+      defEdgePairs :: [(String, String)]
+      defEdgePairs = map fst defEdgesWithProv
+
+      defEdgeProv :: [EdgeProv]
+      defEdgeProv = map snd defEdgesWithProv
+
+      -- Module edges as name pairs (sorted, deduped).
+      moduleEdgePairs :: [(String, String)]
+      moduleEdgePairs =
+        let leafEdges =
+              [ (sMod, tMod)
+              | d <- giDefs
+              , let sMod = prettyShow (qnameModule (_name d))
+              , t <- S.toAscList (_deps d)
+              , let tMod = prettyShow (qnameModule t)
+              , sMod /= tMod
+              ]
+            impEdges =
+              [ (s, t) | (s, t) <- giImportEdges, s /= t ]
+            allEdges = leafEdges ++ impEdges
+        in S.toAscList (S.fromList allEdges)
+
+      transModPairs :: [(String, String)]
+      transModPairs = sort $
+        let idxToName   = IM.fromList (zip [0..] modules)
+            nameOf i     = IM.findWithDefault "?" i idxToName
+            moduleIxMap = M.fromList (zip modules [(0::Int)..])
+            idxEdges    = [ (i, j)
+                          | (s, t) <- moduleEdgePairs
+                          , Just i <- [M.lookup s moduleIxMap]
+                          , Just j <- [M.lookup t moduleIxMap]
+                          ]
+        in [ (nameOf s, nameOf t) | (s, t) <- transitiveEdgesInt idxEdges ]
+
+      -- Emit "line" / "access" / "type" only when populated; an absent
+      -- field encodes "unknown" (line) / "public" (access).
+      defJson qn =
+        let i      = M.findWithDefault (-1) qn defIndexMap
+            modN   = prettyShow (qnameModule qn)
+            stTag  = stateLetter (defState qn)
+            kdTag  = kindTag (defKind qn)
+            mx     = fmap posX (M.lookup qn giPositions)
+            my     = fmap posY (M.lookup qn giPositions)
+            lineField = case defLine qn of
+              Just ln -> ",\"line\":" ++ show ln
+              Nothing -> ""
+            accessField = case defAccess qn of
+              Just a  -> ",\"access\":" ++ jsString (accessTag a)
+              Nothing -> ""
+            typeField = case defSig qn of
+              Just s  -> ",\"type\":" ++ jsString s
+              Nothing -> ""
+        in "{\"id\":" ++ show i
+        ++ ",\"name\":" ++ jsString (nodeKey qn)
+        ++ ",\"module\":" ++ jsString modN
+        ++ ",\"state\":" ++ jsString stTag
+        ++ ",\"kind\":" ++ jsString kdTag
+        ++ lineField
+        ++ accessField
+        ++ typeField
+        ++ ",\"x\":" ++ maybe "null" showFloat mx
+        ++ ",\"y\":" ++ maybe "null" showFloat my
+        ++ "}"
+
+      -- Optional diagnostic field; absent when @--no-externals@ wasn't
+      -- passed.
+      externalsSummaryField = case giExternalsSummary of
+        Just es -> ",\"externals_summary\":" ++ externalsSummaryJson es
+        Nothing -> ""
+
+      -- @"definitionSubtermHashes"@ and the parallel
+      -- @"definitionSubtermDepths"@, both arrays parallel to
+      -- @"definitions"@. Each entry is the @[Word64]@ / @[Int]@ for
+      -- that def's walked subterms. Both absent when no def carries the
+      -- field (producer not run with @--with-term-hashes@). Emitted
+      -- per-defsList qname via rebuilt lookup maps.
+      defHashesByQ :: M.Map QName [Word64]
+      defHashesByQ = M.fromList
+        [ (_name d, hs)
+        | d <- giDefs
+        , Just hs <- [_subtermHashes d]
+        ]
+
+      defDepthsByQ :: M.Map QName [Int]
+      defDepthsByQ = M.fromList
+        [ (_name d, ds)
+        | d <- giDefs
+        , Just ds <- [_subtermDepths d]
+        ]
+
+      subtermHashesField :: String
+      subtermHashesField
+        | M.null defHashesByQ = ""
+        | otherwise =
+            ",\"definitionSubtermHashes\":["
+            ++ intercalate ","
+                 [ word64ArrayJson (M.findWithDefault [] qn defHashesByQ)
+                 | qn <- defsList
+                 ]
+            ++ "]"
+
+      subtermDepthsField :: String
+      subtermDepthsField
+        | M.null defDepthsByQ = ""
+        | otherwise =
+            ",\"definitionSubtermDepths\":["
+            ++ intercalate ","
+                 [ intArrayJson (M.findWithDefault [] qn defDepthsByQ)
+                 | qn <- defsList
+                 ]
+            ++ "]"
+
+      word64ArrayJson :: [Word64] -> String
+      word64ArrayJson xs = "[" ++ intercalate "," (map show xs) ++ "]"
+
+      intArrayJson :: [Int] -> String
+      intArrayJson xs = "[" ++ intercalate "," (map show xs) ++ "]"
+
+  in "{\"v\":2"
+  ++ ",\"schemaVersion\":2"
+  ++ ",\"nodeKeyVersion\":" ++ show nodeKeyVersion
+  ++ ",\"producer\":"       ++ jsString buildFingerprint
+  ++ ",\"mode\":\"expanded\""
+  ++ ",\"modules\":"          ++ stringArrayJson modules
+  ++ ",\"entryModule\":"      ++ maybe "null" jsString giEntryModule
+  ++ ",\"externalModules\":"  ++ stringArrayJson externals
+  ++ ",\"failedModules\":"    ++ stringArrayJson failedMods
+  ++ ",\"definitions\":["     ++ intercalate "," (map defJson defsList) ++ "]"
+  ++ ",\"definitionEdges\":[" ++ intercalate "," (map pairJson defEdgePairs) ++ "]"
+  ++ ",\"definitionEdgesProvenance\":[" ++ intercalate "," (map provJson defEdgeProv) ++ "]"
+  ++ ",\"moduleEdges\":["     ++ intercalate "," (map pairJson moduleEdgePairs) ++ "]"
+  ++ ",\"transitiveModuleEdges\":[" ++ intercalate "," (map pairJson transModPairs) ++ "]"
+  ++ ",\"moduleFiles\":"      ++ stringMapJson giModuleFile
+  ++ ",\"sourceFiles\":"      ++ stringArrayJson giSourceFiles
+  ++ ",\"reexports\":"        ++ reExportsArrayJson giReExports
+  ++ subtermHashesField
+  ++ subtermDepthsField
+  ++ externalsSummaryField
+  ++ "}"
+  where
+    pairJson (a, b) = "[" ++ jsString a ++ "," ++ jsString b ++ "]"
+
+    showFloat f =
+      -- Float Show; downstream parsers accept exponent-form floats.
+      show f
+
+stateLetter :: DefState -> String
+stateLetter Defined   = "D"
+stateLetter Postulate = "P"
+stateLetter Hole      = "H"
+stateLetter Failed    = "F"
+
+kindTag :: DefKind -> String
+kindTag DKFunction    = "function"
+kindTag DKProjection  = "projection"
+kindTag DKDatatype    = "datatype"
+kindTag DKRecord      = "record"
+kindTag DKConstructor = "constructor"
+kindTag DKPostulate   = "postulate"
+kindTag DKPrimitive   = "primitive"
+kindTag DKOther       = "other"
+
+-- | Lowercase tag for the @"access"@ field in expanded JSON.
+accessTag :: DefAccess -> String
+accessTag AccPrivate = "private"
+accessTag AccPublic  = "public"
+
+-- | Emit a single 'EdgeProv' as its wire string (lowercase).
+provJson :: EdgeProv -> String
+provJson = jsString . provTag
+
+-- | Emit @reexports@ as @[{"from": …, "to": …, "names": […]}, …]@.
+-- The caller is expected to have already sorted+deduped each
+-- @[String]@ payload and sorted the outer list.
+reExportsArrayJson :: [(String, String, [String])] -> String
+reExportsArrayJson xs =
+  "[" ++ intercalate "," (map one xs) ++ "]"
+  where
+    one (fromMod, toMod, names) =
+      "{\"from\":" ++ jsString fromMod
+      ++ ",\"to\":" ++ jsString toMod
+      ++ ",\"names\":" ++ stringArrayJson names
+      ++ "}"

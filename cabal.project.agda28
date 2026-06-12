@@ -1,0 +1,8 @@
+-- Scratch project for building against Agda 2.8.0 (from Hackage) on GHC 9.6.
+-- Used to discover the 2.8/2.9 internal-API delta. Build with:
+--   cabal build --project-file=cabal.project.agda28 --builddir=dist-agda28 agda-deps
+packages: .
+
+with-compiler: ghc-9.6.7
+
+constraints: Agda ==2.8.0

@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/input-output-hk/agda-dependencies/blob/main/schema/graph-v2-expanded.schema.json",
+  "title": "agda-deps v2 graph.json (expanded mode)",
+  "description": "Wire schema for the JSON that `agda-deps --format=json --json-mode=expanded` emits. The producer encoder `AgdaDeps.Backend.GraphJson.buildExpandedJson` remains the single source of truth; this file is generated to match it and CI validates freshly-generated expanded output against it. `required` lists the fields the producer has emitted since v2 inception; fields added later (and documented as additive in CLAUDE.md) are optional, so this schema validates both current and older v2 output. `additionalProperties` is `true` throughout: downstream readers ignore unknown fields, and a future additive field must not fail v2 validation. The `packed` mode (CSR + base64 typed arrays) and the `--lazy` split-file layout are NOT covered here.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "v",
+    "schemaVersion",
+    "mode",
+    "modules",
+    "entryModule",
+    "externalModules",
+    "failedModules",
+    "definitions",
+    "definitionEdges",
+    "moduleEdges",
+    "transitiveModuleEdges",
+    "moduleFiles",
+    "sourceFiles",
+    "reexports"
+  ],
+  "properties": {
+    "v": {
+      "const": 2,
+      "description": "Wire-shape version. A consumer must refuse a `v` it doesn't recognise."
+    },
+    "schemaVersion": {
+      "const": 2,
+      "description": "Expanded-form schema version (mirrors `v` for the expanded shape)."
+    },
+    "mode": {
+      "const": "expanded",
+      "description": "Discriminates expanded from packed output."
+    },
+    "nodeKeyVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Additive. Node-naming convention version (orthogonal to the schema version). Absent in older JSON, where a reader assumes 1. Lets a downstream reader spot a stale-format cache."
+    },
+    "producer": {
+      "type": "string",
+      "description": "Additive. Build fingerprint of the emitting agda-deps, e.g. \"agda-deps 1.1 (git <sha>+, built <date>, ghc 9.14)\"."
+    },
+    "modules": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "All module names referenced in the graph (definitions' modules, import-edge endpoints, the entry, failed and extra modules)."
+    },
+    "entryModule": {
+      "type": ["string", "null"],
+      "description": "The IsMain entry module, or null when unknown."
+    },
+    "externalModules": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Modules classified as external (outside the project root)."
+    },
+    "failedModules": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Modules whose type-check raised under --keep-going (each gets an `F`-state marker node)."
+    },
+    "definitions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/definition" }
+    },
+    "definitionEdges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" },
+      "description": "Leaf dependency edges as [sourceName, targetName] pairs, keyed by `definition.name`."
+    },
+    "definitionEdgesProvenance": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/provenance" },
+      "description": "Additive (round 4). Parallel to `definitionEdges`: index i tags how edge i was discovered. When present, MUST be the same length as `definitionEdges` (a cross-array invariant this schema cannot express; the consumer enforces it). Absent in older JSON, where every edge is treated as \"unknown\"."
+    },
+    "moduleEdges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" },
+      "description": "Module-level edges as [sourceModule, targetModule] pairs (leaf edges lifted to modules, unioned with import edges)."
+    },
+    "transitiveModuleEdges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" },
+      "description": "Transitive closure of `moduleEdges` as [sourceModule, targetModule] pairs."
+    },
+    "moduleFiles": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Map from module name to its source file path."
+    },
+    "sourceFiles": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Source file paths discovered by the scan."
+    },
+    "reexports": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/reexport" },
+      "description": "Public re-export rows (`open import M public`)."
+    },
+    "definitionSubtermHashes": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "integer", "minimum": 0 }
+      },
+      "description": "Additive (round 6, --with-term-hashes). Parallel to `definitions`: index i is that def's array of canonical-subterm Word64 fingerprints (emitted as JSON numbers). When present, MUST be the same length as `definitions`."
+    },
+    "definitionSubtermDepths": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "integer", "minimum": 0 }
+      },
+      "description": "Additive (round 6, --with-term-hashes). Parallel to `definitionSubtermHashes`: the AST depth of each emitted subterm. Same length contract."
+    },
+    "externals_summary": {
+      "$ref": "#/$defs/externalsSummary",
+      "description": "Additive (--no-externals). Diagnostic record of the externals stripped from the graph; absent otherwise."
+    }
+  },
+  "$defs": {
+    "edge": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "A directed edge encoded as a two-element [source, target] array of wire names."
+    },
+    "state": {
+      "type": "string",
+      "enum": ["D", "P", "H", "F"],
+      "description": "Definition lifecycle: Defined / Postulate / Hole / Failed."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "function",
+        "projection",
+        "datatype",
+        "record",
+        "constructor",
+        "postulate",
+        "primitive",
+        "other"
+      ],
+      "description": "Structural kind. `other` covers external library references with no local definition."
+    },
+    "access": {
+      "type": "string",
+      "enum": ["private", "public"],
+      "description": "Defining-module visibility. Absent in the JSON means `public`."
+    },
+    "provenance": {
+      "type": "string",
+      "enum": ["signature", "body", "where", "with", "unknown"],
+      "description": "How an edge was discovered: defType (signature), theDef body, where-helper, with-auxiliary, or unclassified."
+    },
+    "definition": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "name", "module", "state", "kind", "x", "y"],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "Index into `definitions` (sorted by node-key hash). -1 for references with no local definition."
+        },
+        "name": {
+          "type": "string",
+          "description": "Canonical wire name (`nodeKey`): prettyShow plus an @<binding-line> suffix for `._.` helpers. Edge endpoints key on this."
+        },
+        "module": { "type": "string" },
+        "state": { "$ref": "#/$defs/state" },
+        "kind": { "$ref": "#/$defs/kind" },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Additive/optional. 1-based start line; absent when the producer didn't know."
+        },
+        "access": { "$ref": "#/$defs/access" },
+        "type": {
+          "type": "string",
+          "description": "Additive/optional (--with-signatures). Reified type signature, as-written (not normalised), collapsed to one line."
+        },
+        "x": {
+          "type": ["number", "null"],
+          "description": "Layout x position, or null when no layout was computed."
+        },
+        "y": {
+          "type": ["number", "null"],
+          "description": "Layout y position, or null when no layout was computed."
+        }
+      }
+    },
+    "reexport": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["from", "to", "names"],
+      "properties": {
+        "from": { "type": "string", "description": "Host module doing `open import M public`." },
+        "to": { "type": "string", "description": "Source module M." },
+        "names": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Fully-qualified names flowing through (match `definition.name`)."
+        }
+      }
+    },
+    "externalsSummary": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["modules", "postulates_by_module"],
+      "properties": {
+        "modules": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Module names that were dropped."
+        },
+        "postulates_by_module": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "description": "Per dropped module, the unqualified postulate names it held."
+        }
+      }
+    }
+  }
+}

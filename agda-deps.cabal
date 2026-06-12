@@ -1,0 +1,76 @@
+cabal-version:       3.0
+name:                agda-deps
+version:             1.1
+author:              Orestis Melkonian, Carlos Tomé Cortiñas, and Martín Ceresa
+category:            Language, Compiler
+build-type:          Simple
+synopsis:            Reporting lemma dependencies of Agda proofs.
+
+extra-doc-files:    README.md
+
+extra-source-files: src/AgdaDeps/templates/deps.html.tmpl
+                    src/AgdaDeps/templates/views/ide-three-pane.html.tmpl
+                    src/AgdaDeps/templates/views/module-dag-pods.html.tmpl
+                    src/AgdaDeps/templates/views/source-centric.html.tmpl
+                    src/AgdaDeps/templates/views/notion-doc.html.tmpl
+                    src/AgdaDeps/templates/views/wiki-backlinks.html.tmpl
+                    src/AgdaDeps/templates/views/sigma.html.tmpl
+                    src/AgdaDeps/templates/views/big-module-dag-pods.html.tmpl
+                    src/AgdaDeps/templates/views/critical-path-holes.html.tmpl
+                    src/AgdaDeps/templates/views/progress-dashboard.html.tmpl
+                    src/AgdaDeps/templates/views/cartographic-atlas.html.tmpl
+                    src/AgdaDeps/templates/views/sunburst-hierarchy.html.tmpl
+                    src/AgdaDeps/templates/views/reading-order-narrative.html.tmpl
+                    src/AgdaDeps/templates/views/pixel-grid-overview.html.tmpl
+
+source-repository head
+  type:     git
+  location: https://github.com/input-output-hk/agda-dependencies.git
+
+-- agda-deps is the Agda compiler backend that emits graph.json.
+executable agda-deps
+  ghc-options: -O2 -threaded
+  hs-source-dirs:      src
+  main-is:             Main.hs
+  other-modules:       Paths_agda_deps
+                       BuildInfo
+                       BuildInfoTH
+                       AgdaDeps.Util
+                       AgdaDeps.Logging
+                       AgdaDeps.Csr
+                       AgdaDeps.Config
+                       AgdaDeps.Layout
+                       AgdaDeps.Options
+                       AgdaDeps.Deps
+                       AgdaDeps.Source
+                       AgdaDeps.Backend.Dot
+                       AgdaDeps.Backend.GraphJson
+                       AgdaDeps.Backend.Html
+                       AgdaDeps.Backend.Json
+                       AgdaDeps.Backend
+                       AgdaDeps.Help
+                       AgdaDeps.ModuleExplorer
+                       AgdaDeps.Driver
+                       AgdaDeps.LibResolve
+                       AgdaDeps.Precompute
+                       AgdaDeps.SkipAgda
+                       AgdaDeps.TermCanon
+  autogen-modules:     Paths_agda_deps
+  build-depends:       base >= 4.10 && < 4.23,
+                       Agda >= 2.8 && < 3,
+                       aeson >= 2.0 && < 3,
+                       deepseq >= 1.4.4 && < 1.6,
+                       text,
+                       containers,
+                       unordered-containers,
+                       file-embed,
+                       filepath,
+                       graphviz >= 2999.20,
+                       fgl,
+                       directory,
+                       mtl,
+                       bytestring,
+                       process >= 1.6 && < 2,
+                       template-haskell,
+                       yaml >= 0.11 && < 0.12,
+                       zlib,

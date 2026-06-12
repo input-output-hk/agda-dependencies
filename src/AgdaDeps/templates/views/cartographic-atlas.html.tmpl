@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  agda-deps · Cartographic Atlas view.
+
+  Treats the dependency graph as a topographic atlas:
+    * continents  = top-level dotted prefix of every module
+    * territories = each module, drawn as an irregular polygon
+    * elevation   = longest-path depth from axiom-sources (no incoming edges)
+    * volcanoes   = modules with unfilled holes (count scales with H count)
+    * sinkholes   = modules with postulates
+    * ports       = module re-export sites (if reexports[] is present)
+    * capital     = the entry module
+    * routes      = on territory hover, dashed import lines to neighbours
+    * Foreign Land = externals, drawn in a parchment-tan ring outside
+
+  The whole view is pure SVG + vanilla JS so it works in any browser
+  without runtime deps. Pan/zoom is borrowed from module-dag-pods.
+-->
+<meta charset="UTF-8">
+<title>agda-deps — Cartographic Atlas</title>
+<script>window.__gzipEnabled = __GZIP_ENABLED__;</script>
+<script>
+  if (window.__gzipEnabled && typeof DecompressionStream === 'undefined') {
+    document.write('<scr'+'ipt src="https://unpkg.com/pako@2.1.0/dist/pako_inflate.min.js"></scr'+'ipt>');
+  }
+</script>
+<style>
+  :root {
+    --c-defined:   __COLOR_DEFINED__;
+    --c-postulate: __COLOR_POSTULATE__;
+    --c-hole:      __COLOR_HOLE__;
+    --c-failed:    __COLOR_FAILED__;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; overflow: hidden;
+    font-family: 'IM Fell English', 'Iowan Old Style', 'Palatino', Georgia, serif;
+    background: #0d141a; color: #d9c9a3;
+  }
+
+  #banner {
+    background: linear-gradient(180deg, #1a232e 0%, #131a23 100%);
+    border-bottom: 1px solid #2a3a4a;
+    padding: 6px 14px; font-size: 12px; letter-spacing: .08em;
+    display: flex; align-items: center; gap: 10px;
+    color: #b8a878; font-variant: small-caps;
+  }
+  #banner strong { color: #e8d49a; font-weight: 600; letter-spacing: .12em; }
+  #banner em { color: #7a8a98; font-style: italic; font-family: Georgia, serif; }
+
+  #root {
+    position: relative; height: calc(100% - 30px); width: 100%; overflow: hidden;
+    background:
+      radial-gradient(ellipse at 30% 25%, #1a2530 0%, #0d141a 70%),
+      #0d141a;
+  }
+
+  #map-svg {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    cursor: grab;
+  }
+  #map-svg.dragging { cursor: grabbing; }
+
+  .ocean { fill: url(#oceanGrad); }
+  .ocean-noise { fill: url(#oceanNoise); opacity: 0.35; }
+
+  .continent-bg {
+    stroke: #4a3a28; stroke-width: 1.5; stroke-linejoin: round;
+    filter: url(#parchmentTint);
+  }
+  .continent-bg.foreign { stroke: #6a5a38; stroke-dasharray: 4 3; }
+
+  .territory {
+    stroke: #3a2a18; stroke-width: 0.8; stroke-linejoin: round;
+    cursor: pointer;
+    transition: filter 0.18s, stroke-width 0.18s;
+  }
+  .territory:hover { stroke-width: 1.8; filter: brightness(1.18); }
+  .territory.selected { stroke: #f3d77a; stroke-width: 2.2; }
+  .territory.route-source { stroke: #d97e3a; stroke-width: 2; }
+  .territory.route-target { stroke: #6fa66f; stroke-width: 2; }
+
+  .contour {
+    fill: none; stroke: #4a3a28; stroke-width: 0.4; opacity: 0.55;
+    pointer-events: none;
+  }
+
+  .territory-label {
+    fill: #2a1f10; font-family: 'IM Fell English', 'Palatino', Georgia, serif;
+    font-size: 9px; font-variant: small-caps; letter-spacing: 0.08em;
+    text-anchor: middle; pointer-events: none;
+    font-weight: 600;
+    paint-order: stroke;
+    stroke: rgba(232,212,170,0.55); stroke-width: 2;
+  }
+  .territory-label.large { font-size: 11px; letter-spacing: 0.12em; }
+
+  .continent-name {
+    fill: #d4b870; font-family: 'IM Fell English', Georgia, serif;
+    font-size: 22px; font-variant: small-caps; letter-spacing: 0.4em;
+    text-anchor: middle; opacity: 0.45;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: #0d141a; stroke-width: 3;
+    font-style: italic;
+  }
+
+  .route {
+    fill: none; stroke: #c8a557; stroke-width: 1.2; opacity: 0;
+    stroke-dasharray: 4 3;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .route.visible { opacity: 0.85; }
+  .route.outgoing { stroke: #d97e3a; }
+  .route.incoming { stroke: #6fa66f; }
+
+  .hazard { pointer-events: none; }
+  .hazard-volcano { fill: #c54b2a; stroke: #2a1308; stroke-width: 0.6; }
+  .hazard-sinkhole { fill: #5a3a72; stroke: #2a1830; stroke-width: 0.6; }
+  .hazard-failed { fill: var(--c-failed); stroke: #1a1a1a; stroke-width: 0.6; }
+  .hazard-smoke { fill: #c54b2a; opacity: 0.35; }
+
+  .port {
+    fill: #f3d77a; stroke: #3a2a18; stroke-width: 0.6;
+    cursor: pointer;
+  }
+  .port-flag {
+    fill: #b85a3a; stroke: #2a1308; stroke-width: 0.4;
+    pointer-events: none;
+  }
+
+  .capital {
+    fill: #e8d49a; stroke: #4a3a18; stroke-width: 1;
+  }
+  .capital-ring {
+    fill: none; stroke: #e8d49a; stroke-width: 1.2; opacity: 0.7;
+    stroke-dasharray: 3 3;
+  }
+
+  #drawer {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: 360px; background: linear-gradient(180deg, #16202b, #101820);
+    border-left: 1px solid #2a3a4a; color: #d9c9a3;
+    transform: translateX(100%); transition: transform 0.25s ease;
+    display: flex; flex-direction: column;
+    box-shadow: -8px 0 24px rgba(0,0,0,0.4);
+    z-index: 20;
+  }
+  #drawer.open { transform: translateX(0); }
+  #drawer-header {
+    padding: 14px 18px 10px;
+    border-bottom: 1px solid #2a3a4a;
+    background: linear-gradient(90deg, #1f2a36, #16202b);
+  }
+  #drawer-eyebrow {
+    font-size: 10px; letter-spacing: 0.3em; color: #7a8a98;
+    font-variant: small-caps; margin-bottom: 4px;
+  }
+  #drawer-title {
+    font-size: 18px; color: #e8d49a; font-family: 'IM Fell English', Georgia, serif;
+    letter-spacing: 0.05em; word-break: break-all;
+  }
+  #drawer-subtitle {
+    font-size: 11px; color: #98886a; margin-top: 4px;
+    font-family: Georgia, serif; font-style: italic;
+  }
+  #drawer-close {
+    position: absolute; top: 12px; right: 14px;
+    background: transparent; border: 1px solid #3a4a5a; color: #98886a;
+    width: 22px; height: 22px; border-radius: 11px;
+    cursor: pointer; font-size: 13px; line-height: 1;
+  }
+  #drawer-close:hover { color: #e8d49a; border-color: #7a8a98; }
+
+  #drawer-stats {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+    padding: 12px 18px; border-bottom: 1px solid #2a3a4a;
+  }
+  .stat-cell {
+    background: #0d141a; border: 1px solid #2a3a4a; border-radius: 3px;
+    padding: 6px 8px; text-align: center;
+  }
+  .stat-num {
+    font-family: 'IM Fell English', Georgia, serif;
+    font-size: 18px; color: #e8d49a;
+  }
+  .stat-label {
+    font-size: 9px; color: #7a8a98; letter-spacing: 0.15em;
+    font-variant: small-caps; margin-top: 2px;
+  }
+  .stat-cell.green .stat-num { color: var(--c-defined); }
+  .stat-cell.red .stat-num   { color: var(--c-postulate); }
+  .stat-cell.purple .stat-num{ color: var(--c-hole); }
+
+  #drawer-content { flex: 1; overflow-y: auto; padding: 10px 18px 18px; }
+  #drawer-content::-webkit-scrollbar { width: 6px; }
+  #drawer-content::-webkit-scrollbar-thumb { background: #2a3a4a; border-radius: 3px; }
+
+  .drawer-section-title {
+    font-size: 10px; letter-spacing: 0.25em; color: #7a8a98;
+    font-variant: small-caps; margin: 14px 0 6px; padding-bottom: 4px;
+    border-bottom: 1px dotted #2a3a4a;
+  }
+
+  .neighbour-row {
+    padding: 4px 6px; font-size: 11px; color: #98886a;
+    cursor: pointer; border-radius: 3px;
+    display: flex; align-items: center; gap: 6px;
+    font-family: 'Fira Code', Consolas, monospace;
+    word-break: break-all;
+  }
+  .neighbour-row:hover { background: #1f2a36; color: #e8d49a; }
+  .neighbour-arrow { color: #7a8a98; font-size: 10px; flex-shrink: 0; }
+
+  #compass {
+    position: absolute; top: 16px; left: 16px;
+    width: 84px; height: 84px;
+    z-index: 5; pointer-events: none;
+    filter: drop-shadow(0 0 4px rgba(0,0,0,0.6));
+  }
+
+  #scale-bar {
+    position: absolute; bottom: 18px; left: 18px;
+    background: rgba(13, 20, 26, 0.75);
+    border: 1px solid #2a3a4a; padding: 6px 10px; border-radius: 3px;
+    font-size: 10px; letter-spacing: 0.15em; color: #b8a878;
+    font-variant: small-caps;
+    z-index: 5;
+  }
+  .scale-segments { display: flex; margin-top: 4px; }
+  .scale-segment {
+    height: 7px; width: 28px;
+    border: 1px solid #b8a878;
+  }
+  .scale-segment.filled { background: #b8a878; }
+
+  #legend {
+    position: absolute; bottom: 18px; right: 18px;
+    background: rgba(13, 20, 26, 0.82);
+    border: 1px solid #2a3a4a; border-radius: 3px;
+    padding: 10px 12px; font-size: 11px;
+    z-index: 5; min-width: 200px;
+    color: #b8a878;
+  }
+  #legend h4 {
+    font-size: 10px; letter-spacing: 0.25em; color: #e8d49a;
+    font-variant: small-caps; margin-bottom: 6px;
+    border-bottom: 1px solid #2a3a4a; padding-bottom: 4px;
+    font-weight: normal;
+  }
+  .legend-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+  .legend-swatch {
+    width: 14px; height: 14px; flex-shrink: 0;
+    border: 1px solid #3a2a18; border-radius: 2px;
+  }
+  .legend-icon {
+    width: 14px; flex-shrink: 0; text-align: center;
+    font-size: 13px;
+  }
+  .legend-row .legend-text { color: #b8a878; font-family: Georgia, serif; }
+
+  #weather {
+    position: absolute; top: 16px; right: 16px;
+    background: rgba(13, 20, 26, 0.85);
+    border: 1px solid #2a3a4a; border-radius: 3px;
+    padding: 10px 14px; font-size: 12px;
+    z-index: 5; max-width: 280px;
+    color: #d9c9a3;
+  }
+  #weather h4 {
+    font-size: 10px; letter-spacing: 0.25em; color: #e8d49a;
+    font-variant: small-caps; margin-bottom: 8px;
+    border-bottom: 1px solid #2a3a4a; padding-bottom: 4px;
+    font-weight: normal;
+    display: flex; align-items: center; gap: 6px;
+  }
+  #weather-list { max-height: 220px; overflow-y: auto; }
+  #weather-list::-webkit-scrollbar { width: 4px; }
+  #weather-list::-webkit-scrollbar-thumb { background: #2a3a4a; }
+  .weather-row {
+    padding: 3px 0; font-size: 11px;
+    font-family: 'Fira Code', monospace;
+    color: #c0b090; display: flex; align-items: center; gap: 6px;
+    cursor: pointer;
+  }
+  .weather-row:hover { color: #e8d49a; }
+  .weather-icon { font-size: 11px; flex-shrink: 0; }
+  .weather-row.volcano  .weather-icon { color: var(--c-hole); }
+  .weather-row.sinkhole .weather-icon { color: var(--c-postulate); }
+  .weather-row.failed   .weather-icon { color: var(--c-failed); }
+  .weather-empty {
+    font-style: italic; color: #555; font-size: 11px;
+    font-family: Georgia, serif;
+  }
+
+  #zoom-controls {
+    position: absolute; top: 110px; left: 16px;
+    display: flex; flex-direction: column; gap: 4px;
+    z-index: 5;
+  }
+  .zoom-btn {
+    width: 28px; height: 28px; background: rgba(13, 20, 26, 0.85);
+    border: 1px solid #2a3a4a; color: #b8a878;
+    cursor: pointer; font-size: 14px; font-family: Georgia, serif;
+    border-radius: 3px;
+  }
+  .zoom-btn:hover { background: #1f2a36; color: #e8d49a; }
+
+  #tooltip {
+    position: absolute; pointer-events: none;
+    background: rgba(13, 20, 26, 0.95);
+    border: 1px solid #4a3a28; border-radius: 3px;
+    padding: 6px 10px; font-size: 12px;
+    color: #e8d49a; font-family: Georgia, serif;
+    display: none; z-index: 30;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    max-width: 280px;
+  }
+  #tooltip .tip-mod { font-variant: small-caps; letter-spacing: 0.1em; word-break: break-all; }
+  #tooltip .tip-meta {
+    font-size: 10px; color: #98886a; margin-top: 2px;
+    font-style: italic;
+  }
+
+  @keyframes pulseRing {
+    0%   { r: 14; opacity: 0.7; }
+    100% { r: 28; opacity: 0; }
+  }
+  .pulse-ring { animation: pulseRing 2.2s ease-out infinite; }
+
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center;
+    justify-content: center; background: #0d141a; z-index: 100;
+    font-size: 14px; color: #98886a; font-family: Georgia, serif;
+    font-style: italic;
+  }
+  #err {
+    position: fixed; inset: 0; display: none; align-items: center;
+    justify-content: center; background: #0d141a; z-index: 100;
+    padding: 24px; text-align: center;
+  }
+  #err.visible { display: flex; }
+  #err pre {
+    background: #131a23; border: 1px solid #2a3a4a;
+    border-radius: 4px; padding: 12px;
+    font-family: 'Fira Code', Consolas, monospace;
+    font-size: 12px; color: var(--c-postulate); max-width: 600px;
+    white-space: pre-wrap; text-align: left;
+  }
+</style>
+</head>
+<body>
+
+<div id="banner">
+  <strong>agda-deps — Cartographic Atlas</strong>
+  <em>territories sized by definition count · contours = depth from axioms · volcanoes = unfilled holes</em>
+</div>
+
+<div id="root">
+
+  <svg id="map-svg" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="oceanGrad" cx="50%" cy="45%" r="80%">
+        <stop offset="0%" stop-color="#1c2832"/>
+        <stop offset="60%" stop-color="#131c25"/>
+        <stop offset="100%" stop-color="#0a1118"/>
+      </radialGradient>
+      <pattern id="oceanNoise" patternUnits="userSpaceOnUse" width="60" height="60">
+        <rect width="60" height="60" fill="transparent"/>
+        <circle cx="10" cy="14" r="0.6" fill="#3a4a5a" opacity="0.4"/>
+        <circle cx="44" cy="32" r="0.5" fill="#3a4a5a" opacity="0.3"/>
+        <circle cx="22" cy="48" r="0.4" fill="#3a4a5a" opacity="0.5"/>
+        <circle cx="52" cy="8"  r="0.7" fill="#3a4a5a" opacity="0.3"/>
+      </pattern>
+      <filter id="parchmentTint"><feGaussianBlur stdDeviation="0.5"/></filter>
+      <filter id="territoryShadow" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="1.5"/>
+        <feOffset dx="0" dy="1" result="offsetblur"/>
+        <feComponentTransfer><feFuncA type="linear" slope="0.45"/></feComponentTransfer>
+        <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="rough" x="-5%" y="-5%" width="110%" height="110%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="3"/>
+        <feDisplacementMap in="SourceGraphic" scale="2.5"/>
+      </filter>
+      <radialGradient id="volcanoGlow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#f3a13a" stop-opacity="0.9"/>
+        <stop offset="50%" stop-color="#c54b2a" stop-opacity="0.5"/>
+        <stop offset="100%" stop-color="#c54b2a" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="capitalHalo" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#f3d77a" stop-opacity="0.6"/>
+        <stop offset="100%" stop-color="#f3d77a" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <g id="viewport">
+      <rect class="ocean" x="-4000" y="-4000" width="12000" height="12000"/>
+      <rect class="ocean-noise" x="-4000" y="-4000" width="12000" height="12000"/>
+      <g id="continent-layer"></g>
+      <g id="contour-layer"></g>
+      <g id="territory-layer"></g>
+      <g id="hazard-layer"></g>
+      <g id="port-layer"></g>
+      <g id="route-layer"></g>
+      <g id="capital-layer"></g>
+      <g id="label-layer"></g>
+      <g id="continent-name-layer"></g>
+    </g>
+  </svg>
+
+  <svg id="compass" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="40" fill="rgba(13,20,26,0.7)" stroke="#3a2a18" stroke-width="1"/>
+    <circle cx="50" cy="50" r="34" fill="none" stroke="#4a3a28" stroke-width="0.5" stroke-dasharray="2 2"/>
+    <polygon points="50,10 54,50 50,46 46,50" fill="#d4b870" stroke="#3a2a18" stroke-width="0.5"/>
+    <polygon points="50,90 54,50 50,54 46,50" fill="#5a4a38" stroke="#3a2a18" stroke-width="0.5"/>
+    <polygon points="10,50 50,46 54,50 50,54" fill="#5a4a38" stroke="#3a2a18" stroke-width="0.5"/>
+    <polygon points="90,50 50,54 46,50 50,46" fill="#5a4a38" stroke="#3a2a18" stroke-width="0.5"/>
+    <polygon points="22,22 50,48 48,50 26,26" fill="#7a6a48" opacity="0.7"/>
+    <polygon points="78,22 50,48 52,50 74,26" fill="#7a6a48" opacity="0.7"/>
+    <polygon points="22,78 48,52 50,50 26,74" fill="#7a6a48" opacity="0.7"/>
+    <polygon points="78,78 52,52 50,50 74,74" fill="#7a6a48" opacity="0.7"/>
+    <circle cx="50" cy="50" r="3" fill="#e8d49a" stroke="#3a2a18" stroke-width="0.5"/>
+    <text x="50" y="8"  text-anchor="middle" fill="#e8d49a" font-size="7" font-family="Georgia,serif" font-weight="bold">N</text>
+    <text x="50" y="96" text-anchor="middle" fill="#98886a" font-size="6" font-family="Georgia,serif">S</text>
+    <text x="6"  y="52" text-anchor="middle" fill="#98886a" font-size="6" font-family="Georgia,serif">W</text>
+    <text x="94" y="52" text-anchor="middle" fill="#98886a" font-size="6" font-family="Georgia,serif">E</text>
+  </svg>
+
+  <div id="zoom-controls">
+    <button class="zoom-btn" id="zoom-in" title="Zoom in">+</button>
+    <button class="zoom-btn" id="zoom-out" title="Zoom out">&minus;</button>
+    <button class="zoom-btn" id="zoom-reset" title="Re-centre">&#x2299;</button>
+    <button class="zoom-btn" id="zoom-capital" title="Fly to capital">&#9733;</button>
+  </div>
+
+  <div id="weather">
+    <h4><span>&#9888;</span> Weather report — hazards on the map</h4>
+    <div id="weather-list"></div>
+  </div>
+
+  <div id="scale-bar">
+    <div id="scale-text">Scale &middot; 1 league = 1 def</div>
+    <div class="scale-segments">
+      <div class="scale-segment filled"></div>
+      <div class="scale-segment"></div>
+      <div class="scale-segment filled"></div>
+      <div class="scale-segment"></div>
+    </div>
+  </div>
+
+  <div id="legend">
+    <h4>Map legend</h4>
+    <div class="legend-row">
+      <div class="legend-swatch" style="background:#88a878"></div>
+      <div class="legend-text">Mostly defined (verdant)</div>
+    </div>
+    <div class="legend-row">
+      <div class="legend-swatch" style="background:#c8a8a0"></div>
+      <div class="legend-text">Mixed &mdash; some postulates</div>
+    </div>
+    <div class="legend-row">
+      <div class="legend-swatch" style="background:#7a6080"></div>
+      <div class="legend-text">Many holes &mdash; under construction</div>
+    </div>
+    <div class="legend-row">
+      <div class="legend-swatch" style="background:#c8a060"></div>
+      <div class="legend-text">External (foreign land)</div>
+    </div>
+    <div class="legend-row" style="margin-top:6px;border-top:1px dotted #2a3a4a;padding-top:6px">
+      <div class="legend-icon">&#9650;</div>
+      <div class="legend-text">Volcano &mdash; unfilled hole</div>
+    </div>
+    <div class="legend-row">
+      <div class="legend-icon">&#9678;</div>
+      <div class="legend-text">Sinkhole &mdash; postulate</div>
+    </div>
+    <div class="legend-row">
+      <div class="legend-icon">&#9873;</div>
+      <div class="legend-text">Port &mdash; public re-export</div>
+    </div>
+    <div class="legend-row">
+      <div class="legend-icon" style="color:#f3d77a">&#9733;</div>
+      <div class="legend-text">Capital &mdash; entry theorem</div>
+    </div>
+  </div>
+
+  <div id="tooltip"></div>
+
+  <aside id="drawer">
+    <button id="drawer-close" title="Close">&times;</button>
+    <div id="drawer-header">
+      <div id="drawer-eyebrow">Territory of</div>
+      <div id="drawer-title">&mdash;</div>
+      <div id="drawer-subtitle">&mdash;</div>
+    </div>
+    <div id="drawer-stats"></div>
+    <div id="drawer-content"></div>
+  </aside>
+
+  <div id="loading">Charting the realm&hellip;</div>
+  <div id="err"><div><h2 style="margin-bottom:12px;color:var(--c-postulate)">Error</h2><pre id="err-body"></pre></div></div>
+</div>
+
+<script>
+// ─── DATA LOADING PRELUDE ──────────────────────────────────────────────────
+__DATA_LOADING_PRELUDE__
+
+// ─── BASE64 DECODERS (v2 packed schema) ───────────────────────────────────
+function b64Bytes(b64) {
+  if (!b64) return new Uint8Array(0);
+  var bin = atob(b64), out = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64I32(b64) { return new Int32Array(b64Bytes(b64).buffer); }
+
+// ─── FETCH HELPERS ────────────────────────────────────────────────────────
+async function fetchJson(url) {
+  if (GZIP_ENABLED && window.pako) {
+    try {
+      var rg = await fetch(url + '.gz');
+      if (rg.ok) {
+        var ab = await rg.arrayBuffer();
+        var txt = pako.inflate(new Uint8Array(ab), {to:'string'});
+        return JSON.parse(txt);
+      }
+    } catch(e) {}
+  }
+  var r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching ' + url);
+  return r.json();
+}
+function showErr(msg) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('err-body').textContent = msg;
+  document.getElementById('err').classList.add('visible');
+}
+
+// ─── STATE ────────────────────────────────────────────────────────────────
+var G = null;                // raw graph.json payload
+var modules = [];            // [String]
+var entryModule = null;      // String|null
+var externalSet = new Set(); // Set<int>  (indices into modules)
+var moduleCounts = [];       // [[d,p,h,f], …]
+var moduleEdges = [];        // [[srcIdx, tgtIdx], …]   (already-indexed pairs)
+var outByMod = new Map();    // i -> [j …]
+var inByMod  = new Map();    // i -> [j …]
+var depthByMod = null;       // Int32Array | null      (longest-path depth from sources)
+var maxDepth = 0;
+
+// Per-module visual data (filled by computeLayout)
+var modData = [];   // { idx, name, continent, cx, cy, r, defs, defined, postulate, hole, failed, elev, external, isHub, isCapital, hasVolcano, hasSinkhole, hasFailed, desc }
+var continents = []; // { id, members:[idx…], cx, cy, label, foreign, color }
+var portsData = []; // { module, x, y, exports[], to }
+var maxDefs = 1;
+
+// Pan/zoom
+var view = { x: 0, y: 0, scale: 1.0 };
+var SVG = document.getElementById('map-svg');
+var VP  = document.getElementById('viewport');
+var SVG_NS = 'http://www.w3.org/2000/svg';
+
+// ─── INIT ─────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    G = LAZY ? await fetchJson(GRAPH_URL) : GRAPH;
+  } catch(e) {
+    showErr('Failed to load graph data: ' + e.message +
+            (LAZY ? '\n\nThe lazy bundle uses fetch(); serve via HTTP (e.g. `python -m http.server`), not file://.' : ''));
+    return;
+  }
+
+  modules      = G.modules || [];
+  entryModule  = G.entryModule || null;
+  moduleCounts = G.moduleStateCounts || [];
+  // externalModules: base64 Int32 (packed) OR an array of names (expanded fallback).
+  if (G.externalModules) {
+    if (typeof G.externalModules === 'string') {
+      var arr = b64I32(G.externalModules);
+      for (var i = 0; i < arr.length; i++) externalSet.add(arr[i]);
+    } else if (Array.isArray(G.externalModules)) {
+      // expanded-mode emits strings, but the inline/lazy v2 form uses base64.
+      // Support both, just in case future tooling feeds us an expanded blob.
+      var nameToIdx = new Map();
+      for (var k = 0; k < modules.length; k++) nameToIdx.set(modules[k], k);
+      G.externalModules.forEach(function(nm) {
+        if (typeof nm === 'number') externalSet.add(nm);
+        else if (nameToIdx.has(nm)) externalSet.add(nameToIdx.get(nm));
+      });
+    }
+  }
+
+  // moduleEdges: integer pairs (v2 packed/inline) OR string pairs (expanded JSON).
+  var nameIdx = new Map();
+  for (var i = 0; i < modules.length; i++) nameIdx.set(modules[i], i);
+  (G.moduleEdges || []).forEach(function(e) {
+    var s = e[0], t = e[1];
+    if (typeof s === 'string') { s = nameIdx.get(s); t = nameIdx.get(t); }
+    if (s == null || t == null) return;
+    if (s < 0 || t < 0) return;
+    moduleEdges.push([s, t]);
+    if (!outByMod.has(s)) outByMod.set(s, []);
+    if (!inByMod.has(t))  inByMod.set(t,  []);
+    outByMod.get(s).push(t);
+    inByMod.get(t).push(s);
+  });
+
+  // reexports: only present in expanded JSON. Tolerated when absent.
+  // Each row is { from, to, names: [String] } using module names.
+  if (Array.isArray(G.reexports)) {
+    G.reexports.forEach(function(r) {
+      if (!nameIdx.has(r.from)) return;
+      portsData.push({
+        moduleIdx: nameIdx.get(r.from),
+        toIdx: nameIdx.has(r.to) ? nameIdx.get(r.to) : -1,
+        exports: r.names || [],
+        toName: r.to
+      });
+    });
+  }
+
+  document.getElementById('loading').style.display = 'none';
+  if (modules.length === 0) {
+    showErr('Graph contains no modules. Nothing to chart.');
+    return;
+  }
+
+  computeDepths();
+  buildContinents();
+  layoutContinents();
+  layoutTerritories();
+  layoutPorts();
+
+  renderContinents();
+  renderContours();
+  renderTerritories();
+  renderHazards();
+  renderPorts();
+  renderCapital();
+  renderLabels();
+  renderContinentNames();
+  updateWeather();
+  recentreInitial();
+  updateScaleBar();
+
+  window.addEventListener('resize', recentreInitial);
+}
+
+// ─── DEPTH (longest path from sources) ────────────────────────────────────
+// Treat moduleEdges as src → tgt. A "source" has no incoming edges. We
+// compute the longest path from any source to each module via a topological
+// pass; cycles (shouldn't happen — Agda's module graph is a DAG) get depth 0.
+function computeDepths() {
+  var n = modules.length;
+  var depth = new Int32Array(n);
+  var indeg = new Int32Array(n);
+  moduleEdges.forEach(function(e) { indeg[e[1]]++; });
+
+  var queue = [];
+  for (var i = 0; i < n; i++) if (indeg[i] === 0) queue.push(i);
+
+  // Kahn's algorithm with longest-path update.
+  while (queue.length) {
+    var u = queue.shift();
+    var outs = outByMod.get(u) || [];
+    for (var k = 0; k < outs.length; k++) {
+      var v = outs[k];
+      if (depth[u] + 1 > depth[v]) depth[v] = depth[u] + 1;
+      if (--indeg[v] === 0) queue.push(v);
+    }
+  }
+  depthByMod = depth;
+  for (var i2 = 0; i2 < n; i2++) if (depth[i2] > maxDepth) maxDepth = depth[i2];
+}
+
+// ─── CONTINENTS ───────────────────────────────────────────────────────────
+// A "continent" is the first dotted segment of the module name. Modules
+// without a dot become their own continent named after themselves; this
+// keeps tiny corpuses like the test suite legible.
+function buildContinents() {
+  var bucket = new Map();
+  for (var i = 0; i < modules.length; i++) {
+    var nm = modules[i];
+    var head = nm.split('.')[0] || nm;
+    if (externalSet.has(i)) {
+      // group all externals into a single "Foreign Land" continent so they
+      // don't fragment the map into tiny stubs of Agda.Builtin, …
+      head = '__foreign__';
+    }
+    if (!bucket.has(head)) bucket.set(head, []);
+    bucket.get(head).push(i);
+  }
+  // Sort continents by member count (descending) so the largest lands
+  // anchor the centre of the layout.
+  continents = Array.from(bucket.entries()).map(function(p) {
+    var foreign = (p[0] === '__foreign__');
+    return {
+      id:      foreign ? 'foreign' : p[0],
+      label:   foreign ? 'FOREIGN LAND' : p[0].toUpperCase(),
+      members: p[1].sort(function(a,b){ return modules[a] < modules[b] ? -1 : 1; }),
+      foreign: foreign,
+      color:   continentColor(p[0])
+    };
+  }).sort(function(a, b) { return b.members.length - a.members.length; });
+}
+
+function continentColor(head) {
+  if (head === '__foreign__') return '#5a4630';
+  // Deterministic muted palette per continent name.
+  var h = 0;
+  for (var i = 0; i < head.length; i++) h = (h * 31 + head.charCodeAt(i)) >>> 0;
+  var palette = ['#5a4a32', '#4a4a32', '#3a3a48', '#3a4a40', '#4a3a40', '#3a4a50', '#503a32', '#3a4a3a'];
+  return palette[h % palette.length];
+}
+
+// ─── LAYOUT ───────────────────────────────────────────────────────────────
+// Continents are laid out on a coarse ring around the map centre, with
+// the largest non-foreign continent at the centre when it dominates.
+// Foreign Land is pushed to the far outside.
+function layoutContinents() {
+  var nonForeign = continents.filter(function(c){return !c.foreign;});
+  var foreign    = continents.filter(function(c){return c.foreign;});
+
+  var cx0 = 0, cy0 = 0;
+  // First non-foreign continent goes to the centre; the rest ring around.
+  var others = nonForeign.slice(1);
+  if (nonForeign.length > 0) {
+    nonForeign[0].cx = cx0; nonForeign[0].cy = cy0;
+  }
+  var ringR = Math.max(420, 180 + others.length * 90);
+  others.forEach(function(c, i) {
+    var ang = (i / Math.max(1, others.length)) * Math.PI * 2 - Math.PI / 2;
+    c.cx = cx0 + ringR * Math.cos(ang);
+    c.cy = cy0 + ringR * Math.sin(ang);
+  });
+  // Foreign Land sits on an outer arc so it looks like overseas islands.
+  foreign.forEach(function(c, i) {
+    var ang = (i / Math.max(1, foreign.length)) * Math.PI * 2 + Math.PI / 4;
+    var R = ringR + 480;
+    c.cx = cx0 + R * Math.cos(ang);
+    c.cy = cy0 + R * Math.sin(ang);
+  });
+}
+
+function layoutTerritories() {
+  // Inside each continent, lay member modules out on a sunflower-ish disc
+  // sorted by elevation (high-elevation theorems toward the rim, low-
+  // elevation foundations near the centre).
+  modData = new Array(modules.length);
+  for (var c = 0; c < continents.length; c++) {
+    var cont = continents[c];
+    var k = cont.members.length;
+    // Sort within continent: low elevation first (drawn near centre).
+    var sorted = cont.members.slice().sort(function(a, b) {
+      var da = depthByMod ? depthByMod[a] : 0;
+      var db = depthByMod ? depthByMod[b] : 0;
+      if (da !== db) return da - db;
+      return modules[a] < modules[b] ? -1 : 1;
+    });
+    // Sunflower spacing.
+    var golden = Math.PI * (3 - Math.sqrt(5));
+    // Auto-scale continent radius by member count.
+    var contR = 80 + Math.sqrt(k) * 70;
+    for (var i = 0; i < k; i++) {
+      var mi = sorted[i];
+      var c2 = moduleCounts[mi] || [0,0,0,0];
+      var total = c2[0] + c2[1] + c2[2] + c2[3];
+      if (total > maxDefs) maxDefs = total;
+      // Place on sunflower; radius grows with sqrt(i/k) so packing is even.
+      var rr = contR * Math.sqrt((i + 0.5) / Math.max(1, k));
+      var ang = i * golden;
+      var cx = cont.cx + rr * Math.cos(ang);
+      var cy = cont.cy + rr * Math.sin(ang);
+      // Territory radius: sublinear in def count so a Prelude with 5k defs
+      // doesn't dwarf everything else. Floor at 14 so tiny modules stay legible.
+      var territoryR = Math.max(14, Math.min(45, 8 + Math.sqrt(total) * 4.5));
+      var failed = (c2[3] > 0);
+      var hasVolcano  = c2[2] > 0;
+      var hasSinkhole = c2[1] > 0;
+      modData[mi] = {
+        idx: mi,
+        name: modules[mi],
+        continent: cont.id,
+        cx: cx, cy: cy, r: territoryR,
+        defs: total,
+        defined: c2[0], postulate: c2[1], hole: c2[2], failed: c2[3],
+        elev: depthByMod ? depthByMod[mi] : 0,
+        external: externalSet.has(mi),
+        isCapital: (modules[mi] === entryModule),
+        isHub: (outByMod.get(mi) || []).length + (inByMod.get(mi) || []).length >= 4,
+        hasVolcano: hasVolcano,
+        hasSinkhole: hasSinkhole,
+        hasFailed: failed
+      };
+    }
+  }
+}
+
+function layoutPorts() {
+  // Position ports just outside the source-module's territory, on the
+  // bearing toward the re-export target if known, otherwise toward the
+  // map centre. We sample at most 6 ports per source module so even
+  // re-export-heavy modules stay clean.
+  var perMod = new Map();
+  portsData.forEach(function(p) {
+    var src = modData[p.moduleIdx];
+    if (!src) return;
+    if (!perMod.has(p.moduleIdx)) perMod.set(p.moduleIdx, []);
+    perMod.get(p.moduleIdx).push(p);
+  });
+  perMod.forEach(function(arr, srcIdx) {
+    var src = modData[srcIdx];
+    var k = Math.min(arr.length, 6);
+    for (var i = 0; i < k; i++) {
+      var p = arr[i];
+      var tgt = (p.toIdx >= 0) ? modData[p.toIdx] : null;
+      var bx, by;
+      if (tgt) { bx = tgt.cx; by = tgt.cy; }
+      else     { bx = 0;       by = 0;       }
+      var dx = bx - src.cx, dy = by - src.cy;
+      var len = Math.hypot(dx, dy) || 1;
+      // Stagger multiple ports around the rim.
+      var jitter = (i - (k - 1) / 2) * 0.25;
+      var ang = Math.atan2(dy, dx) + jitter;
+      var rim = src.r * 0.92;
+      p.x = src.cx + Math.cos(ang) * rim;
+      p.y = src.cy + Math.sin(ang) * rim;
+    }
+    // Trim to first k entries so we don't render hidden ones.
+    perMod.set(srcIdx, arr.slice(0, k));
+  });
+  // Flatten back into portsData (in case we trimmed).
+  portsData = [];
+  perMod.forEach(function(arr) { arr.forEach(function(p){ portsData.push(p); }); });
+}
+
+// ─── SVG HELPERS ──────────────────────────────────────────────────────────
+function el(tag, attrs, parent) {
+  var n = document.createElementNS(SVG_NS, tag);
+  if (attrs) for (var k in attrs) n.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function hashStr(s) {
+  var h = 2166136261;
+  for (var i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+function territoryPath(cx, cy, r, seed, points, jitter) {
+  points = points || 14;
+  jitter = jitter == null ? 0.35 : jitter;
+  var rng = mulberry32(seed);
+  var pts = [];
+  for (var i = 0; i < points; i++) {
+    var a = (i / points) * Math.PI * 2;
+    var rr = r * (1 - jitter * 0.5 + rng() * jitter);
+    pts.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr]);
+  }
+  var d = '';
+  for (var i = 0; i < pts.length; i++) {
+    var p0 = pts[(i - 1 + pts.length) % pts.length];
+    var p1 = pts[i];
+    var p2 = pts[(i + 1) % pts.length];
+    var p3 = pts[(i + 2) % pts.length];
+    if (i === 0) d += 'M ' + p1[0].toFixed(2) + ' ' + p1[1].toFixed(2);
+    var c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+    var c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+    d += ' C ' + c1[0].toFixed(2) + ' ' + c1[1].toFixed(2)
+       + ', '  + c2[0].toFixed(2) + ' ' + c2[1].toFixed(2)
+       + ', '  + p2[0].toFixed(2) + ' ' + p2[1].toFixed(2);
+  }
+  return d + ' Z';
+}
+
+// Mix state-mix into a parchment-tinted fill.
+function territoryFill(m) {
+  if (m.external) return '#9a8050';
+  var total = m.defined + m.postulate + m.hole || 1;
+  var greenF  = m.defined / total;
+  var redF    = m.postulate / total;
+  var purpleF = m.hole / total;
+  var failedF = m.failed / total;
+  // Verdant green = defined; russet = postulate; mauve = hole; grey = failed.
+  var greenCol  = [136, 168, 120];
+  var redCol    = [200, 168, 160];
+  var purpleCol = [122, 96, 128];
+  var failCol   = [120, 110, 110];
+  var rgb = [
+    Math.round(greenCol[0]*greenF + redCol[0]*redF + purpleCol[0]*purpleF + failCol[0]*failedF),
+    Math.round(greenCol[1]*greenF + redCol[1]*redF + purpleCol[1]*purpleF + failCol[1]*failedF),
+    Math.round(greenCol[2]*greenF + redCol[2]*redF + purpleCol[2]*purpleF + failCol[2]*failedF)
+  ];
+  // Higher peaks are slightly bleached.
+  var elevTint = (m.elev || 0) / Math.max(8, maxDepth + 1);
+  rgb[0] = Math.min(255, rgb[0] + elevTint * 35);
+  rgb[1] = Math.min(255, rgb[1] + elevTint * 30);
+  rgb[2] = Math.min(255, rgb[2] + elevTint * 20);
+  return 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')';
+}
+
+// ─── RENDER ───────────────────────────────────────────────────────────────
+function renderContinents() {
+  var layer = document.getElementById('continent-layer');
+  continents.forEach(function(c) {
+    if (!c.members.length) return;
+    var minx=1e9, miny=1e9, maxx=-1e9, maxy=-1e9;
+    c.members.forEach(function(mi) {
+      var m = modData[mi];
+      if (!m) return;
+      minx = Math.min(minx, m.cx - m.r);
+      maxx = Math.max(maxx, m.cx + m.r);
+      miny = Math.min(miny, m.cy - m.r);
+      maxy = Math.max(maxy, m.cy + m.r);
+    });
+    if (minx === 1e9) return;
+    var cx = (minx + maxx) / 2;
+    var cy = (miny + maxy) / 2;
+    var r  = Math.max(maxx - minx, maxy - miny) / 2 + 40;
+    var d  = territoryPath(cx, cy, r, hashStr(c.id) ^ 0xC0AC, 22, c.foreign ? 0.18 : 0.25);
+    var p = el('path', {
+      d: d, fill: c.color,
+      class: 'continent-bg' + (c.foreign ? ' foreign' : ''),
+      opacity: c.foreign ? 0.45 : 0.55
+    }, layer);
+    p.setAttribute('filter', 'url(#rough)');
+    c.bounds = { cx: cx, cy: cy, r: r };
+  });
+}
+
+function renderContours() {
+  var layer = document.getElementById('contour-layer');
+  modData.forEach(function(m) {
+    if (!m) return;
+    var seed = hashStr(m.name);
+    var rings = 2 + Math.min(3, Math.floor((m.elev || 0) / 2));
+    for (var i = 1; i <= rings; i++) {
+      var rr = m.r * (0.45 + i * 0.18);
+      if (rr > m.r * 0.98) continue;
+      el('path', {
+        d: territoryPath(m.cx, m.cy, rr, seed + i * 7, 14, 0.15),
+        class: 'contour'
+      }, layer);
+    }
+  });
+}
+
+function renderTerritories() {
+  var layer = document.getElementById('territory-layer');
+  modData.forEach(function(m) {
+    if (!m) return;
+    var d = territoryPath(m.cx, m.cy, m.r, hashStr(m.name), 16, 0.32);
+    var path = el('path', {
+      d: d, class: 'territory', 'data-mod': String(m.idx), fill: territoryFill(m)
+    }, layer);
+    path.setAttribute('filter', 'url(#territoryShadow)');
+    path.addEventListener('click', function(e) { e.stopPropagation(); selectTerritory(m.idx); });
+    path.addEventListener('mouseenter', function() { onTerritoryHover(m.idx, true); });
+    path.addEventListener('mouseleave', function() { onTerritoryHover(m.idx, false); });
+    path.addEventListener('mousemove', function(e) { showTooltip(e, m); });
+  });
+}
+
+function renderHazards() {
+  var layer = document.getElementById('hazard-layer');
+  modData.forEach(function(m) {
+    if (!m) return;
+    if (m.hole > 0) {
+      // Volcano count scales with H count, capped at 3.
+      var n = Math.min(3, Math.ceil(m.hole / 2));
+      var rng = mulberry32(hashStr(m.name) ^ 0xF00D);
+      for (var i = 0; i < n; i++) {
+        var a = rng() * Math.PI * 2;
+        var rr = m.r * 0.45 * rng();
+        var x = m.cx + Math.cos(a) * rr;
+        var y = m.cy + Math.sin(a) * rr;
+        el('circle', { cx: x, cy: y - 8, r: 7, class: 'hazard hazard-smoke', fill: 'url(#volcanoGlow)' }, layer);
+        var sz = 5;
+        el('polygon', {
+          points: (x-sz)+','+(y+sz)+' '+(x+sz)+','+(y+sz)+' '+x+','+(y-sz),
+          class: 'hazard hazard-volcano'
+        }, layer);
+        el('circle', { cx: x, cy: y - sz + 1.5, r: 1.4, fill: '#f3a13a', class: 'hazard' }, layer);
+      }
+    }
+    if (m.postulate > 0 && !m.external) {
+      var n2 = Math.min(3, Math.ceil(m.postulate / 3));
+      var rng2 = mulberry32(hashStr(m.name) ^ 0xBABE);
+      for (var j = 0; j < n2; j++) {
+        var a2 = rng2() * Math.PI * 2 + 1.2;
+        var rr2 = m.r * 0.5 * rng2() + m.r * 0.15;
+        var x2 = m.cx + Math.cos(a2) * rr2;
+        var y2 = m.cy + Math.sin(a2) * rr2;
+        el('circle', {
+          cx: x2, cy: y2, r: 5, fill: 'none',
+          stroke: '#5a3a72', 'stroke-width': 0.8, 'stroke-dasharray': '1.5 1.2',
+          class: 'hazard'
+        }, layer);
+        el('circle', { cx: x2, cy: y2, r: 2.8, class: 'hazard hazard-sinkhole' }, layer);
+      }
+    }
+    if (m.failed > 0) {
+      // Failed modules get a single ruin glyph.
+      el('rect', {
+        x: m.cx - 4, y: m.cy - 4, width: 8, height: 8,
+        class: 'hazard hazard-failed', transform: 'rotate(45 ' + m.cx + ' ' + m.cy + ')'
+      }, layer);
+    }
+  });
+}
+
+function renderPorts() {
+  var layer = document.getElementById('port-layer');
+  portsData.forEach(function(p) {
+    if (p.x == null || p.y == null) return;
+    var g = el('g', { class: 'port-group' }, layer);
+    el('rect', { x: p.x - 4, y: p.y - 1.5, width: 8, height: 3, class: 'port', rx: 0.5 }, g);
+    el('line', { x1: p.x + 3, y1: p.y - 1.5, x2: p.x + 3, y2: p.y - 9, stroke: '#3a2a18', 'stroke-width': 0.6 }, g);
+    el('polygon', {
+      points: (p.x+3)+','+(p.y-9)+' '+(p.x+9)+','+(p.y-7.5)+' '+(p.x+3)+','+(p.y-6),
+      class: 'port-flag'
+    }, g);
+    g.addEventListener('mouseenter', function(e) {
+      var srcName = modules[p.moduleIdx] || '?';
+      var n = (p.exports && p.exports.length) || 0;
+      showRawTooltip(e,
+        '<div class="tip-mod">Port of ' + escapeHtml(srcName) + '</div>' +
+        '<div class="tip-meta">re-exports ' + n + ' names &rarr; ' + escapeHtml(p.toName || '?') + '</div>');
+    });
+    g.addEventListener('mousemove', function(e) {
+      var t = document.getElementById('tooltip');
+      t.style.left = (e.clientX + 14) + 'px';
+      t.style.top  = (e.clientY + 14) + 'px';
+    });
+    g.addEventListener('mouseleave', hideTooltip);
+  });
+}
+
+function renderCapital() {
+  var layer = document.getElementById('capital-layer');
+  var cap = modData.find(function(m){ return m && m.isCapital; });
+  if (!cap) return;
+  el('circle', { cx: cap.cx, cy: cap.cy, r: 35, fill: 'url(#capitalHalo)', 'pointer-events': 'none' }, layer);
+  el('circle', {
+    cx: cap.cx, cy: cap.cy, r: 14, fill: 'none', stroke: '#f3d77a',
+    'stroke-width': 1.5, class: 'pulse-ring', 'pointer-events': 'none'
+  }, layer);
+  // Star
+  var points = [];
+  for (var i = 0; i < 10; i++) {
+    var a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+    var rr = i % 2 === 0 ? 9 : 4;
+    points.push([cap.cx + Math.cos(a) * rr, cap.cy + Math.sin(a) * rr]);
+  }
+  el('polygon', {
+    points: points.map(function(p){return p.map(function(v){return v.toFixed(1);}).join(',');}).join(' '),
+    class: 'capital', 'pointer-events': 'none'
+  }, layer);
+  var tag = el('g', { 'pointer-events': 'none' }, layer);
+  el('rect', {
+    x: cap.cx + 14, y: cap.cy - 8, width: 70, height: 12,
+    fill: '#0d141a', stroke: '#f3d77a', 'stroke-width': 0.6, rx: 1, opacity: 0.85
+  }, tag);
+  var t = el('text', {
+    x: cap.cx + 48, y: cap.cy + 1, 'text-anchor': 'middle',
+    fill: '#f3d77a', 'font-size': 8, 'font-family': 'Georgia, serif',
+    'font-variant': 'small-caps', 'letter-spacing': '0.15em'
+  }, tag);
+  t.textContent = 'You are here';
+}
+
+function renderLabels() {
+  var layer = document.getElementById('label-layer');
+  modData.forEach(function(m) {
+    if (!m) return;
+    // Drop labels for very small territories at this zoom level; they
+    // would just be visual noise.
+    if (m.r < 16) return;
+    var short = m.name.split('.').slice(-1)[0] || m.name;
+    var t = el('text', {
+      x: m.cx, y: m.cy + 4,
+      class: 'territory-label' + (m.isHub ? ' large' : '')
+    }, layer);
+    t.textContent = short;
+  });
+}
+
+function renderContinentNames() {
+  var layer = document.getElementById('continent-name-layer');
+  continents.forEach(function(c) {
+    if (!c.bounds) return;
+    var t = el('text', {
+      x: c.bounds.cx, y: c.bounds.cy - c.bounds.r - 14,
+      class: 'continent-name'
+    }, layer);
+    t.textContent = c.label;
+  });
+}
+
+// ─── HOVER / TRADE-ROUTE HIGHLIGHTING ─────────────────────────────────────
+function onTerritoryHover(modIdx, on) {
+  var layer = document.getElementById('route-layer');
+  layer.innerHTML = '';
+  document.querySelectorAll('.territory').forEach(function(p) {
+    p.classList.remove('route-source', 'route-target');
+  });
+  if (!on) { hideTooltip(); return; }
+
+  var m = modData[modIdx];
+  if (!m) return;
+
+  (outByMod.get(modIdx) || []).forEach(function(tgt) {
+    var tm = modData[tgt];
+    if (!tm) return;
+    drawRoute(m, tm, 'outgoing');
+    var el = document.querySelector('.territory[data-mod="' + tgt + '"]');
+    if (el) el.classList.add('route-target');
+  });
+  (inByMod.get(modIdx) || []).forEach(function(src) {
+    var sm = modData[src];
+    if (!sm) return;
+    drawRoute(sm, m, 'incoming');
+    var el = document.querySelector('.territory[data-mod="' + src + '"]');
+    if (el) el.classList.add('route-source');
+  });
+}
+
+function drawRoute(a, b, kind) {
+  var layer = document.getElementById('route-layer');
+  var mx = (a.cx + b.cx) / 2;
+  var my = (a.cy + b.cy) / 2;
+  var dx = b.cx - a.cx, dy = b.cy - a.cy;
+  var len = Math.hypot(dx, dy) || 1;
+  var nx = -dy / len, ny = dx / len;
+  var bow = Math.min(60, len * 0.18);
+  var cx = mx + nx * bow;
+  var cy = my + ny * bow;
+  el('path', {
+    d: 'M ' + a.cx + ' ' + a.cy + ' Q ' + cx + ' ' + cy + ' ' + b.cx + ' ' + b.cy,
+    class: 'route ' + kind + ' visible'
+  }, layer);
+  var t = 0.5;
+  var px = (1-t)*(1-t)*a.cx + 2*(1-t)*t*cx + t*t*b.cx;
+  var py = (1-t)*(1-t)*a.cy + 2*(1-t)*t*cy + t*t*b.cy;
+  el('circle', {
+    cx: px, cy: py, r: 2.2,
+    fill: kind === 'outgoing' ? '#d97e3a' : '#6fa66f',
+    stroke: '#1a1208', 'stroke-width': 0.4
+  }, layer);
+}
+
+// ─── TOOLTIP ──────────────────────────────────────────────────────────────
+function showTooltip(e, m) {
+  var elev = m.elev != null ? 'elevation ' + m.elev : '';
+  var stateLine = m.external
+    ? '<span style="color:#c8a060">foreign territory</span>'
+    : '<span style="color:var(--c-defined)">' + m.defined + 'D</span>'
+      + ' &middot; <span style="color:var(--c-postulate)">' + m.postulate + 'P</span>'
+      + ' &middot; <span style="color:var(--c-hole)">' + m.hole + 'H</span>'
+      + (m.failed > 0 ? ' &middot; <span style="color:var(--c-failed)">' + m.failed + 'F</span>' : '');
+  var html =
+    '<div class="tip-mod">' + escapeHtml(m.name) + '</div>' +
+    '<div class="tip-meta">' + m.defs + ' defs &middot; ' + stateLine + (elev ? ' &middot; ' + elev : '') + '</div>';
+  showRawTooltip(e, html);
+}
+function showRawTooltip(e, html) {
+  var tip = document.getElementById('tooltip');
+  tip.innerHTML = html;
+  tip.style.display = 'block';
+  tip.style.left = (e.clientX + 14) + 'px';
+  tip.style.top  = (e.clientY + 14) + 'px';
+}
+function hideTooltip() {
+  document.getElementById('tooltip').style.display = 'none';
+}
+
+// ─── DRAWER ───────────────────────────────────────────────────────────────
+function selectTerritory(modIdx) {
+  var m = modData[modIdx];
+  if (!m) return;
+  document.querySelectorAll('.territory.selected').forEach(function(p) { p.classList.remove('selected'); });
+  var path = document.querySelector('.territory[data-mod="' + modIdx + '"]');
+  if (path) path.classList.add('selected');
+
+  document.getElementById('drawer-title').textContent = m.name;
+  var subtitleParts = [];
+  var cont = continents.find(function(c){ return c.id === m.continent; });
+  if (cont) subtitleParts.push(cont.label);
+  if (m.isCapital) subtitleParts.push('CAPITAL');
+  if (m.isHub)     subtitleParts.push('regional hub');
+  if (m.external)  subtitleParts.push('foreign');
+  document.getElementById('drawer-subtitle').textContent = subtitleParts.join(' · ') || '—';
+
+  var stats = document.getElementById('drawer-stats');
+  stats.innerHTML =
+    '<div class="stat-cell"><div class="stat-num">' + m.defs + '</div><div class="stat-label">defs</div></div>' +
+    '<div class="stat-cell"><div class="stat-num">' + m.elev + '</div><div class="stat-label">elev</div></div>' +
+    '<div class="stat-cell"><div class="stat-num">' + ((outByMod.get(m.idx) || []).length) + '</div><div class="stat-label">imports</div></div>' +
+    '<div class="stat-cell green"><div class="stat-num">' + m.defined + '</div><div class="stat-label">defined</div></div>' +
+    '<div class="stat-cell red"><div class="stat-num">' + m.postulate + '</div><div class="stat-label">postulate</div></div>' +
+    '<div class="stat-cell purple"><div class="stat-num">' + m.hole + '</div><div class="stat-label">hole</div></div>';
+
+  var content = document.getElementById('drawer-content');
+  var html = '';
+  if (m.external) {
+    html += '<div style="font-size:12px;color:#98886a;font-style:italic;'
+         + 'padding:6px 0 4px;font-family:Georgia,serif;line-height:1.5">'
+         + 'Foreign land &mdash; definitions held abroad.</div>';
+  }
+  var outs = (outByMod.get(m.idx) || []);
+  var ins  = (inByMod.get(m.idx)  || []);
+  if (outs.length) {
+    html += '<div class="drawer-section-title">Outgoing trade · imports</div>';
+    outs.slice().sort(function(a,b){ return modules[a]<modules[b]?-1:1; }).forEach(function(t) {
+      html += '<div class="neighbour-row" data-jump="' + t + '"><span class="neighbour-arrow">&rarr;</span><span>' + escapeHtml(modules[t]) + '</span></div>';
+    });
+  }
+  if (ins.length) {
+    html += '<div class="drawer-section-title">Incoming trade · imported by</div>';
+    ins.slice().sort(function(a,b){ return modules[a]<modules[b]?-1:1; }).forEach(function(s) {
+      html += '<div class="neighbour-row" data-jump="' + s + '"><span class="neighbour-arrow">&larr;</span><span>' + escapeHtml(modules[s]) + '</span></div>';
+    });
+  }
+  var ports = portsData.filter(function(p){ return p.moduleIdx === m.idx; });
+  if (ports.length) {
+    html += '<div class="drawer-section-title">Ports · public re-exports</div>';
+    ports.forEach(function(p) {
+      var nm = (p.exports || []).slice(0, 4).join(', ') + ((p.exports || []).length > 4 ? ', &hellip;' : '');
+      html += '<div class="neighbour-row" style="color:#f3d77a">'
+        + '<span class="neighbour-arrow">&#9873;</span>'
+        + '<span>' + escapeHtml(nm) + ' &rarr; <span style="color:#7a8a98">' + escapeHtml(p.toName || '?') + '</span></span></div>';
+    });
+  }
+  content.innerHTML = html;
+  content.querySelectorAll('.neighbour-row[data-jump]').forEach(function(r) {
+    r.addEventListener('click', function() {
+      var idx = parseInt(r.dataset.jump, 10);
+      var tgt = modData[idx];
+      if (tgt) { selectTerritory(idx); flyTo(tgt.cx, tgt.cy); }
+    });
+  });
+  document.getElementById('drawer').classList.add('open');
+}
+document.getElementById('drawer-close').addEventListener('click', function() {
+  document.getElementById('drawer').classList.remove('open');
+  document.querySelectorAll('.territory.selected').forEach(function(p) { p.classList.remove('selected'); });
+});
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'})[c];
+  });
+}
+
+// ─── WEATHER REPORT ───────────────────────────────────────────────────────
+function updateWeather() {
+  var list = document.getElementById('weather-list');
+  var items = [];
+  modData.forEach(function(m) {
+    if (!m) return;
+    if (m.hole > 0)                       items.push({ kind: 'volcano',  idx: m.idx, mod: m.name, count: m.hole,      label: 'unfilled hole'  + (m.hole > 1 ? 's' : '') });
+    if (m.postulate > 0 && !m.external)   items.push({ kind: 'sinkhole', idx: m.idx, mod: m.name, count: m.postulate, label: 'postulate'      + (m.postulate > 1 ? 's' : '') });
+    if (m.failed > 0)                     items.push({ kind: 'failed',   idx: m.idx, mod: m.name, count: m.failed,    label: 'failed module'  + (m.failed > 1 ? 's' : '') });
+  });
+  items.sort(function(a,b){ return b.count - a.count; });
+  if (!items.length) {
+    list.innerHTML = '<div class="weather-empty">Fair skies &mdash; no hazards detected.</div>';
+    return;
+  }
+  var glyph = { volcano: '&#9650;', sinkhole: '&#9678;', failed: '&#10005;' };
+  list.innerHTML = items.slice(0, 18).map(function(it) {
+    return '<div class="weather-row ' + it.kind + '" data-mod="' + it.idx + '">'
+      + '<span class="weather-icon">' + glyph[it.kind] + '</span>'
+      + '<span>' + escapeHtml(it.mod) + '</span>'
+      + '<span style="color:#7a8a98;font-size:10px;margin-left:auto">' + it.count + ' ' + it.label + '</span>'
+      + '</div>';
+  }).join('');
+  list.querySelectorAll('.weather-row').forEach(function(r) {
+    r.addEventListener('click', function() {
+      var idx = parseInt(r.dataset.mod, 10);
+      var m = modData[idx];
+      if (m) { selectTerritory(idx); flyTo(m.cx, m.cy); }
+    });
+  });
+}
+
+// ─── PAN / ZOOM ───────────────────────────────────────────────────────────
+function applyView() {
+  VP.setAttribute('transform', 'translate(' + view.x + ', ' + view.y + ') scale(' + view.scale + ')');
+}
+function flyTo(cx, cy) {
+  var rect = SVG.getBoundingClientRect();
+  view.scale = Math.max(view.scale, 1.1);
+  view.x = rect.width / 2 - cx * view.scale;
+  view.y = rect.height / 2 - cy * view.scale;
+  applyView();
+}
+function recentreInitial() {
+  var rect = SVG.getBoundingClientRect();
+  // Compute world bounds across all territories + continents.
+  var minx=1e9, miny=1e9, maxx=-1e9, maxy=-1e9;
+  modData.forEach(function(m) {
+    if (!m) return;
+    minx = Math.min(minx, m.cx - m.r);
+    maxx = Math.max(maxx, m.cx + m.r);
+    miny = Math.min(miny, m.cy - m.r);
+    maxy = Math.max(maxy, m.cy + m.r);
+  });
+  if (minx === 1e9) { minx = -200; maxx = 200; miny = -200; maxy = 200; }
+  var w = maxx - minx, h = maxy - miny;
+  // Leave padding for compass + drawer.
+  var pad = 80, drawerPad = 360;
+  view.scale = Math.min((rect.width - drawerPad - pad) / w, (rect.height - pad) / h);
+  view.scale = Math.max(0.15, Math.min(view.scale, 2.5));
+  var cx = (minx + maxx) / 2, cy = (miny + maxy) / 2;
+  view.x = (rect.width - drawerPad) / 2 - cx * view.scale;
+  view.y = rect.height / 2 - cy * view.scale + 8;
+  applyView();
+}
+
+function updateScaleBar() {
+  // "1 league" = how many defs roughly fit per scale segment.
+  // We approximate by inverse of overall scale & maxDefs.
+  var seg = Math.max(1, Math.round(maxDefs / 4));
+  document.getElementById('scale-text').textContent =
+    'Scale · 1 league ≈ ' + seg + ' defs';
+}
+
+var dragging = false, dragStart = null;
+SVG.addEventListener('mousedown', function(e) {
+  if (e.target.closest('.territory, .port-group')) return;
+  dragging = true;
+  dragStart = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
+  SVG.classList.add('dragging');
+});
+window.addEventListener('mousemove', function(e) {
+  if (!dragging) return;
+  view.x = dragStart.vx + (e.clientX - dragStart.x);
+  view.y = dragStart.vy + (e.clientY - dragStart.y);
+  applyView();
+});
+window.addEventListener('mouseup', function() {
+  dragging = false; SVG.classList.remove('dragging');
+});
+SVG.addEventListener('wheel', function(e) {
+  e.preventDefault();
+  var rect = SVG.getBoundingClientRect();
+  var mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  var factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  var newScale = Math.min(8, Math.max(0.08, view.scale * factor));
+  view.x = mx - (mx - view.x) * (newScale / view.scale);
+  view.y = my - (my - view.y) * (newScale / view.scale);
+  view.scale = newScale;
+  applyView();
+}, { passive: false });
+
+document.getElementById('zoom-in').addEventListener('click', function() {
+  view.scale = Math.min(8, view.scale * 1.2); applyView();
+});
+document.getElementById('zoom-out').addEventListener('click', function() {
+  view.scale = Math.max(0.08, view.scale / 1.2); applyView();
+});
+document.getElementById('zoom-reset').addEventListener('click', recentreInitial);
+document.getElementById('zoom-capital').addEventListener('click', function() {
+  var cap = modData.find(function(m){ return m && m.isCapital; });
+  if (cap) { selectTerritory(cap.idx); flyTo(cap.cx, cap.cy); }
+});
+
+SVG.addEventListener('click', function(e) {
+  if (e.target.closest('.territory, .port-group')) return;
+  document.getElementById('drawer').classList.remove('open');
+  document.querySelectorAll('.territory.selected').forEach(function(p) { p.classList.remove('selected'); });
+});
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  agda-deps · Sunburst hierarchy view.
+
+  Agda's dotted module names ARE a tree (Protocol.Example.Properties.Liveness.Lemma6
+  is five levels deep), so we render the whole project as a sunburst:
+  concentric rings == nesting depth, arc length proportional to descendant
+  leaf-module count, arc fill is a weighted mix over D/P/H/F state counts.
+
+  Click an arc to zoom polar-style into that subtree; click the centre
+  disc (or the SVG background) to zoom back out. The right pane lists
+  the leaf modules currently in focus plus what is incomplete in scope.
+
+  All data comes from the v2 graph.json schema (modules, moduleEdges,
+  moduleStateCounts, entryModule, externalModules) — same as every other
+  agda-deps view; nothing here is bespoke.
+-->
+<meta charset="UTF-8">
+<title>agda-deps — Sunburst Hierarchy</title>
+<script>window.__gzipEnabled = __GZIP_ENABLED__;</script>
+<script>
+  if (window.__gzipEnabled && typeof DecompressionStream === 'undefined') {
+    document.write('<scr'+'ipt src="https://unpkg.com/pako@2.1.0/dist/pako_inflate.min.js"></scr'+'ipt>');
+  }
+</script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js"></script>
+<style>
+  :root {
+    --c-defined:   __COLOR_DEFINED__;
+    --c-postulate: __COLOR_POSTULATE__;
+    --c-hole:      __COLOR_HOLE__;
+    --c-failed:    __COLOR_FAILED__;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; font-size: 13px; background: #0f1115; color: #d4d4d4; overflow: hidden; }
+
+  /* ── BANNER ── */
+  #banner {
+    background: linear-gradient(90deg, #1a1f2e 0%, #232a3a 100%); color: #cdd6f4; padding: 6px 14px;
+    font-size: 12px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #2a2f3a;
+  }
+  #banner strong { font-weight: 600; color: #89dceb; letter-spacing: 0.02em; }
+  #banner .pill {
+    background: rgba(137,220,235,0.1); border: 1px solid rgba(137,220,235,0.3);
+    padding: 1px 8px; border-radius: 10px; font-size: 11px; color: #89dceb;
+  }
+
+  /* ── ROOT ── */
+  #root { display: flex; height: calc(100% - 32px); }
+
+  /* ── CENTRE STAGE (SUNBURST) ── */
+  #stage {
+    flex: 1; min-width: 400px; position: relative; background:
+      radial-gradient(circle at 50% 50%, #161a24 0%, #0f1115 70%);
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  #sunburst-svg { width: 100%; height: 100%; cursor: default; }
+
+  .ring-arc { stroke: #0f1115; stroke-width: 1; cursor: pointer; transition: opacity 120ms; }
+  .ring-arc.dimmed { opacity: 0.25; }
+  .ring-arc.highlight { stroke: #fff; stroke-width: 1.5; }
+  .ring-arc-label {
+    fill: #f5f5f5; font-size: 10.5px; font-weight: 500; pointer-events: none;
+    text-shadow: 0 0 3px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.85);
+    letter-spacing: 0.01em;
+  }
+  .center-label-name {
+    font-size: 14px; font-weight: 600; fill: #cdd6f4; text-anchor: middle;
+  }
+  .center-label-stats {
+    font-size: 10.5px; fill: #7e879b; text-anchor: middle;
+  }
+  .center-label-back {
+    font-size: 10px; fill: #89dceb; text-anchor: middle; cursor: pointer; letter-spacing: 0.06em;
+  }
+  .center-disc {
+    fill: #161a24; stroke: #2a2f3a; stroke-width: 1; cursor: pointer;
+  }
+  .center-disc:hover { fill: #1c2230; stroke: #89dceb; }
+
+  /* ── IMPORT CHORDS (faint great-circle arcs inside the sunburst centre) ── */
+  .chord { fill: none; stroke: #89dceb; stroke-width: 0.9; opacity: 0; pointer-events: none; }
+  .chord.visible { opacity: 0.28; }
+  .chord.trail { stroke: #f9e2af; opacity: 0.92; stroke-width: 1.6; }
+
+  /* ── TOOLTIP ── */
+  #tooltip {
+    position: absolute; pointer-events: none; padding: 7px 10px;
+    background: rgba(18,22,32,0.96); border: 1px solid #3a4054; border-radius: 6px;
+    font-size: 12px; color: #cdd6f4; box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    backdrop-filter: blur(4px); opacity: 0; transition: opacity 100ms; max-width: 320px; z-index: 10;
+  }
+  #tooltip .tt-name { font-weight: 600; color: #89dceb; margin-bottom: 3px; word-break: break-all; }
+  #tooltip .tt-meta { color: #7e879b; font-size: 11px; margin-bottom: 4px; }
+  #tooltip .tt-counts { display: flex; gap: 7px; font-size: 11px; }
+  #tooltip .tt-counts span { display: flex; align-items: center; gap: 3px; }
+  .tt-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+  /* ── TOPBAR (over stage) ── */
+  #topbar {
+    position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 5;
+  }
+  #topbar .control {
+    background: rgba(22,26,36,0.85); border: 1px solid #2a2f3a; border-radius: 5px;
+    padding: 5px 9px; font-size: 11.5px; color: #cdd6f4; backdrop-filter: blur(4px);
+    display: flex; align-items: center; gap: 8px;
+  }
+  #topbar label { cursor: pointer; user-select: none; }
+  #topbar input[type=checkbox] { accent-color: #89dceb; cursor: pointer; }
+  .trail-input {
+    background: #0f1115; border: 1px solid #2a2f3a; color: #cdd6f4; padding: 2px 6px; border-radius: 3px;
+    font-family: 'Fira Code', monospace; font-size: 11px; outline: none; min-width: 200px;
+  }
+  .trail-input:focus { border-color: #89dceb; }
+  .trail-btn {
+    background: #1c2230; border: 1px solid #3a4054; color: #cdd6f4; padding: 2px 8px;
+    border-radius: 3px; font-size: 11px; cursor: pointer;
+  }
+  .trail-btn:hover { background: #283248; border-color: #89dceb; }
+  .trail-msg { color: #f38ba8; font-size: 11px; }
+
+  /* ── LEGEND ── */
+  #legend {
+    position: absolute; bottom: 12px; left: 12px; background: rgba(22,26,36,0.85);
+    border: 1px solid #2a2f3a; border-radius: 5px; padding: 7px 10px; font-size: 11px;
+    backdrop-filter: blur(4px); display: flex; gap: 12px; align-items: center;
+  }
+  #legend .swatch { width: 11px; height: 11px; border-radius: 2px; display: inline-block; margin-right: 4px; vertical-align: -1px; }
+
+  /* ── RIGHT PANE ── */
+  #right-pane {
+    width: 330px; min-width: 260px; background: #14181f; border-left: 1px solid #2a2f3a;
+    display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;
+  }
+  .pane-section { border-bottom: 1px solid #2a2f3a; display: flex; flex-direction: column; min-height: 0; }
+  .pane-section:last-child { flex: 1; }
+  .pane-header {
+    padding: 8px 12px 6px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em;
+    text-transform: uppercase; color: #89dceb; background: #181d27;
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .pane-count {
+    background: rgba(137,220,235,0.12); color: #89dceb; padding: 0 6px; border-radius: 8px;
+    font-size: 10px; font-weight: 600;
+  }
+  .pane-body { overflow-y: auto; max-height: 100%; flex: 1; }
+  .pane-body::-webkit-scrollbar { width: 6px; }
+  .pane-body::-webkit-scrollbar-thumb { background: #2a2f3a; border-radius: 3px; }
+
+  .leaf-row {
+    padding: 6px 12px; font-size: 12px; display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid rgba(42,47,58,0.4); cursor: pointer; transition: background 80ms;
+  }
+  .leaf-row:hover { background: #1c2230; }
+  .leaf-row.external .leaf-name { color: #7e879b; font-style: italic; }
+  .leaf-name { flex: 1; color: #cdd6f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'Fira Code', monospace; font-size: 11.5px; }
+  .leaf-name .dim { color: #555c6e; }
+  .leaf-counts { display: flex; gap: 3px; font-size: 10px; flex-shrink: 0; }
+  .leaf-counts .c { padding: 1px 4px; border-radius: 3px; font-weight: 600; min-width: 18px; text-align: center; }
+  .leaf-counts .c-d { background: rgba(76,175,80,0.16); color: #a5d6a7; }
+  .leaf-counts .c-p { background: rgba(244,67,54,0.16); color: #ef9a9a; }
+  .leaf-counts .c-h { background: rgba(156,39,176,0.16); color: #ce93d8; }
+  .leaf-counts .c-f { background: rgba(255,167,38,0.16); color: #ffcc80; }
+  .leaf-counts .c.zero { opacity: 0.3; }
+
+  /* incomplete view */
+  .incomplete-row {
+    padding: 5px 12px 5px 24px; font-size: 11.5px; color: #cdd6f4;
+    border-bottom: 1px solid rgba(42,47,58,0.3);
+    display: flex; align-items: baseline; gap: 6px; font-family: 'Fira Code', monospace;
+    position: relative;
+  }
+  .incomplete-row::before {
+    content: ''; position: absolute; left: 12px; top: 9px; width: 4px; height: 4px; border-radius: 50%;
+  }
+  .incomplete-row.postulate::before { background: var(--c-postulate); }
+  .incomplete-row.hole::before      { background: var(--c-hole); }
+  .incomplete-row.failed::before    { background: var(--c-failed); }
+  .incomplete-name { color: #f5f5f5; }
+  .incomplete-mod { color: #555c6e; font-size: 10.5px; }
+  .empty-msg { padding: 14px 12px; color: #555c6e; font-size: 12px; font-style: italic; text-align: center; }
+
+  /* ── LOADING / ERROR ── */
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center;
+    justify-content: center; background: #0f1115; z-index: 100;
+    font-size: 14px; color: #7e879b;
+  }
+  #err {
+    position: fixed; inset: 0; display: none; align-items: center;
+    justify-content: center; background: #0f1115; z-index: 100;
+    padding: 24px; text-align: center;
+  }
+  #err.visible { display: flex; }
+  #err pre {
+    background: #161a24; border: 1px solid #2a2f3a;
+    border-radius: 6px; padding: 12px; font-family: 'Fira Code', monospace;
+    font-size: 12px; color: var(--c-postulate); max-width: 600px;
+    white-space: pre-wrap; text-align: left;
+  }
+
+  /* ── OPEN SOURCE: row opens the agda --html page; ⌖ relocates
+        zoom. Everything here is dormant unless AGDA_HTML_BASE is set. ── */
+  .center-open { font-size: 11px; fill: #7ee787; text-anchor: middle; cursor: pointer; font-weight: 600; }
+  .leaf-row.openable:hover { background: #16351f; box-shadow: inset 2px 0 0 #7ee787; }
+  .leaf-hint { flex-shrink: 0; color: #7ee787; font-weight: 700; font-size: 12px; width: 14px; text-align: center; opacity: 0; transition: opacity 80ms; }
+  .leaf-row.openable:hover .leaf-hint { opacity: 1; }
+  .leaf-zoom {
+    flex-shrink: 0; background: transparent; border: 1px solid #2a2f3a; color: #89dceb; cursor: pointer;
+    width: 22px; height: 22px; border-radius: 5px; font-size: 12px; line-height: 1; padding: 0;
+    opacity: 0; transition: opacity 80ms, background 80ms;
+  }
+  .leaf-row:hover .leaf-zoom { opacity: 1; }
+  .leaf-zoom:hover { background: #11283a; border-color: #89dceb; }
+
+  #open-card {
+    position: absolute; top: 12px; right: 12px; width: 230px; z-index: 8;
+    background: rgba(22,26,36,0.93); border: 1px solid #2a2f3a; border-radius: 8px;
+    padding: 11px 12px; backdrop-filter: blur(5px); box-shadow: 0 8px 26px rgba(0,0,0,0.45);
+  }
+  #open-card.hidden { display: none; }
+  #open-card .oc-name { font-family: 'Fira Code', monospace; font-size: 12.5px; color: #cdd6f4; font-weight: 600; word-break: break-all; }
+  #open-card .oc-counts { display: flex; gap: 6px; margin: 6px 0 9px; font-size: 10.5px; }
+  #open-card .oc-counts .c { padding: 1px 6px; border-radius: 3px; font-weight: 600; }
+  #open-card .oc-counts .c-d { background: rgba(76,175,80,0.18); color: #a5d6a7; }
+  #open-card .oc-counts .c-p { background: rgba(244,67,54,0.18); color: #ef9a9a; }
+  #open-card .oc-counts .c-h { background: rgba(156,39,176,0.2); color: #ce93d8; }
+  #open-card .oc-counts .c-f { background: rgba(255,167,38,0.18); color: #ffcc80; }
+  #open-card .oc-counts .c.zero { opacity: .3; }
+  #open-card .oc-btn { width: 100%; background: #1f6feb; border: none; color: #fff; font-weight: 600; font-size: 12.5px; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+  #open-card .oc-btn:hover { background: #388bfd; }
+  #open-card .oc-btn[disabled] { background: #2a2f3a; color: #7e879b; cursor: not-allowed; }
+  #open-card .oc-url { margin-top: 7px; font: 10.5px 'Fira Code', monospace; color: #89dceb; word-break: break-all; }
+  #open-card .oc-note { margin-top: 6px; font-size: 10.5px; color: #7e879b; }
+</style>
+</head>
+<body>
+
+<div id="banner">
+  <strong>agda-deps — Sunburst Hierarchy</strong>
+  <span>Concentric rings = dotted-module nesting depth. Arc length ∝ descendant leaves. Click to zoom; centre disc to zoom out.</span>
+  <span class="pill" id="banner-counts">loading…</span>
+  <span class="pill" id="src-pill" style="display:none">↗ source linked</span>
+</div>
+
+<div id="root">
+
+  <!-- ── STAGE ────────────────────────────────────────────────────────────── -->
+  <div id="stage">
+    <svg id="sunburst-svg" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet"></svg>
+
+    <div id="topbar">
+      <div class="control">
+        <label><input type="checkbox" id="toggle-chords"> Show import chords</label>
+        <span style="color:#555c6e">(capped at 200)</span>
+      </div>
+      <div class="control">
+        <span style="color:#7e879b">Trail:</span>
+        <input class="trail-input" id="trail-a" placeholder="src module (e.g. Test)" />
+        <span style="color:#555c6e">→</span>
+        <input class="trail-input" id="trail-b" placeholder="dst module" />
+        <button class="trail-btn" id="trail-go">Plot</button>
+        <button class="trail-btn" id="trail-clear">Clear</button>
+        <span class="trail-msg" id="trail-msg"></span>
+      </div>
+    </div>
+
+    <div id="legend">
+      <span><span class="swatch" style="background:var(--c-defined)"></span>Defined</span>
+      <span><span class="swatch" style="background:var(--c-postulate)"></span>Postulate</span>
+      <span><span class="swatch" style="background:var(--c-hole)"></span>Hole</span>
+      <span><span class="swatch" style="background:var(--c-failed)"></span>Failed</span>
+      <span style="color:#555c6e">|</span>
+      <span style="color:#7e879b">ring depth ↑ saturation</span>
+    </div>
+    <div id="tooltip"></div>
+
+    <!-- floating Open-source card; hidden unless AGDA_HTML_BASE is set -->
+    <div id="open-card" class="hidden">
+      <div class="oc-name" id="oc-name"></div>
+      <div class="oc-counts" id="oc-counts"></div>
+      <button class="oc-btn" id="oc-btn">Open source ↗</button>
+      <div class="oc-url" id="oc-url"></div>
+      <div class="oc-note" id="oc-note"></div>
+    </div>
+  </div>
+
+  <!-- ── RIGHT PANE ───────────────────────────────────────────────────────── -->
+  <div id="right-pane">
+
+    <div class="pane-section" style="flex: 1 1 0; min-height: 200px;">
+      <div class="pane-header">
+        Leaves in focus
+        <span class="pane-count" id="leaves-count">0</span>
+      </div>
+      <div class="pane-body" id="leaves-body"></div>
+    </div>
+
+    <div class="pane-section" style="flex: 1 1 0; min-height: 160px;">
+      <div class="pane-header">
+        What's incomplete here?
+        <span class="pane-count" id="incomplete-count">0</span>
+      </div>
+      <div class="pane-body" id="incomplete-body"></div>
+    </div>
+
+  </div>
+
+</div>
+
+<div id="loading">Loading graph data…</div>
+<div id="err"><div><h2 style="margin-bottom:12px;color:var(--c-postulate)">Error</h2><pre id="err-body"></pre></div></div>
+
+<script>
+// ─── DATA LOADING PRELUDE ──────────────────────────────────────────────────
+__DATA_LOADING_PRELUDE__
+
+// ─── BASE64 DECODER (for externalModules Int32 array) ──────────────────────
+function b64Bytes(b64) {
+  if (!b64) return new Uint8Array(0);
+  var bin = atob(b64), out = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64I32(b64) { return new Int32Array(b64Bytes(b64).buffer); }
+
+// ─── FETCH HELPER ──────────────────────────────────────────────────────────
+async function fetchJson(url) {
+  if (GZIP_ENABLED && window.pako) {
+    try {
+      var r = await fetch(url + '.gz');
+      if (r.ok) {
+        var ab = await r.arrayBuffer();
+        var txt = pako.inflate(new Uint8Array(ab), {to:'string'});
+        return JSON.parse(txt);
+      }
+    } catch(e) {}
+  }
+  var r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching ' + url);
+  return r.json();
+}
+
+function showErr(msg) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('err-body').textContent = msg;
+  document.getElementById('err').classList.add('visible');
+}
+
+// ─── OPEN SOURCE ───────────────────────────────────────────────────────────
+// `agda --html` writes one page per TOP-LEVEL module; sub-modules (datatype /
+// record / where modules such as Bool.Bool, Test.Exp, Where._) live inside the
+// enclosing file, so they must resolve to that file — never <Sub>.html.
+// MODULE_HTML is populated in init() from moduleToFile/files; the fallback
+// covers the no-mapping case (e.g. a module with no recorded source file).
+var MODULE_HTML = {};
+function fileFor(name) { return MODULE_HTML[name] || (name + ".html"); }
+function openSource(name) {
+  if (!AGDA_HTML_BASE) return;
+  window.open(AGDA_HTML_BASE + fileFor(name), "_blank", "noopener");
+}
+// Floating action card that tracks the hovered / focused leaf module, so you
+// can open source straight from the wheel (arcs still zoom on click).
+function showOpenCard(data) {
+  var card = document.getElementById("open-card");
+  if (!card) return;
+  if (!AGDA_HTML_BASE || !data || !data.isLeaf) { card.classList.add("hidden"); return; }
+  card.classList.remove("hidden");
+  document.getElementById("oc-name").textContent = data.fullName;
+  var c = data.counts || { D: 0, P: 0, H: 0, F: 0 };
+  document.getElementById("oc-counts").innerHTML =
+    '<span class="c c-d ' + (c.D ? '' : 'zero') + '">' + c.D + 'D</span>' +
+    '<span class="c c-p ' + (c.P ? '' : 'zero') + '">' + c.P + 'P</span>' +
+    '<span class="c c-h ' + (c.H ? '' : 'zero') + '">' + c.H + 'H</span>' +
+    '<span class="c c-f ' + (c.F ? '' : 'zero') + '">' + c.F + 'F</span>';
+  var btn = document.getElementById("oc-btn");
+  var url = document.getElementById("oc-url");
+  var note = document.getElementById("oc-note");
+  if (data.isExternal) {
+    btn.disabled = true; btn.textContent = "external — no local page";
+    btn.onclick = null; url.textContent = "";
+    note.textContent = "Builtin / library module — no rendered page.";
+  } else {
+    btn.disabled = false; btn.textContent = "Open source ↗";
+    url.textContent = AGDA_HTML_BASE + fileFor(data.fullName);
+    note.textContent = "";
+    btn.onclick = function() { openSource(data.fullName); };
+  }
+}
+
+// ─── INIT ──────────────────────────────────────────────────────────────────
+(async function init() {
+  var raw;
+  try {
+    raw = LAZY ? await fetchJson(GRAPH_URL) : GRAPH;
+  } catch(e) {
+    showErr('Failed to load graph data: ' + e.message +
+            (LAZY ? '\n\nThe lazy bundle uses fetch(); serve via HTTP (e.g. `python -m http.server`), not file://.' : ''));
+    return;
+  }
+  document.getElementById('loading').style.display = 'none';
+
+  var modules     = raw.modules || [];
+  var stateCounts = raw.moduleStateCounts || [];
+  var moduleEdges = raw.moduleEdges || [];
+  var entryModule = raw.entryModule || null;
+
+  if (!modules.length) {
+    showErr('Graph contains no modules. Nothing to render.');
+    return;
+  }
+
+  // External-module set, decoded from packed Int32 form.
+  var externalSet = new Set();
+  if (raw.externalModules) {
+    var arr = b64I32(raw.externalModules);
+    for (var i = 0; i < arr.length; i++) externalSet.add(arr[i]);
+  }
+
+  // Resolve each module to the page `agda --html` actually wrote. The file is
+  // named after its top-level module, which is the shortest (prefix) module
+  // name sharing that file — so sub-modules collapse onto the enclosing page.
+  if (AGDA_HTML_BASE && raw.moduleToFile && raw.files) {
+    var m2f = b64I32(raw.moduleToFile);
+    var topPerFile = {};
+    for (var i = 0; i < modules.length; i++) {
+      var fi = m2f[i];
+      if (fi == null || fi < 0) continue;
+      if (!(fi in topPerFile) || modules[i].length < topPerFile[fi].length) topPerFile[fi] = modules[i];
+    }
+    for (var i = 0; i < modules.length; i++) {
+      var fi = m2f[i];
+      if (fi != null && fi >= 0 && topPerFile[fi]) MODULE_HTML[modules[i]] = topPerFile[fi] + ".html";
+    }
+  }
+
+  // Build LEAVES (one per module) — same shape the standalone mockup
+  // expected, so the D3 sunburst code below stays untouched.
+  var LEAVES = modules.map(function(name, i) {
+    var c = stateCounts[i] || [0, 0, 0, 0];
+    return {
+      name: name,
+      counts: { D: c[0]|0, P: c[1]|0, H: c[2]|0, F: c[3]|0 },
+      isExternal: externalSet.has(i),
+      moduleIndex: i
+    };
+  });
+
+  // Build IMPORTS (pairs of module names). moduleEdges entries can be
+  // either [i, j] integer pairs (lazy mode, indexed) or [srcName, tgtName]
+  // string pairs (older inline shape). Normalise both into strings here.
+  var IMPORTS = moduleEdges.map(function(e) {
+    var s = e[0], t = e[1];
+    var sName = (typeof s === 'number') ? modules[s] : s;
+    var tName = (typeof t === 'number') ? modules[t] : t;
+    return [sName, tName];
+  }).filter(function(p) { return p[0] != null && p[1] != null; });
+
+  runSunburst(LEAVES, IMPORTS, entryModule);
+})();
+
+function runSunburst(LEAVES, IMPORTS, entryModule) {
+  // ── BUILD TREE FROM DOTTED NAMES ─────────────────────────────────────────
+  // Every dotted prefix that isn't itself a module becomes a pure-folder
+  // node; every real module becomes a tagged leaf carrying counts. If a
+  // module name happens to also be a prefix of another (e.g. Foo and
+  // Foo.Bar), the parent node carries both children + its own counts —
+  // aggregate() handles the rare double-counting.
+  function buildHierarchy(leaves) {
+    var root = { name: "", fullName: "", children: [], depth: 0, isLeaf: false };
+    var byPath = new Map([["", root]]);
+    for (var li = 0; li < leaves.length; li++) {
+      var leaf = leaves[li];
+      var parts = leaf.name.split(".");
+      var prefix = "", parent = root;
+      for (var i = 0; i < parts.length; i++) {
+        var seg = parts[i];
+        prefix = prefix ? prefix + "." + seg : seg;
+        var node = byPath.get(prefix);
+        if (!node) {
+          node = { name: seg, fullName: prefix, children: [], depth: i + 1, isLeaf: false };
+          parent.children.push(node);
+          byPath.set(prefix, node);
+        }
+        parent = node;
+      }
+      parent.isLeaf = true;
+      parent.counts = leaf.counts;
+      parent.isExternal = leaf.isExternal;
+      parent.moduleIndex = leaf.moduleIndex;
+    }
+    return root;
+  }
+
+  var ROOT = buildHierarchy(LEAVES);
+
+  // Aggregate counts into every internal node; size = total def count
+  // (or 1 for empty modules — keeps zero-def nodes visible as thin slices).
+  function aggregate(node) {
+    if (!node.children || !node.children.length) {
+      var c = node.counts || { D: 0, P: 0, H: 0, F: 0 };
+      node.aggCounts = { D: c.D, P: c.P, H: c.H, F: c.F };
+      node.size = (c.D + c.P + c.H + c.F) || 1;
+      node.leafCount = node.isLeaf ? 1 : 0;
+      return;
+    }
+    var agg = { D: 0, P: 0, H: 0, F: 0 };
+    var leafCount = 0;
+    for (var i = 0; i < node.children.length; i++) {
+      var k = node.children[i];
+      aggregate(k);
+      agg.D += k.aggCounts.D; agg.P += k.aggCounts.P;
+      agg.H += k.aggCounts.H; agg.F += k.aggCounts.F;
+      leafCount += k.leafCount;
+    }
+    // Module that is also a parent (rare but possible: e.g. `Nat` with
+    // children `Nat.Whatever`): fold its own counts in once too.
+    if (node.isLeaf && node.counts) {
+      agg.D += node.counts.D; agg.P += node.counts.P;
+      agg.H += node.counts.H; agg.F += node.counts.F;
+      leafCount += 1;
+    }
+    node.aggCounts = agg;
+    node.leafCount = leafCount;
+    node.size = (agg.D + agg.P + agg.H + agg.F) || leafCount || 1;
+  }
+  aggregate(ROOT);
+
+  // Banner counts.
+  var TOTAL_LEAVES = ROOT.leafCount;
+  document.getElementById("banner-counts").textContent =
+    TOTAL_LEAVES + " modules · " +
+    (ROOT.aggCounts.D + ROOT.aggCounts.P + ROOT.aggCounts.H + ROOT.aggCounts.F) + " defs" +
+    (entryModule ? " · entry: " + entryModule : "");
+  if (AGDA_HTML_BASE) { var srcPill = document.getElementById("src-pill"); if (srcPill) srcPill.style.display = ""; }
+
+  // ── COLOUR: blend state counts into HSL ──────────────────────────────────
+  // The four states are placed at fixed hues; the weighted mean (treated
+  // as a 2-D unit-vector average) gives the arc its colour. Saturation
+  // rises with ring depth so the outer rim is more vivid than the centre —
+  // it visually signals "you are looking at leaves".
+  var STATE_HUES = { D: 122, P: 0, H: 285, F: 32 };  // green, red, purple, amber
+  var EXTERNAL_COLOR = "#3d4252";
+
+  function colorFor(node) {
+    if (node.data.isExternal && node.data.isLeaf) return EXTERNAL_COLOR;
+    var agg = node.data.aggCounts;
+    var depth = node.depth;
+    var tot = agg.D + agg.P + agg.H + agg.F;
+    if (!tot) {
+      // empty subtree (e.g. pure-folder over external-only leaves): fall back to neutral grey
+      return "hsl(220, 6%, " + Math.max(20, 38 - depth * 3) + "%)";
+    }
+    var x = 0, y = 0;
+    ["D","P","H","F"].forEach(function(k) {
+      if (!agg[k]) return;
+      var h = STATE_HUES[k] * Math.PI / 180;
+      x += Math.cos(h) * agg[k];
+      y += Math.sin(h) * agg[k];
+    });
+    var hueDeg = Math.atan2(y, x) * 180 / Math.PI;
+    if (hueDeg < 0) hueDeg += 360;
+    var sat = Math.min(55, 28 + depth * 6);
+    var lt  = Math.max(28, 48 - depth * 3);
+    return "hsl(" + hueDeg.toFixed(0) + ", " + sat + "%, " + lt + "%)";
+  }
+
+  // ── D3 PARTITION ─────────────────────────────────────────────────────────
+  var svg = d3.select("#sunburst-svg");
+  var WIDTH = 1000, HEIGHT = 1000;
+  var RADIUS = Math.min(WIDTH, HEIGHT) / 2 - 20;
+
+  var rootG = svg.append("g").attr("transform", "translate(" + (WIDTH/2) + "," + (HEIGHT/2) + ")");
+  var chordLayer  = rootG.append("g").attr("class", "chords-layer");
+  var arcLayer    = rootG.append("g").attr("class", "arcs-layer");
+  var labelLayer  = rootG.append("g").attr("class", "labels-layer").style("pointer-events", "none");
+  var centreLayer = rootG.append("g").attr("class", "centre-layer");
+
+  var partition = d3.partition().size([2 * Math.PI, RADIUS]);
+  var hierarchy = d3.hierarchy(ROOT)
+    .sum(function(d) { return (d.children && d.children.length) ? 0 : d.size; })
+    .sort(function(a, b) {
+      // External leaves sink to the bottom of each parent's slice so the
+      // user-code rim is more prominent. Within each group, sort by value
+      // descending (biggest modules first) — keeps the layout legible.
+      var ae = a.data.isExternal ? 1 : 0;
+      var be = b.data.isExternal ? 1 : 0;
+      if (ae !== be) return ae - be;
+      return b.value - a.value;
+    });
+  partition(hierarchy);
+
+  // Stash the original (full-circle) coords so polar zoom can interpolate
+  // against a stable reference frame instead of compounding mutations.
+  hierarchy.each(function(d) { d.x0o = d.x0; d.x1o = d.x1; d.y0o = d.y0; d.y1o = d.y1; });
+
+  var currentFocus = hierarchy;
+
+  var arc = d3.arc()
+    .startAngle(function(d) { return d.x0; })
+    .endAngle(function(d) { return d.x1; })
+    .innerRadius(function(d) { return d.y0; })
+    .outerRadius(function(d) { return d.y1; })
+    .padAngle(0.002)
+    .padRadius(RADIUS / 2);
+
+  var allDesc = hierarchy.descendants().filter(function(d) { return d.depth > 0; });
+
+  var arcs = arcLayer.selectAll("path.ring-arc")
+    .data(allDesc, function(d) { return d.data.fullName; })
+    .join("path")
+    .attr("class", "ring-arc")
+    .attr("d", arc)
+    .attr("fill", colorFor)
+    .on("mouseover", function(e, d) { onHover(d, e); })
+    .on("mousemove", function(e)    { moveTooltip(e); })
+    .on("mouseout",  function()     { onLeave(); })
+    .on("click", function(e, d) { e.stopPropagation(); zoomTo(d); });
+
+  function labelTransform(d) {
+    var a = (d.x0 + d.x1) / 2;
+    var r = (d.y0 + d.y1) / 2;
+    var deg = a * 180 / Math.PI - 90;
+    var flip = deg > 90 ? 180 : 0;
+    return "rotate(" + deg + ") translate(" + r + ",0) rotate(" + flip + ")";
+  }
+  function labelText(d) {
+    var arcLen = (d.x1 - d.x0) * (d.y0 + d.y1) / 2;
+    if (arcLen < 18) return "";
+    var maxChars = Math.max(4, Math.floor(arcLen / 6));
+    var n = d.data.name;
+    return n.length > maxChars ? n.slice(0, maxChars - 1) + "…" : n;
+  }
+
+  var labels = labelLayer.selectAll("text.ring-arc-label")
+    .data(allDesc, function(d) { return d.data.fullName; })
+    .join("text")
+    .attr("class", "ring-arc-label")
+    .attr("dy", "0.32em")
+    .attr("text-anchor", "middle")
+    .attr("transform", labelTransform)
+    .text(labelText);
+
+  // ── CENTRE DISC ─────────────────────────────────────────────────────────
+  var CENTRE_R = 80;
+  centreLayer.append("circle")
+    .attr("class", "center-disc")
+    .attr("r", CENTRE_R)
+    .on("click", function() { zoomUp(); });
+
+  var centreNameTxt  = centreLayer.append("text").attr("class", "center-label-name").attr("y", -16);
+  var centreStatsTxt = centreLayer.append("text").attr("class", "center-label-stats").attr("y", 2);
+  var centreBackTxt  = centreLayer.append("text").attr("class", "center-label-back").attr("y", 26)
+    .text("◀ click to zoom out").attr("opacity", 0);
+  // Open the focused leaf module's source from the centre.
+  var centreOpenTxt  = centreLayer.append("text").attr("class", "center-open").attr("y", 44)
+    .text("↗ open source").attr("opacity", 0)
+    .on("click", function(e) {
+      if (e) e.stopPropagation();
+      if (AGDA_HTML_BASE && currentFocus.data.isLeaf && !currentFocus.data.isExternal)
+        openSource(currentFocus.data.fullName);
+    });
+
+  function updateCentre() {
+    var f = currentFocus;
+    var lbl = f.depth === 0 ? "ALL MODULES" : f.data.fullName;
+    var parts = lbl.split(".");
+    if (parts.length > 3) {
+      centreNameTxt.text("").selectAll("tspan").remove();
+      var half = Math.ceil(parts.length / 2);
+      centreNameTxt.append("tspan").attr("x", 0).attr("dy", "-0.5em").text(parts.slice(0, half).join("."));
+      centreNameTxt.append("tspan").attr("x", 0).attr("dy", "1.2em").text(parts.slice(half).join("."));
+    } else {
+      centreNameTxt.selectAll("tspan").remove();
+      centreNameTxt.text(lbl);
+    }
+    var c = f.data.aggCounts;
+    centreStatsTxt.text(f.data.leafCount + " mod · " +
+                        c.D + "D " + c.P + "P " + c.H + "H " + c.F + "F");
+    centreBackTxt.attr("opacity", f.depth > 0 ? 1 : 0);
+    // Centre "open source" + card when focused on a real leaf.
+    var leafFocus = !!AGDA_HTML_BASE && f.data.isLeaf && !f.data.isExternal;
+    centreOpenTxt.attr("opacity", leafFocus ? 1 : 0);
+    if (AGDA_HTML_BASE && f.data.isLeaf) showOpenCard(f.data);
+  }
+
+  // ── HOVER ───────────────────────────────────────────────────────────────
+  var tooltip = document.getElementById("tooltip");
+  function onHover(d, e) {
+    var keep = new Set();
+    var p = d; while (p) { keep.add(p); p = p.parent; }
+    d.descendants().forEach(function(x) { keep.add(x); });
+    arcs.classed("dimmed",    function(a) { return !keep.has(a); })
+        .classed("highlight", function(a) { return a === d; });
+
+    var c = d.data.aggCounts;
+    tooltip.innerHTML =
+      '<div class="tt-name">' + escapeHtml(d.data.fullName || "All modules") + '</div>' +
+      '<div class="tt-meta">depth ' + d.depth + ' · ' +
+        d.data.leafCount + ' leaf module' + (d.data.leafCount === 1 ? "" : "s") +
+        (d.data.isLeaf ? ' · LEAF' : '') +
+        (d.data.isExternal ? ' · external' : '') +
+      '</div>' +
+      '<div class="tt-counts">' +
+        '<span><span class="tt-dot" style="background:var(--c-defined)"></span>' + c.D + '</span>' +
+        '<span><span class="tt-dot" style="background:var(--c-postulate)"></span>' + c.P + '</span>' +
+        '<span><span class="tt-dot" style="background:var(--c-hole)"></span>' + c.H + '</span>' +
+        '<span><span class="tt-dot" style="background:var(--c-failed)"></span>' + c.F + '</span>' +
+      '</div>';
+    tooltip.style.opacity = 1;
+    moveTooltip(e);
+    if (AGDA_HTML_BASE && d.data.isLeaf) showOpenCard(d.data);
+  }
+  function onLeave() {
+    arcs.classed("dimmed", false).classed("highlight", false);
+    tooltip.style.opacity = 0;
+  }
+  function moveTooltip(e) {
+    var stage = document.getElementById("stage");
+    var rect = stage.getBoundingClientRect();
+    var x = e.clientX - rect.left + 14;
+    var y = e.clientY - rect.top + 14;
+    if (x + 320 > rect.width)  x = e.clientX - rect.left - 320;
+    if (y + 100 > rect.height) y = e.clientY - rect.top - 100;
+    tooltip.style.left = x + "px";
+    tooltip.style.top  = y + "px";
+  }
+
+  // ── POLAR ZOOM ──────────────────────────────────────────────────────────
+  function isDescendantOf(node, ancestor) {
+    var p = node; while (p) { if (p === ancestor) return true; p = p.parent; } return false;
+  }
+
+  function zoomTo(d) {
+    currentFocus = d;
+    var xs = d3.scaleLinear().domain([d.x0o, d.x1o]).range([0, 2 * Math.PI]);
+    var maxDepth = d3.max(d.descendants(), function(x) { return x.depth; }) || d.depth;
+    var layers = Math.max(1, maxDepth - d.depth);
+    var radiusPerLayer = (RADIUS - CENTRE_R) / Math.max(layers, 1);
+
+    hierarchy.each(function(n) {
+      if (n === d) {
+        n.x0 = 0; n.x1 = 2 * Math.PI; n.y0 = 0; n.y1 = CENTRE_R;
+      } else if (isDescendantOf(n, d)) {
+        n.x0 = Math.max(0, Math.min(2 * Math.PI, xs(n.x0o)));
+        n.x1 = Math.max(0, Math.min(2 * Math.PI, xs(n.x1o)));
+        n.y0 = CENTRE_R + (n.depth - d.depth - 1) * radiusPerLayer;
+        n.y1 = CENTRE_R + (n.depth - d.depth) * radiusPerLayer;
+      } else {
+        n.x0 = n.x1 = 0;
+        n.y0 = n.y1 = RADIUS + 4;
+      }
+    });
+
+    arcs.transition().duration(650)
+      .attrTween("d", function(a) {
+        var prev = this._current || { x0: a.x0, x1: a.x1, y0: a.y0, y1: a.y1 };
+        var next = { x0: a.x0, x1: a.x1, y0: a.y0, y1: a.y1 };
+        this._current = next;
+        var i = d3.interpolate(prev, next);
+        return function(t) { return arc(i(t)); };
+      })
+      .style("opacity", function(a) { return (isDescendantOf(a, d) || a === d) ? 1 : 0; });
+
+    labels.transition().duration(650)
+      .attr("transform", labelTransform)
+      .style("opacity", function(a) { return isDescendantOf(a, d) ? 1 : 0; })
+      .tween("text", function(a) {
+        var self = this;
+        return function(t) { if (t > 0.45) d3.select(self).text(labelText(a)); };
+      });
+
+    updateCentre();
+    renderRightPane();
+    renderChords();
+  }
+  function zoomUp() {
+    if (currentFocus.depth === 0) return;
+    zoomTo(currentFocus.parent || hierarchy);
+  }
+
+  // ── RIGHT PANE ──────────────────────────────────────────────────────────
+  function renderRightPane() {
+    var f = currentFocus;
+    var leaves = [];
+    f.each(function(n) { if (n.data.isLeaf) leaves.push(n); });
+    leaves.sort(function(a, b) { return a.data.fullName.localeCompare(b.data.fullName); });
+
+    document.getElementById("leaves-count").textContent = leaves.length;
+    var lb = document.getElementById("leaves-body");
+    if (!leaves.length) {
+      lb.innerHTML = '<div class="empty-msg">No leaf modules in this subtree.</div>';
+    } else {
+      var focusPrefix = f.data.fullName ? f.data.fullName + "." : "";
+      // When source linking is on, the row body OPENS SOURCE and a
+      // ⌖ button carries the (now secondary) zoom; off → zoom on row click.
+      var SRC_ON = !!AGDA_HTML_BASE;
+      lb.innerHTML = leaves.map(function(l) {
+        var rel = (focusPrefix && l.data.fullName.indexOf(focusPrefix) === 0)
+          ? l.data.fullName.slice(focusPrefix.length)
+          : l.data.fullName;
+        var c = l.data.counts || { D: 0, P: 0, H: 0, F: 0 };
+        var openable = SRC_ON && !l.data.isExternal;
+        var rowCls = 'leaf-row' + (l.data.isExternal ? ' external' : '') + (openable ? ' openable' : '');
+        var rowTitle = openable ? ' title="Open agda --html source ↗"'
+                     : (SRC_ON && l.data.isExternal ? ' title="external — no local page (zoom only)"' : '');
+        return '<div class="' + rowCls + '" data-full="' + escapeAttr(l.data.fullName) + '"' + rowTitle + '>' +
+          '<span class="leaf-name" title="' + escapeAttr(l.data.fullName) + '">' +
+            (focusPrefix ? '<span class="dim">' + escapeHtml(focusPrefix) + '</span>' : '') + escapeHtml(rel) +
+          '</span>' +
+          '<span class="leaf-counts">' +
+            '<span class="c c-d ' + (c.D ? '' : 'zero') + '">' + c.D + '</span>' +
+            '<span class="c c-p ' + (c.P ? '' : 'zero') + '">' + c.P + '</span>' +
+            '<span class="c c-h ' + (c.H ? '' : 'zero') + '">' + c.H + '</span>' +
+            '<span class="c c-f ' + (c.F ? '' : 'zero') + '">' + c.F + '</span>' +
+          '</span>' +
+          (openable ? '<span class="leaf-hint">↗</span>' : '') +
+          (SRC_ON ? '<button class="leaf-zoom" data-zoom="' + escapeAttr(l.data.fullName) + '" title="Zoom to this module in the sunburst">⌖</button>' : '') +
+        '</div>';
+      }).join("");
+      var findNode = function(fn) {
+        return hierarchy.descendants().find(function(n) { return n.data.fullName === fn; });
+      };
+      Array.prototype.forEach.call(lb.querySelectorAll(".leaf-row"), function(row) {
+        var node = findNode(row.dataset.full);
+        row.addEventListener("click", function() {
+          // Row click opens source; external rows (no page) zoom.
+          if (SRC_ON && node && !node.data.isExternal) { openSource(node.data.fullName); }
+          else if (node) { zoomTo(node); }
+        });
+        if (SRC_ON && node) row.addEventListener("mouseenter", function() { showOpenCard(node.data); });
+      });
+      // The relocated zoom affordance.
+      Array.prototype.forEach.call(lb.querySelectorAll(".leaf-zoom"), function(btn) {
+        btn.addEventListener("click", function(ev) {
+          ev.stopPropagation();
+          var node = findNode(btn.dataset.zoom);
+          if (node) zoomTo(node);
+        });
+      });
+    }
+
+    // What's incomplete here? — postulates / holes / failures inside focus.
+    var incomplete = [];
+    leaves.forEach(function(l) {
+      var c = l.data.counts || { D: 0, P: 0, H: 0, F: 0 };
+      if (c.P) incomplete.push({ kind: "postulate", count: c.P, mod: l.data.fullName });
+      if (c.H) incomplete.push({ kind: "hole",      count: c.H, mod: l.data.fullName });
+      if (c.F) incomplete.push({ kind: "failed",    count: c.F, mod: l.data.fullName });
+    });
+    document.getElementById("incomplete-count").textContent = incomplete.length;
+    var ib = document.getElementById("incomplete-body");
+    if (!incomplete.length) {
+      ib.innerHTML = '<div class="empty-msg">Clean — no postulates, holes, or failures in this subtree.</div>';
+    } else {
+      var focusPrefix2 = f.data.fullName ? f.data.fullName + "." : "";
+      ib.innerHTML = incomplete.map(function(it) {
+        var rel = (focusPrefix2 && it.mod.indexOf(focusPrefix2) === 0)
+          ? it.mod.slice(focusPrefix2.length) : it.mod;
+        var label = { postulate: "postulate", hole: "hole", failed: "failed" }[it.kind];
+        return '<div class="incomplete-row ' + it.kind + '">' +
+          '<span class="incomplete-name">' + it.count + '× ' + label + '</span>' +
+          '<span class="incomplete-mod" title="' + escapeAttr(it.mod) + '">' + escapeHtml(rel) + '</span>' +
+        '</div>';
+      }).join("");
+    }
+  }
+
+  // ── IMPORT CHORDS ──────────────────────────────────────────────────────
+  // Sibling-to-sibling import edges become a quadratic Bezier through the
+  // origin (a great circle inside the rim). Capped at 200 so dense hubs
+  // (e.g. Prelude on the reference corpus) don't drown out the topology.
+  var CHORD_CAP = 200;
+  var chordsEnabled = false;
+  var chordToggle = document.getElementById("toggle-chords");
+  chordToggle.addEventListener("change", function() {
+    chordsEnabled = chordToggle.checked;
+    renderChords();
+  });
+
+  function leafCoord(node) {
+    var a = (node.x0 + node.x1) / 2 - Math.PI / 2;
+    var r = node.y0;
+    return [Math.cos(a) * r, Math.sin(a) * r];
+  }
+
+  function renderChords() {
+    var byName = new Map();
+    hierarchy.each(function(n) { if (n.data.isLeaf) byName.set(n.data.fullName, n); });
+    var visible = new Set();
+    currentFocus.each(function(n) { if (n.data.isLeaf) visible.add(n); });
+
+    var lines = [];
+    if (chordsEnabled) {
+      var taken = 0;
+      for (var i = 0; i < IMPORTS.length && taken < CHORD_CAP; i++) {
+        var pair = IMPORTS[i];
+        var a = byName.get(pair[0]), b = byName.get(pair[1]);
+        if (!a || !b) continue;
+        if (!visible.has(a) || !visible.has(b)) continue;
+        var p1 = leafCoord(a), p2 = leafCoord(b);
+        lines.push({ d: "M" + p1[0] + "," + p1[1] + " Q0,0 " + p2[0] + "," + p2[1], cls: "chord visible" });
+        taken++;
+      }
+    }
+    if (trailPath && trailPath.length >= 2) {
+      for (var j = 0; j < trailPath.length - 1; j++) {
+        var ta = byName.get(trailPath[j]), tb = byName.get(trailPath[j+1]);
+        if (!ta || !tb) continue;
+        var q1 = leafCoord(ta), q2 = leafCoord(tb);
+        lines.push({ d: "M" + q1[0] + "," + q1[1] + " Q0,0 " + q2[0] + "," + q2[1], cls: "chord trail" });
+      }
+    }
+    chordLayer.selectAll("path.chord")
+      .data(lines)
+      .join("path")
+      .attr("d", function(x) { return x.d; })
+      .attr("class", function(x) { return x.cls; });
+  }
+
+  // ── TRAIL (A → B over moduleEdges) ─────────────────────────────────────
+  // BFS over the undirected projection of the import graph. Undirected
+  // because users want "is there ANY path connecting these two modules?",
+  // not strict reachability.
+  var trailPath = null;
+  document.getElementById("trail-go").addEventListener("click", function() {
+    var a = document.getElementById("trail-a").value.trim();
+    var b = document.getElementById("trail-b").value.trim();
+    var msg = document.getElementById("trail-msg");
+    msg.textContent = "";
+    if (!a || !b) { msg.textContent = "enter both endpoints"; return; }
+
+    var adj = new Map();
+    for (var i = 0; i < IMPORTS.length; i++) {
+      var s = IMPORTS[i][0], t = IMPORTS[i][1];
+      if (!adj.has(s)) adj.set(s, new Set());
+      if (!adj.has(t)) adj.set(t, new Set());
+      adj.get(s).add(t); adj.get(t).add(s);
+    }
+    if (!adj.has(a) || !adj.has(b)) {
+      trailPath = null;
+      msg.textContent = "module not in import graph";
+      renderChords();
+      return;
+    }
+
+    var prev = new Map(); prev.set(a, null);
+    var queue = [a]; var found = false;
+    while (queue.length) {
+      var u = queue.shift();
+      if (u === b) { found = true; break; }
+      var nbrs = adj.get(u);
+      if (!nbrs) continue;
+      nbrs.forEach(function(v) {
+        if (!prev.has(v)) { prev.set(v, u); queue.push(v); }
+      });
+    }
+    if (!found) {
+      trailPath = null;
+      msg.textContent = "no path between " + a + " and " + b;
+    } else {
+      var out = []; var cur = b;
+      while (cur !== null && cur !== undefined) { out.unshift(cur); cur = prev.get(cur); }
+      trailPath = out;
+      msg.textContent = "path length " + (out.length - 1);
+    }
+    renderChords();
+  });
+  document.getElementById("trail-clear").addEventListener("click", function() {
+    trailPath = null;
+    document.getElementById("trail-a").value = "";
+    document.getElementById("trail-b").value = "";
+    document.getElementById("trail-msg").textContent = "";
+    renderChords();
+  });
+
+  // Prefill the trail "from" input with the entry module — saves users a
+  // few characters in the common A→entry, A→leaf case.
+  if (entryModule) {
+    document.getElementById("trail-a").placeholder = "src (default: " + entryModule + ")";
+  }
+
+  // ── ESCAPING HELPERS ────────────────────────────────────────────────────
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function(c) {
+      return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' })[c];
+    });
+  }
+  function escapeAttr(s) { return escapeHtml(s); }
+
+  // ── INIT ────────────────────────────────────────────────────────────────
+  updateCentre();
+  renderRightPane();
+  renderChords();
+
+  // Clicking the SVG background (outside any arc) zooms up one level —
+  // mirrors the centre disc affordance.
+  svg.on("click", function() { zoomUp(); });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>agda-deps · Big Module DAG Pods</title>
+<script>window.__gzipEnabled = false;</script>
+<script>
+  if (window.__gzipEnabled && typeof DecompressionStream === 'undefined') {
+    document.write('<scr'+'ipt src="https://unpkg.com/pako@2.1.0/dist/pako_inflate.min.js"></scr'+'ipt>');
+  }
+</script>
+<!--
+  Big Module DAG Pods: viewport-virtualised port of the module-dag-pods
+  view, sized to handle ~100k modules.
+
+  - Layout is pre-computed Haskell-side (graph.modulePodLayout, packed
+    Float32: [x, y, w, h] per module). Browser dagre dies past ~10k.
+  - We only mount DOM elements for modules whose bounding box intersects
+    the current viewport, plus a margin.
+  - A small canvas minimap shows the full graph as one pixel per module
+    so the user can navigate at scale.
+  - Edges are drawn into SVG only for the pair (visible, *) — capped at
+    EDGE_BUDGET so a hub module doesn't melt the page.
+-->
+<style>
+:root {
+  --c-defined:   #4caf50;
+  --c-postulate: #f44336;
+  --c-hole:      #9c27b0;
+  --c-failed:    #ff9800;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: #16213e;
+  border-bottom: 1px solid #0f3460;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  z-index: 50;
+}
+#toolbar .title { font-size: 13px; font-weight: 700; color: #a0b0d0; margin-right: 4px; }
+#toolbar button, #toolbar select, #toolbar input {
+  background: #0f3460;
+  border: 1px solid #1a5276;
+  color: #c0d0e8;
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+#toolbar button { cursor: pointer; }
+#toolbar button:hover { background: #1a5276; }
+#toolbar button:disabled { opacity: 0.5; cursor: default; }
+#toolbar #search { width: 220px; }
+#toolbar .spacer { flex: 1; }
+#toolbar #stats { font-size: 11px; color: #607090; font-family: 'SFMono-Regular', Consolas, monospace; }
+
+#main-area {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+
+#viewport {
+  position: absolute;
+  inset: 0;
+  cursor: grab;
+  background:
+    radial-gradient(rgba(255,255,255,0.025) 1px, transparent 1px) 0 0/40px 40px,
+    #1a1a2e;
+}
+#viewport.panning { cursor: grabbing; }
+
+#world {
+  position: absolute;
+  top: 0; left: 0;
+  width: 0; height: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+#edges-svg {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+#pods-layer {
+  position: absolute;
+  top: 0; left: 0;
+}
+
+/* ── Pod cards (positioned absolutely inside #pods-layer) ── */
+.pod {
+  position: absolute;
+  border-radius: 8px;
+  border: 1.5px solid #2a4070;
+  background: #16213e;
+  box-shadow: 0 3px 12px rgba(0,0,0,0.4);
+  user-select: none;
+  font-size: 11px;
+  overflow: hidden;
+}
+.pod.external { border-style: dashed; border-color: #3a4060; background: #12192e; opacity: 0.75; }
+.pod.entry { border-color: #e94560; box-shadow: 0 0 16px rgba(233,69,96,0.25); }
+.pod.failed { border-color: #ff9800; }
+.pod.search-match { border-color: #f9ca24; box-shadow: 0 0 12px rgba(249,202,36,0.35); }
+
+.pod-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  gap: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  height: 100%;
+}
+.pod-header:hover { background: rgba(255,255,255,0.05); }
+.pod.expanded .pod-header { border-bottom: 1px solid #2a4070; height: auto; }
+
+.pod-name {
+  font-weight: 600;
+  color: #c8d8f0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pod.external .pod-name { color: #8090a8; }
+.pod.entry .pod-name { color: #f07080; }
+
+.pod-swatches { display: flex; gap: 3px; align-items: center; }
+.swatch { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.swatch.defined  { background: var(--c-defined); }
+.swatch.postulate { background: var(--c-postulate); }
+.swatch.hole     { background: var(--c-hole); }
+.swatch.failed   { background: var(--c-failed); }
+
+.pod-count {
+  font-size: 10px;
+  color: #506080;
+  background: #0f1f3a;
+  border-radius: 10px;
+  padding: 1px 6px;
+}
+
+.chevron { font-size: 11px; color: #607090; transition: transform 0.2s; flex-shrink: 0; }
+.pod.expanded .chevron { transform: rotate(90deg); }
+
+/* Expanded pods grow downward inside their absolute-positioned wrapper.
+   We do NOT reflow the layout — pods may overlap neighbours below
+   when expanded. That's an explicit trade-off for scale. */
+.pod-defs {
+  display: none;
+  padding: 6px 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #16213e;
+  scrollbar-width: thin;
+  scrollbar-color: #2a4070 transparent;
+}
+.pod.expanded { z-index: 10; }
+.pod.expanded .pod-defs { display: block; }
+
+.def-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.def-row:hover { background: rgba(255,255,255,0.06); }
+
+.def-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.def-dot.defined   { background: var(--c-defined); }
+.def-dot.postulate { background: var(--c-postulate); }
+.def-dot.hole      { background: var(--c-hole); }
+.def-dot.failed    { background: var(--c-failed); }
+.def-name { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #b8c8e0; }
+
+/* ── SVG edges ── */
+.edge-module { stroke: #3a6090; stroke-width: 1.2; fill: none; marker-end: url(#arrowMod); opacity: 0.65; }
+.edge-highlight { stroke: #f9ca24; stroke-width: 1.8; }
+
+/* ── Minimap ── */
+#minimap {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  width: 240px;
+  height: 160px;
+  background: rgba(15,28,55,0.92);
+  border: 1px solid #2a4070;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  overflow: hidden;
+  z-index: 40;
+}
+#minimap canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+#minimap-frame {
+  position: absolute;
+  border: 1.5px solid #f9ca24;
+  background: rgba(249,202,36,0.08);
+  pointer-events: none;
+}
+
+/* ── Drawer ── */
+#drawer {
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 340px;
+  background: #16213e;
+  border-left: 1px solid #2a4070;
+  transform: translateX(100%);
+  transition: transform 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+}
+#drawer.open { transform: translateX(0); }
+
+#drawer-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid #2a4070;
+  display: flex; align-items: flex-start; gap: 8px;
+}
+#drawer-def-name { font-size: 14px; font-weight: 700; color: #c8d8f0; word-break: break-all; }
+#drawer-module-path { font-size: 11px; color: #607090; margin-top: 2px; }
+#drawer-badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; color: #fff; flex-shrink: 0; }
+#drawer-badge.defined   { background: var(--c-defined); }
+#drawer-badge.postulate { background: var(--c-postulate); }
+#drawer-badge.hole      { background: var(--c-hole); }
+#drawer-badge.failed    { background: var(--c-failed); }
+#drawer-close { background: none; border: none; color: #607090; font-size: 18px; cursor: pointer; padding: 0 4px; }
+#drawer-close:hover { color: #e0e0e0; }
+#drawer-source { flex: 1; overflow: auto; padding: 12px 14px; font-family: 'SFMono-Regular', Consolas, monospace; font-size: 12px; line-height: 1.6; color: #b0c8d0; white-space: pre-wrap; }
+
+/* ── Loading / error ── */
+#loading, #err {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: #1a1a2e; z-index: 200;
+  font-size: 13px; color: #a0b0d0;
+}
+#err { display: none; flex-direction: column; gap: 12px; padding: 20px; }
+#err.visible { display: flex; }
+#err pre { background: #16213e; border: 1px solid #2a4070; border-radius: 6px; padding: 12px; max-width: 600px; color: var(--c-postulate); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <span class="title">big-module-dag-pods</span>
+  <input id="search" type="text" placeholder="Search modules…">
+  <button id="btn-home" title="Jump to entry / origin">home</button>
+  <button id="btn-collapse-all" title="Collapse every expanded pod">collapse all</button>
+  <button id="btn-toggle-ext" class="active" title="Show / hide external modules">externals: on</button>
+  <span class="spacer"></span>
+  <span id="stats">loading…</span>
+</div>
+
+<div id="main-area">
+  <div id="viewport">
+    <svg id="edges-svg">
+      <defs>
+        <marker id="arrowMod" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L7,3 z" fill="#3a6090" opacity="0.8"/>
+        </marker>
+      </defs>
+      <g id="edges-g"></g>
+    </svg>
+    <div id="world">
+      <div id="pods-layer"></div>
+    </div>
+  </div>
+
+  <div id="minimap">
+    <canvas id="minimap-canvas"></canvas>
+    <div id="minimap-frame"></div>
+  </div>
+
+  <div id="drawer">
+    <div id="drawer-header">
+      <div style="flex:1">
+        <div id="drawer-def-name"></div>
+        <div id="drawer-module-path"></div>
+      </div>
+      <span id="drawer-badge" class="defined">Defined</span>
+      <button id="drawer-close">✕</button>
+    </div>
+    <pre id="drawer-source"></pre>
+  </div>
+</div>
+
+<div id="loading">Loading graph data…</div>
+<div id="err"><div><h2 style="margin-bottom:10px;color:var(--c-postulate)">Error</h2><pre id="err-body"></pre></div></div>
+
+<script>
+// ─── DATA LOADING PRELUDE ──────────────────────────────────────────────────
+var LAZY = false;
+var WITH_SOURCE = true;
+var GZIP_ENABLED = false;
+var AGDA_HTML_BASE = null;
+var GRAPH = {"v":2,"modules":["Agda.Builtin.Nat","Agda.Primitive","Agda.Primitive.Cubical","Bool","Bool.Bool","Coinductive","Coinductive.Stream","DeadPrivate","GoalsTest","Holes","List","List.List","Nat","Nat.Nat","Records","Records.Box","Records.Point","Test","Test.Exp","Where","Where._"],"files":["/home/mceresa/Repositories/Projects/AgdaDependencies/test/Bool.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Coinductive.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/DeadPrivate.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/GoalsTest.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Holes.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/List.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Nat.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Records.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Test.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Where.agda"],"moduleToFile":"////////////////AAAAAAAAAAABAAAAAQAAAP//////////BAAAAAUAAAAFAAAABgAAAAYAAAAHAAAABwAAAAcAAAAIAAAACAAAAAkAAAAJAAAA","fileToModules":[[3,4],[5,6],[],[],[9],[10,11],[12,13],[14,15,16],[17,18],[19,20]],"defs":{"names":["Records.Box.constructor","Bool.Bool","Test._++_","Holes.useMagic","Test.Exp.Plus","List.List.[]","Where._.sq","Test.Exp.Var","Test.eval\u0027","Test.Var-0","Nat.Nat.suc","List.List","Coinductive.Stream.tail","Nat._\u003c_","Where._.go","Test.eval","Records.double","Nat._-_","Where._.bump","Coinductive.Stream.head","Nat.Nat.zero","Holes.magic","Nat.suc-0","Records.Point.y","Records.Box.contents","Records.origin","Test.sum","List._∷_-1","Test.Int-0","Nat._*_","Nat.Nat","Nat._+_","Where.sumSquares","Records.Box","Records.mkPoint","Records.Box.count","Test.Exp.Int","Records.Point.constructor","Coinductive.zeros","Records.Point","Nat._==_","Records.Point.x","Test.Plus-1","Coinductive.Stream.constructor","Test.Exp","Where.weirdSum","Holes.unsolved#meta.3","Holes.incomplete","Test.Plus-0","Bool.Bool.true","List._∷_-0","Bool.Bool.false","Coinductive.mapSuc","Test.map","List.List._∷_","Records.sumCoords","Coinductive.Stream"],"modules":"DwAAAAMAAAARAAAACQAAABIAAAALAAAAFAAAABIAAAARAAAAEQAAAA0AAAAKAAAABgAAAAwAAAAUAAAAEQAAAA4AAAAMAAAAFAAAAAYAAAANAAAACQAAAAwAAAAQAAAADwAAAA4AAAARAAAACgAAABEAAAAMAAAADAAAAAwAAAATAAAADgAAAA4AAAAPAAAAEgAAABAAAAAFAAAADgAAAAwAAAAQAAAAEQAAAAYAAAARAAAAEwAAAAkAAAAJAAAAEQAAAAQAAAAKAAAABAAAAAUAAAARAAAACwAAAA4AAAAFAAAA","states":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAAAAAAAAAAAA","x":"7ny/P3S1DUB8m84+iGPdPwRWRkDVWys/TKaaP/32PUAFowpAz2ZZQBdIAECh80I/AU0YQBrAA0D3dZA/0gAaQL3jvD9pb/g/aW/QP40oDUCdEd0/HHzRP9xGE0BpAK8/bVbFP0p7uz9JLo8/zczMPGRdMEAwTM4/ih/TP1io1T8nMYg/QBOxP9nOrz/8GKs/ejYXQEvIlz+1pgFAqoKhP+Xy/z/4wqQ/mghjQCBjHkDAWyxAokXmP0Ot4T+Ybuo/wFtkQAu1BkAdWuQ9/BgTQNiBB0BxPbo+36YHP166sT+fzRJA","y":"ONucPimuCj4w9RM/BOecPw+cSz+Xizg/X5gcP6s+Dz8F3UY/nim0PtnOXz8EHCo/F7fRP+uQ+z7eAkE/F5pDP2tI7D7QD3M/n82SP0vI3z9hVFI/mbuuP3h6pT+J0pY/k29WPuM2ij98RFQ/n7BcP7hYcT4wEio/UMJMP3+8Zz/b3Bg/6Q6SPpjdoz8J/sc+uw8QP4/kij/IB60/zcyUP8Fu6D65jYY//fZtPynL+D8yrDI/RraLP+QUjT49Csc+FhM7Pwx5xD09LIw/0zBcPuoErD8F3TY/LJpWP1XZdz/c19k/"},"edges":{"outOffsets":"AAAAAAMAAAAFAAAACQAAAAwAAAAQAAAAEgAAABUAAAAYAAAAGwAAABsAAAAeAAAAIAAAACIAAAApAAAAMQAAADgAAAA8AAAAQAAAAEIAAABEAAAARgAAAEcAAABHAAAASgAAAE0AAABTAAAAWgAAAFoAAABaAAAAXwAAAGEAAABlAAAAaAAAAGwAAABxAAAAdAAAAHgAAAB7AAAAgQAAAIYAAACNAAAAkAAAAJAAAACSAAAAlQAAAJgAAACZAAAAmwAAAJsAAACdAAAAnQAAAJ8AAACmAAAAqgAAAK4AAAC0AAAAuQAAAA==","outTargets":"AAAAAB4AAAAhAAAAMQAAADMAAAACAAAABQAAAAsAAAA2AAAAFQAAAB4AAAAfAAAABAAAACoAAAAsAAAAMAAAAAUAAAALAAAACwAAAB0AAAAeAAAABwAAAAkAAAAsAAAAFAAAAB4AAAAsAAAACgAAABYAAAAeAAAABQAAADYAAAArAAAAOAAAAAEAAAAKAAAADQAAABQAAAAeAAAAMQAAADMAAAAFAAAABgAAAAsAAAAOAAAAFAAAAB4AAAAfAAAANgAAAAQAAAAHAAAADwAAAB4AAAAfAAAAJAAAACwAAAAdAAAAHgAAACEAAAAjAAAACgAAABEAAAAUAAAAHgAAAB4AAAAfAAAAKwAAADgAAAAUAAAAHgAAAB4AAAAeAAAAJQAAACcAAAAAAAAAHgAAACEAAAAUAAAAFwAAABkAAAAeAAAAJwAAACkAAAAFAAAACwAAABQAAAAaAAAAHgAAAB8AAAA2AAAACgAAABQAAAAdAAAAHgAAAB8AAAAKAAAAFAAAAAoAAAAUAAAAHgAAAB8AAAALAAAADgAAAB4AAAAAAAAAGAAAAB4AAAAjAAAAFwAAABkAAAAeAAAAJwAAACkAAAAAAAAAHgAAACEAAAAcAAAAHgAAACQAAAAsAAAAHgAAACUAAAAnAAAADAAAABMAAAAUAAAAHgAAACYAAAA4AAAAFwAAABkAAAAeAAAAJQAAACkAAAABAAAACgAAABQAAAAeAAAAKAAAADEAAAAzAAAAHgAAACUAAAAnAAAAKwAAADgAAAAEAAAABwAAACQAAAASAAAAHgAAAB8AAAAeAAAAHgAAAC4AAAABAAAAMQAAAAEAAAAzAAAACgAAAAwAAAATAAAAHgAAACYAAAA0AAAAOAAAAAUAAAALAAAANQAAADYAAAALAAAAGwAAADIAAAA2AAAAFwAAABkAAAAeAAAAHwAAACcAAAApAAAADAAAABMAAAAmAAAAKwAAADgAAAA=","inOffsets":"AAAAAAQAAAAIAAAACQAAAAkAAAAMAAAAEgAAABMAAAAWAAAAFgAAABcAAAAfAAAAJwAAACoAAAArAAAALQAAAC4AAAAuAAAALwAAADAAAAAzAAAAPwAAAEAAAABBAAAARQAAAEYAAABKAAAASwAAAEwAAABNAAAAUAAAAHIAAAB7AAAAewAAAH8AAAB/AAAAgQAAAIQAAACIAAAAiwAAAJEAAACSAAAAlgAAAJcAAACbAAAAoAAAAKAAAAChAAAAoQAAAKIAAACmAAAApwAAAKsAAACsAAAArQAAALMAAACzAAAAuQAAAA==","inTargets":"AAAAABgAAAAhAAAAIwAAAA0AAAAoAAAAMQAAADMAAAACAAAABAAAAA8AAAAsAAAAAgAAAAUAAAALAAAADgAAABoAAAA1AAAADgAAAAcAAAAPAAAALAAAAAcAAAAKAAAADQAAABEAAAAdAAAAHgAAAB8AAAAoAAAANAAAAAIAAAAFAAAABgAAAA4AAAAaAAAAIAAAADUAAAA2AAAAJgAAADQAAAA4AAAADQAAAA4AAAAgAAAADwAAABEAAAAtAAAAJgAAADQAAAA4AAAACAAAAA0AAAAOAAAAEQAAABQAAAAZAAAAGgAAAB0AAAAeAAAAHwAAACYAAAAoAAAAAwAAAAoAAAAZAAAAIgAAACcAAAA3AAAAIQAAABkAAAAiAAAAJwAAADcAAAAaAAAANgAAACQAAAAGAAAAEAAAAB0AAAAAAAAAAwAAAAYAAAAIAAAACgAAAA0AAAAOAAAADwAAABAAAAARAAAAEgAAABQAAAAVAAAAFwAAABgAAAAZAAAAGgAAAB0AAAAfAAAAIAAAACEAAAAiAAAAIwAAACQAAAAlAAAAJgAAACcAAAAoAAAAKQAAAC0AAAAuAAAALwAAADQAAAA3AAAAAwAAAA4AAAAPAAAAEgAAABoAAAAdAAAAHwAAAC0AAAA3AAAAAAAAABAAAAAYAAAAIwAAABAAAAAhAAAADwAAACQAAAAsAAAAFwAAACUAAAAnAAAAKQAAACYAAAA0AAAAOAAAABcAAAAZAAAAIgAAACUAAAApAAAANwAAACgAAAAZAAAAIgAAACcAAAA3AAAABAAAAAwAAAATAAAAKwAAADgAAAAEAAAABwAAAAgAAAAPAAAAJAAAAC8AAAAEAAAAAQAAAA0AAAAoAAAAMQAAADYAAAABAAAADQAAACgAAAAzAAAANAAAADUAAAACAAAACwAAAA4AAAAaAAAANQAAADYAAAAMAAAAEwAAACYAAAArAAAANAAAADgAAAA="},"definitionEdgesProvenance":"AQAAAQEBAQABAQABAQEAAQEAAAEAAQEAAQAAAQEAAQEBAAABAQEAAQEBAgACAQABAQEBAQABAQABAAABAQEBAAABAQABAAAAAQABAQABAQQBAAEBAAEBAAEBAQEBAAEBAQEBAAEAAgABAQEBAQQAAAEBAAABAAEAAAEAAQEBAAEAAQQBAQEAAQEAAQEBAAEAAQABAQECAAEAAAEAAQABAQEBAAQBAAEAAQEAAQEBAQQAAQABAQEEAQE=","transitiveEdges":"sAwAAIsMAACEDAAAowwAAJ4MAABzBAAAZgQAAOQCAADXAgAAywkAAL4JAACUCAAAiggAAK4IAACJCAAAgggAAJwIAACyCwAAzAsAAJ4LAACnCwAAoAsAALoLAADQCQAA8AkAANMJAAAQAQAA6AAAABQBAAAOAQAAIggAADAIAAAoCAAAIAgAALsBAACWAQAAmAEAAHUDAACDAwAAdgMAAFsDAAB7AwAAXgMAAOYBAADcAQAA6AUAAN4FAADVBQAA6QUAAM8FAAAABgAAfQAAAHcAAACoAAAA2AsAANILAAADDAAAzQgAANgIAADGCAAA1AgAAMgIAABICQAAPwkAAEYJAABGBQAAPQUAAEQFAABkCAAAWwgAAGIIAAC5BwAAsAcAALsHAACpBwAAqwcAAGYMAABdDAAAaAwAAFYMAABYDAAAuAUAAK8FAAClBQAAugUAAKgFAACqBQAAdwcAAHEHAAB8BwAAWQcAAHYFAAB5BQAAWAUAAOkHAADsBwAAywcAAB4AAAAhAAAAAAAAAK4DAACxAwAAswMAAJUKAADJAAAAbAAAAGoAAABcCwAAjgsAAOoKAAAaCwAAeAIAAKkCAAAoAQAAIgEAABEMAAA8DAAAOAwAACEMAADCBgAAuAYAAJIEAACIBAAAWAIAAEQCAABQAgAABQcAAPsGAADxBgAA5wMAAN0DAADTAwAAkwYAAIkGAAB/BgAAlAYAAOkIAAAGCQAAGwkAAPwIAAAZCQAA8ggAAOYCAAADAwAAGAMAAPkCAAAWAwAA7wIAAD4HAAArBwAAdAEAADwDAAAyAwAAKQMAAD0DAAAkAwAAIwMAAFQDAAAjCgAAJAoAACAEAAA=","moduleEdges":[[2,1],[3,1],[3,4],[4,3],[5,1],[5,6],[5,12],[5,13],[6,5],[7,0],[8,10],[8,12],[9,1],[9,12],[10,1],[10,11],[11,10],[12,1],[12,3],[12,4],[12,13],[13,12],[14,1],[14,12],[14,13],[14,15],[14,16],[15,12],[15,14],[16,12],[16,14],[17,1],[17,5],[17,9],[17,10],[17,11],[17,12],[17,13],[17,14],[17,18],[17,19],[18,12],[18,17],[19,1],[19,10],[19,12],[19,20],[20,10],[20,11],[20,12],[20,13]],"transitiveModuleEdges":[[3,1],[5,1],[5,12],[5,13],[9,1],[10,1],[12,1],[12,3],[12,4],[14,1],[14,12],[14,13],[14,15],[14,16],[15,12],[16,12],[17,1],[17,5],[17,9],[17,10],[17,11],[17,12],[17,13],[17,14],[17,19],[18,12],[19,1],[19,10],[19,12],[20,10],[20,11],[20,12],[20,13]],"moduleStates":"AAAAAAAAAAAAAAAAAAAAAAAAAAAA","moduleStateCounts":[[0,0,0,0],[0,0,0,0],[0,0,0,0],[1,0,0,0],[2,0,0,0],[3,0,0,0],[3,0,0,0],[0,0,0,0],[0,0,0,0],[1,1,2,0],[3,0,0,0],[2,0,0,0],[7,0,0,0],[2,0,0,0],[6,0,0,0],[3,0,0,0],[3,0,0,0],[10,0,0,0],[3,0,0,0],[2,0,0,0],[3,0,0,0]],"moduleDepth":"/////wEAAAD/////AgAAAAIAAAABAAAAAgAAAP//////////AQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAgAAAAIAAAAAAAAAAQAAAAEAAAACAAAA","modulePodLayout":"AIDewwAABEMAAEhDAABQQgAAV8MAAARDAABIQwAAUEIAgPLEAAAAAAAASEMAAFBCAMDVxAAAAAAAAEhDAABQQgAAucQAAAAAAABIQwAAUEIAQJzEAAAAAAAASEMAAFBCAAB/xAAAAAAAAEhDAABQQgCARcQAAAAAAABIQwAAUEIAAAzEAAAAAAAASEMAAFBCAAClwwAAAAAAAEhDAABQQgAAcEEAAARDAABIQwAAUEIAAMjCAAAAAAAASEMAAFBCAAB1QwAABEMAAEhDAABQQgAAAkMAAAAAAABIQwAAUEIAALRDAAAAAAAASEMAAFBCAIATRAAAAAAAAEhDAABQQgAATUQAAAAAAABIQwAAUEIAQINEAAAAAAAASEMAAFBCAACgRAAAAAAAAEhDAABQQgDAvEQAAAAAAABIQwAAUEIAgNlEAAAAAAAASEMAAFBC","fileTree":[{"name":"home","parent":-1,"fileIndex":null},{"name":"mceresa","parent":0,"fileIndex":null},{"name":"Repositories","parent":1,"fileIndex":null},{"name":"Projects","parent":2,"fileIndex":null},{"name":"AgdaDependencies","parent":3,"fileIndex":null},{"name":"test","parent":4,"fileIndex":null},{"name":"Bool.agda","parent":5,"fileIndex":0},{"name":"Coinductive.agda","parent":5,"fileIndex":1},{"name":"DeadPrivate.agda","parent":5,"fileIndex":2},{"name":"GoalsTest.agda","parent":5,"fileIndex":3},{"name":"Holes.agda","parent":5,"fileIndex":4},{"name":"List.agda","parent":5,"fileIndex":5},{"name":"Nat.agda","parent":5,"fileIndex":6},{"name":"Records.agda","parent":5,"fileIndex":7},{"name":"Test.agda","parent":5,"fileIndex":8},{"name":"Where.agda","parent":5,"fileIndex":9}],"moduleTree":[{"name":"Agda","parent":-1,"moduleIndex":null},{"name":"Builtin","parent":0,"moduleIndex":null},{"name":"Nat","parent":1,"moduleIndex":0},{"name":"Primitive","parent":0,"moduleIndex":1},{"name":"Cubical","parent":3,"moduleIndex":2},{"name":"Bool","parent":-1,"moduleIndex":3},{"name":"Bool","parent":5,"moduleIndex":4},{"name":"Coinductive","parent":-1,"moduleIndex":5},{"name":"Stream","parent":7,"moduleIndex":6},{"name":"DeadPrivate","parent":-1,"moduleIndex":7},{"name":"GoalsTest","parent":-1,"moduleIndex":8},{"name":"Holes","parent":-1,"moduleIndex":9},{"name":"List","parent":-1,"moduleIndex":10},{"name":"List","parent":12,"moduleIndex":11},{"name":"Nat","parent":-1,"moduleIndex":12},{"name":"Nat","parent":14,"moduleIndex":13},{"name":"Records","parent":-1,"moduleIndex":14},{"name":"Box","parent":16,"moduleIndex":15},{"name":"Point","parent":16,"moduleIndex":16},{"name":"Test","parent":-1,"moduleIndex":17},{"name":"Exp","parent":19,"moduleIndex":18},{"name":"Where","parent":-1,"moduleIndex":19},{"name":"_","parent":21,"moduleIndex":20}],"entryModule":"Test","externalModules":"AAAAAAEAAAACAAAA","bundleFiles":{"Bool":"snippets/Bool.json","Bool.Bool":"snippets/Bool.Bool.json","Coinductive":"snippets/Coinductive.json","Coinductive.Stream":"snippets/Coinductive.Stream.json","Holes":"snippets/Holes.json","List":"snippets/List.json","List.List":"snippets/List.List.json","Nat":"snippets/Nat.json","Nat.Nat":"snippets/Nat.Nat.json","Records":"snippets/Records.json","Records.Box":"snippets/Records.Box.json","Records.Point":"snippets/Records.Point.json","Test":"snippets/Test.json","Test.Exp":"snippets/Test.Exp.json","Where":"snippets/Where.json","Where._":"snippets/Where._.json"},"searchIndex":{"names":["agda.builtin.nat","agda.primitive","agda.primitive.cubical","bool","bool.bool","coinductive","coinductive.stream","deadprivate","goalstest","holes","list","list.list","nat","nat.nat","records","records.box","records.point","test","test.exp","where","where._","records.box.constructor","bool.bool","test._++_","holes.usemagic","test.exp.plus","list.list.[]","where._.sq","test.exp.var","test.eval\u0027","test.var-0","nat.nat.suc","list.list","coinductive.stream.tail","nat._\u003c_","where._.go","test.eval","records.double","nat._-_","where._.bump","coinductive.stream.head","nat.nat.zero","holes.magic","nat.suc-0","records.point.y","records.box.contents","records.origin","test.sum","list._∷_-1","test.int-0","nat._*_","nat.nat","nat._+_","where.sumsquares","records.box","records.mkpoint","records.box.count","test.exp.int","records.point.constructor","coinductive.zeros","records.point","nat._==_","records.point.x","test.plus-1","coinductive.stream.constructor","test.exp","where.weirdsum","holes.unsolved#meta.3","holes.incomplete","test.plus-0","bool.bool.true","list._∷_-0","bool.bool.false","coinductive.mapsuc","test.map","list.list._∷_","records.sumcoords","coinductive.stream"],"kinds":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB","bigrams":{"#m":[67],"*_":[50],"++":[23],"+_":[23,52],"-0":[30,43,49,69,71],"-1":[48,63],"-_":[38],".3":[67],".[":[26],"._":[20,23,27,34,35,38,39,48,50,52,61,71,75],".b":[0,4,15,21,22,39,45,54,56,70,72],".c":[2,21,45,56,58,64],".d":[37],".e":[18,25,28,29,36,57,65],".f":[72],".g":[35],".h":[40],".i":[49,57,68],".l":[11,26,32,75],".m":[42,55,73,74],".n":[0,13,31,41,51],".o":[46],".p":[1,2,16,25,44,58,60,62,63,69],".s":[6,27,31,33,40,43,47,53,64,76,77],".t":[33,70],".u":[24,67],".v":[28,30],".w":[66],".x":[62],".y":[44],".z":[41,59],"\u003c_":[34],"==":[61],"=_":[61],"[]":[26],"_*":[50],"_+":[23,52],"_-":[38,48,71],"_.":[27,35,39],"_\u003c":[34],"_=":[61],"_∷":[48,71,75],"a.":[0,1,2,67],"ad":[7,40],"ag":[0,1,2,24,42],"ai":[33],"al":[2,8,29,36,72],"am":[6,33,40,64,77],"ap":[73,74],"ar":[28,30,53],"at":[0,7,12,13,31,34,38,41,43,50,51,52,61],"bi":[2],"bl":[37],"bo":[3,4,15,21,22,45,54,56,70,72],"bu":[0,39],"c-":[43],"ca":[2],"co":[5,6,14,15,16,21,33,37,40,44,45,46,54,55,56,58,59,60,62,64,68,73,76,77],"ct":[5,6,21,33,40,58,59,64,73,77],"cu":[2],"d#":[67],"da":[0,1,2],"de":[7],"do":[37],"dp":[7],"ds":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,66,76],"du":[5,6,33,40,59,64,73,77],"e.":[2,6,20,27,33,35,39,40,53,59,64,66,73,77],"ea":[6,7,33,40,64,77],"ec":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,76],"ed":[67],"ei":[66],"em":[24],"en":[45],"er":[19,20,27,35,39,41,53,59,66],"es":[8,9,17,18,23,24,25,28,29,30,36,42,47,49,53,57,63,65,67,68,69,74],"et":[67,68],"ev":[29,36],"ex":[18,25,28,57,65],"fa":[72],"gd":[0,1,2],"gi":[24,42,46],"go":[8,35],"he":[19,20,27,35,39,40,53,66],"ho":[9,24,42,67,68],"ic":[2,24,42],"ig":[46],"il":[0,33],"im":[1,2],"in":[0,5,6,16,33,40,44,46,49,55,57,58,59,60,62,64,68,73,77],"ir":[66],"is":[10,11,26,32,48,71,75],"it":[1,2],"iv":[1,2,5,6,7,33,40,59,64,73,77],"kp":[55],"l\u0027":[29],"l.":[4,22,70,72],"le":[9,24,37,42,67,68],"li":[10,11,26,32,48,71,75],"ls":[8,72],"lt":[0],"lu":[25,63,69],"lv":[67],"m.":[33,40,64],"ma":[24,42,73,74],"mc":[76],"me":[67],"mi":[1,2],"mk":[55],"mp":[39,68],"ms":[53],"n.":[0],"na":[0,12,13,31,34,38,41,43,50,51,52,61],"nc":[68],"nd":[5,6,33,40,59,64,73,77],"ns":[21,58,64,67],"nt":[16,44,45,49,55,56,57,58,60,62],"oa":[8],"oi":[5,6,16,33,40,44,55,58,59,60,62,64,73,77],"ol":[3,4,9,22,24,42,67,68,70,72],"om":[68],"on":[21,45,58,64],"oo":[3,4,22,70,72,76],"or":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,64,76],"os":[59],"ou":[37,56],"ox":[15,21,45,54,56],"p.":[25,28,57],"pl":[25,63,68,69],"po":[16,44,55,58,60,62],"pr":[1,2,7],"ps":[73],"qu":[53],"r-":[30],"rd":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,66,76],"re":[6,14,15,16,19,20,21,27,33,35,37,39,40,44,45,46,53,54,55,56,58,60,62,64,66,76,77],"ri":[1,2,7,46],"ro":[41,59],"ru":[21,58,64,70],"s-":[63,69],"s.":[15,16,21,24,37,42,44,45,46,54,55,56,58,60,62,67,68,76],"se":[24,72],"so":[67],"sq":[27,53],"st":[6,8,10,11,17,18,21,23,25,26,28,29,30,32,33,36,40,47,48,49,57,58,63,64,65,69,71,74,75,77],"su":[31,43,47,53,66,73,76],"t-":[49],"t.":[11,13,18,23,25,26,28,29,30,31,32,34,36,38,41,43,44,47,48,49,50,51,52,57,58,61,62,63,65,69,71,74,75],"ta":[33,67],"te":[7,8,17,18,23,25,28,29,30,36,45,47,49,57,63,65,68,69,74],"ti":[0,1,2,5,6,33,40,59,64,73,77],"to":[21,58,64],"tr":[6,21,33,40,58,64,70,77],"ts":[45],"ua":[53],"ub":[2,37],"uc":[5,6,21,31,33,40,43,58,59,64,73,77],"ue":[70],"ui":[0],"um":[39,47,53,66,76],"un":[56,67],"us":[24,25,63,69],"va":[7,28,29,30,36],"ve":[1,2,5,6,33,40,59,64,67,73,77],"we":[66],"wh":[19,20,27,35,39,53,66],"x.":[21,45,56],"xp":[18,25,28,57,65],"ze":[41,59],"∷_":[48,71,75]}}};
+var GRAPH_URL = null;
+var SNIPPETS_BASE = null;
+var MODULES_BASE = null;
+
+// ─── BASE64 DECODERS ───────────────────────────────────────────────────────
+function b64Bytes(b64) {
+  if (!b64) return new Uint8Array(0);
+  var bin = atob(b64), out = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64I32(b64) { return new Int32Array(b64Bytes(b64).buffer); }
+function b64I8(b64)  { return new Int8Array(b64Bytes(b64).buffer); }
+function b64F32(b64) { return new Float32Array(b64Bytes(b64).buffer); }
+
+// ─── FETCH HELPERS ─────────────────────────────────────────────────────────
+async function fetchJson(url) {
+  if (GZIP_ENABLED && window.pako) {
+    try {
+      var r = await fetch(url + '.gz');
+      if (r.ok) {
+        var ab = await r.arrayBuffer();
+        var txt = pako.inflate(new Uint8Array(ab), {to:'string'});
+        return JSON.parse(txt);
+      }
+    } catch(e) {}
+  }
+  var r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching ' + url);
+  return r.json();
+}
+function showErr(msg) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('err-body').textContent = msg;
+  document.getElementById('err').classList.add('visible');
+}
+
+// ─── APP STATE ─────────────────────────────────────────────────────────────
+var g = null;
+var modules = [];                 // string[]
+var podLayout = null;             // Float32Array, 4 per module: x, y, w, h
+var moduleCounts = [];            // [[d, p, h, f], …]
+var moduleStates = null;          // Int8Array (failed flag) | null
+var moduleDepth  = null;          // Int32Array | null
+var externalSet  = new Set();
+var entryIdx     = -1;
+var moduleEdges  = [];            // [[s, t], …]
+var outByMod     = new Map();
+var inByMod      = new Map();
+
+// Camera in world-coords.
+var pan  = { x: 0, y: 0 };
+var zoom = 1;
+
+// Spatial index over the pre-computed pod layout.
+var BUCKET_SIZE = 800;
+var bucketGrid  = new Map();      // 'bx,by' → [moduleIdx, …]
+
+// Currently-mounted pods.
+var mountedPods = new Map();      // moduleIdx → HTMLElement
+var expandedPods = new Set();
+var pendingDetailFetches = new Map();   // moduleIdx → Promise
+
+// Cached lazy-mode bundles.
+var moduleDetailCache = new Map(); // modName → {defs:[…]}
+var snippetCache      = new Map(); // modName → {hashKey: {source, sourceLine}}
+var inlineDefs        = null;      // { names, modules, states, x, y } | null
+
+// Render budgets.
+var EDGE_BUDGET   = 4000;          // SVG paths cap per frame
+var EXPAND_LIMIT  = 50;            // outstanding 'expanded' pods (each holds defs in DOM)
+var VIEWPORT_PAD  = 200;           // graph-space margin around the visible window
+
+var showExternals = true;
+var searchQuery   = '';
+
+// ─── INIT ──────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    g = LAZY ? await fetchJson(GRAPH_URL) : GRAPH;
+  } catch(e) {
+    showErr('Failed to load graph data: ' + e.message +
+            (LAZY ? '\n\nThe lazy bundle uses fetch(); make sure you serve via HTTP, not file://.' : ''));
+    return;
+  }
+
+  modules      = g.modules || [];
+  podLayout    = g.modulePodLayout ? b64F32(g.modulePodLayout) : null;
+  moduleCounts = g.moduleStateCounts || [];
+  moduleStates = g.moduleStates ? b64I8(g.moduleStates) : null;
+  moduleDepth  = g.moduleDepth  ? b64I32(g.moduleDepth)  : null;
+  if (g.externalModules) {
+    var arr = b64I32(g.externalModules);
+    for (var i = 0; i < arr.length; i++) externalSet.add(arr[i]);
+  }
+  entryIdx = g.entryModule ? modules.indexOf(g.entryModule) : -1;
+  moduleEdges = g.moduleEdges || [];
+
+  if (!podLayout || podLayout.length < modules.length * 4) {
+    showErr('Graph is missing pre-computed module layout (modulePodLayout). ' +
+            'Re-emit with a current build of agda-deps.');
+    return;
+  }
+  if (modules.length === 0) {
+    showErr('Graph contains no modules.');
+    return;
+  }
+
+  // Adjacency for edge culling.
+  moduleEdges.forEach(function(e) {
+    var s = e[0], t = e[1];
+    if (!outByMod.has(s)) outByMod.set(s, []);
+    if (!inByMod.has(t))  inByMod.set(t,  []);
+    outByMod.get(s).push(t);
+    inByMod.get(t).push(s);
+  });
+
+  // Inline-mode defs are already in GRAPH.defs.
+  if (!LAZY && g.defs) {
+    var d = g.defs;
+    inlineDefs = {
+      names:   d.names || [],
+      modules: d.modules ? b64I32(d.modules) : null,
+      states:  d.states  ? b64I8(d.states)   : null
+    };
+  }
+
+  buildSpatialIndex();
+  initMinimap();
+  centerOnEntry();
+
+  document.getElementById('loading').style.display = 'none';
+
+  rerender();
+  wireToolbar();
+  wireViewport();
+  updateStats();
+}
+
+// ─── SPATIAL INDEX ─────────────────────────────────────────────────────────
+function buildSpatialIndex() {
+  for (var i = 0; i < modules.length; i++) {
+    var x = podLayout[i*4 + 0];
+    var y = podLayout[i*4 + 1];
+    var w = podLayout[i*4 + 2];
+    var h = podLayout[i*4 + 3];
+    var bxMin = Math.floor(x / BUCKET_SIZE);
+    var bxMax = Math.floor((x + w) / BUCKET_SIZE);
+    var byMin = Math.floor(y / BUCKET_SIZE);
+    var byMax = Math.floor((y + h) / BUCKET_SIZE);
+    for (var bx = bxMin; bx <= bxMax; bx++) {
+      for (var by = byMin; by <= byMax; by++) {
+        var key = bx + ',' + by;
+        var arr = bucketGrid.get(key);
+        if (!arr) { arr = []; bucketGrid.set(key, arr); }
+        arr.push(i);
+      }
+    }
+  }
+}
+
+function modulesInRect(x0, y0, x1, y1) {
+  var bxMin = Math.floor(x0 / BUCKET_SIZE);
+  var bxMax = Math.floor(x1 / BUCKET_SIZE);
+  var byMin = Math.floor(y0 / BUCKET_SIZE);
+  var byMax = Math.floor(y1 / BUCKET_SIZE);
+  var hit = new Set();
+  for (var bx = bxMin; bx <= bxMax; bx++) {
+    for (var by = byMin; by <= byMax; by++) {
+      var arr = bucketGrid.get(bx + ',' + by);
+      if (!arr) continue;
+      for (var k = 0; k < arr.length; k++) {
+        var i = arr[k];
+        if (hit.has(i)) continue;
+        var x = podLayout[i*4 + 0], y = podLayout[i*4 + 1];
+        var w = podLayout[i*4 + 2], h = podLayout[i*4 + 3];
+        if (x > x1 || x + w < x0 || y > y1 || y + h < y0) continue;
+        if (!showExternals && externalSet.has(i)) continue;
+        hit.add(i);
+      }
+    }
+  }
+  return hit;
+}
+
+// ─── VIEWPORT TRANSFORM ────────────────────────────────────────────────────
+function currentViewportRect() {
+  var vw = document.getElementById('viewport').clientWidth;
+  var vh = document.getElementById('viewport').clientHeight;
+  // Pixel-space (0,0)-(vw,vh) maps to world coords via inverse transform.
+  var x0 = (-pan.x) / zoom - VIEWPORT_PAD;
+  var y0 = (-pan.y) / zoom - VIEWPORT_PAD;
+  var x1 = (vw - pan.x) / zoom + VIEWPORT_PAD;
+  var y1 = (vh - pan.y) / zoom + VIEWPORT_PAD;
+  return { x0: x0, y0: y0, x1: x1, y1: y1 };
+}
+
+function applyTransform() {
+  document.getElementById('world').style.transform =
+    'translate(' + pan.x + 'px, ' + pan.y + 'px) scale(' + zoom + ')';
+  // The SVG edges layer lives outside #world (fixed to the viewport)
+  // so its <g> applies the same transform.
+  document.getElementById('edges-g').setAttribute(
+    'transform',
+    'translate(' + pan.x + ' ' + pan.y + ') scale(' + zoom + ')'
+  );
+}
+
+function centerOnEntry() {
+  var vp = document.getElementById('viewport');
+  if (!vp) return;
+  var vw = vp.clientWidth, vh = vp.clientHeight;
+  if (entryIdx >= 0) {
+    var x = podLayout[entryIdx*4 + 0];
+    var y = podLayout[entryIdx*4 + 1];
+    var w = podLayout[entryIdx*4 + 2];
+    var h = podLayout[entryIdx*4 + 3];
+    pan.x = vw / 2 - (x + w / 2) * zoom;
+    pan.y = vh / 3 - (y + h / 2) * zoom;
+  } else {
+    pan.x = vw / 2;
+    pan.y = 40;
+  }
+  applyTransform();
+}
+
+// ─── POD MOUNT / UNMOUNT ───────────────────────────────────────────────────
+function rerender() {
+  var rect = currentViewportRect();
+  var visible = modulesInRect(rect.x0, rect.y0, rect.x1, rect.y1);
+
+  // Unmount pods no longer visible (unless expanded — keep those around
+  // so the user doesn't lose their work on a pan).
+  mountedPods.forEach(function(el, i) {
+    if (!visible.has(i) && !expandedPods.has(i)) {
+      el.parentNode && el.parentNode.removeChild(el);
+      mountedPods.delete(i);
+    }
+  });
+
+  // Mount newly visible pods.
+  var layer = document.getElementById('pods-layer');
+  visible.forEach(function(i) {
+    if (!mountedPods.has(i)) {
+      var el = createPod(i);
+      layer.appendChild(el);
+      mountedPods.set(i, el);
+    }
+  });
+
+  drawEdges(visible);
+  updateMinimapFrame();
+}
+
+function createPod(i) {
+  var name = modules[i];
+  var x = podLayout[i*4 + 0], y = podLayout[i*4 + 1];
+  var w = podLayout[i*4 + 2], h = podLayout[i*4 + 3];
+  var isExt   = externalSet.has(i);
+  var isEntry = (i === entryIdx);
+  var isFail  = !!(moduleStates && moduleStates[i] === 1);
+  var c       = moduleCounts[i] || [0, 0, 0, 0];
+
+  var el = document.createElement('div');
+  el.className = 'pod' +
+    (isExt   ? ' external' : '') +
+    (isEntry ? ' entry'    : '') +
+    (isFail  ? ' failed'   : '');
+  el.dataset.idx = i;
+  el.style.left   = x + 'px';
+  el.style.top    = y + 'px';
+  el.style.width  = w + 'px';
+  el.style.height = h + 'px';
+
+  var header = document.createElement('div');
+  header.className = 'pod-header';
+
+  var chevron = document.createElement('span');
+  chevron.className = 'chevron';
+  chevron.textContent = '▶';
+
+  var nameEl = document.createElement('div');
+  nameEl.className = 'pod-name';
+  nameEl.textContent = shortName(name);
+  nameEl.title = name;
+
+  var swatches = document.createElement('div');
+  swatches.className = 'pod-swatches';
+  if (c[0]) swatches.appendChild(swatch('defined',   c[0] + ' defined'));
+  if (c[1]) swatches.appendChild(swatch('postulate', c[1] + ' postulate'));
+  if (c[2]) swatches.appendChild(swatch('hole',      c[2] + ' hole'));
+  if (c[3] || isFail) swatches.appendChild(swatch('failed', (c[3] || 1) + ' failed'));
+
+  var countEl = document.createElement('div');
+  countEl.className = 'pod-count';
+  countEl.textContent = c[0] + c[1] + c[2] + c[3];
+
+  header.appendChild(chevron);
+  header.appendChild(nameEl);
+  header.appendChild(swatches);
+  header.appendChild(countEl);
+  el.appendChild(header);
+
+  if (expandedPods.has(i)) {
+    el.classList.add('expanded');
+    var defsEl = document.createElement('div');
+    defsEl.className = 'pod-defs';
+    fillDefs(defsEl, i);
+    el.appendChild(defsEl);
+  }
+
+  if (searchQuery && name.toLowerCase().indexOf(searchQuery) >= 0) {
+    el.classList.add('search-match');
+  }
+
+  return el;
+}
+
+function swatch(cls, title) {
+  var s = document.createElement('span');
+  s.className = 'swatch ' + cls;
+  s.title = title;
+  return s;
+}
+
+function shortName(name) {
+  if (name.length <= 28) return name;
+  return '…' + name.slice(-26);
+}
+
+// ─── EXPAND / COLLAPSE ─────────────────────────────────────────────────────
+async function togglePod(i) {
+  if (expandedPods.has(i)) {
+    expandedPods.delete(i);
+    var el = mountedPods.get(i);
+    if (el) {
+      el.classList.remove('expanded');
+      var defs = el.querySelector('.pod-defs');
+      if (defs) defs.parentNode.removeChild(defs);
+    }
+    return;
+  }
+
+  // Enforce a soft cap so a panic-click on a long list doesn't drag
+  // thousands of defs into the DOM at once.
+  if (expandedPods.size >= EXPAND_LIMIT) {
+    var firstExpanded = expandedPods.values().next().value;
+    if (firstExpanded !== undefined) {
+      expandedPods.delete(firstExpanded);
+      var oldEl = mountedPods.get(firstExpanded);
+      if (oldEl) {
+        oldEl.classList.remove('expanded');
+        var d = oldEl.querySelector('.pod-defs');
+        if (d) d.parentNode.removeChild(d);
+      }
+    }
+  }
+
+  expandedPods.add(i);
+  if (LAZY) {
+    await ensureModuleDetail(i);
+  }
+  var el = mountedPods.get(i);
+  if (!el) return;     // user scrolled away while we fetched
+  el.classList.add('expanded');
+  var defsEl = el.querySelector('.pod-defs');
+  if (!defsEl) {
+    defsEl = document.createElement('div');
+    defsEl.className = 'pod-defs';
+    el.appendChild(defsEl);
+  }
+  fillDefs(defsEl, i);
+}
+
+// Placeholder detail files — emitted by the producer for modules
+// that are declared in moduleFiles but have no kept defs (external
+// stdlib modules, all-filtered modules, or modules in the failed-
+// typecheck set under --keep-going). Detail JSON carries
+// { placeholder: true, reason: "external"|"failed"|"filtered",
+//   module: "<name>", externalPostulates?: [...] }. We render an
+// in-pod message instead of trying to show empty defs.
+function placeholderReasonText(reason) {
+  switch (reason) {
+    case 'external':
+      return 'External module — outside the project root. ' +
+             'It was referenced but not analysed.';
+    case 'failed':
+      return 'This module failed to type-check (--keep-going). ' +
+             'Its contents are unknown.';
+    case 'filtered':
+      return 'Every definition in this module was filtered out ' +
+             '(private, generated, or module-instantiation copy).';
+    default:
+      return 'This module was not analysed.';
+  }
+}
+
+function renderPlaceholderHTML(detail) {
+  var reason = (detail && detail.reason) || 'unknown';
+  var reasonText = placeholderReasonText(reason);
+  var postulates = (detail && detail.externalPostulates) || [];
+  var extra = '';
+  if (postulates.length) {
+    var shown = postulates.slice(0, 6)
+                          .map(function (p) {
+                            return '<code style="background:#eef;padding:0 3px;border-radius:2px;font-size:10px;">' +
+                                    String(p).replace(/[&<>]/g, function (c) {
+                                      return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;';
+                                    }) +
+                                   '</code>';
+                          })
+                          .join(', ');
+    var more = postulates.length > 6 ? ' …' : '';
+    extra = '<div style="margin-top:6px;font-size:11px;color:#506080;">' +
+              'Postulates: ' + shown + more +
+            '</div>';
+  }
+  return '<div class="pod-placeholder" ' +
+              'style="padding:8px 6px;font-size:11px;color:#5a6f8a;' +
+                     'font-style:italic;line-height:1.45;">' +
+           '<div style="font-style:normal;font-size:10px;text-transform:uppercase;' +
+                       'letter-spacing:0.5px;color:#7a8aa0;margin-bottom:4px;">' +
+              reason +
+           '</div>' +
+           reasonText +
+           extra +
+         '</div>';
+}
+
+async function ensureModuleDetail(i) {
+  var name = modules[i];
+  if (moduleDetailCache.has(name)) return moduleDetailCache.get(name);
+  if (pendingDetailFetches.has(i)) return pendingDetailFetches.get(i);
+  var file = (g.moduleFiles && g.moduleFiles[name]) || null;
+  if (!file) return null;
+  var url = MODULES_BASE + file.replace(/^modules\//, '');
+  var p = fetchJson(url).then(function(d) {
+    moduleDetailCache.set(name, d);
+    pendingDetailFetches.delete(i);
+    return d;
+  }).catch(function(e) {
+    console.warn('agda-deps: failed to fetch detail for ' + name + ':', e);
+    pendingDetailFetches.delete(i);
+    return null;
+  });
+  pendingDetailFetches.set(i, p);
+  return p;
+}
+
+function fillDefs(container, i) {
+  container.innerHTML = '';
+  var modName = modules[i];
+  if (LAZY) {
+    var det = moduleDetailCache.get(modName);
+    if (det && det.placeholder) {
+      container.innerHTML = renderPlaceholderHTML(det);
+      return;
+    }
+  }
+  var defs = defsForModule(i);
+  if (!defs || defs.length === 0) {
+    var p = document.createElement('div');
+    p.style.color = '#506080';
+    p.style.fontSize = '11px';
+    p.style.padding = '4px';
+    p.textContent = '(no definitions in this module)';
+    container.appendChild(p);
+    return;
+  }
+  defs.forEach(function(d) {
+    var row = document.createElement('div');
+    row.className = 'def-row';
+    var dot = document.createElement('span');
+    dot.className = 'def-dot ' + d.state;
+    var name = document.createElement('span');
+    name.className = 'def-name';
+    name.textContent = d.name;
+    name.title = d.fullName;
+    row.appendChild(dot);
+    row.appendChild(name);
+    container.appendChild(row);
+    row.addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      openDrawer(d, modules[i]);
+    });
+  });
+}
+
+function defsForModule(i) {
+  var name = modules[i];
+  if (LAZY) {
+    var det = moduleDetailCache.get(name);
+    if (!det || !det.defs) return [];
+    var n = det.defs.names || [];
+    var st = det.defs.states ? b64I8(det.defs.states) : null;
+    var out = [];
+    for (var k = 0; k < n.length; k++) {
+      out.push({
+        name: shortDefName(n[k], name),
+        fullName: n[k],
+        state: stateClass(st ? st[k] : 0)
+      });
+    }
+    return out;
+  }
+  // Inline mode
+  if (!inlineDefs || !inlineDefs.modules) return [];
+  var matches = [];
+  for (var j = 0; j < inlineDefs.names.length; j++) {
+    if (inlineDefs.modules[j] !== i) continue;
+    matches.push({
+      name: shortDefName(inlineDefs.names[j], name),
+      fullName: inlineDefs.names[j],
+      state: stateClass(inlineDefs.states ? inlineDefs.states[j] : 0)
+    });
+  }
+  return matches;
+}
+
+function stateClass(s) {
+  return s === 1 ? 'postulate' : s === 2 ? 'hole' : s === 3 ? 'failed' : 'defined';
+}
+
+function shortDefName(fullName, modName) {
+  if (fullName.indexOf(modName + '.') === 0) return fullName.slice(modName.length + 1);
+  var parts = fullName.split('.');
+  return parts[parts.length - 1];
+}
+
+// ─── DRAWER (source preview) ──────────────────────────────────────────────
+async function openDrawer(d, modName) {
+  document.getElementById('drawer-def-name').textContent = d.name;
+  document.getElementById('drawer-module-path').textContent = modName;
+  var badge = document.getElementById('drawer-badge');
+  badge.textContent = d.state.charAt(0).toUpperCase() + d.state.slice(1);
+  badge.className = ''; badge.classList.add(d.state);
+  var src = document.getElementById('drawer-source');
+  src.textContent = '(loading…)';
+  document.getElementById('drawer').classList.add('open');
+
+  // Try the snippet bundle (only available with --with-source).
+  var bundle = await ensureSnippetBundle(modName);
+  if (!bundle) {
+    src.textContent = WITH_SOURCE
+      ? '-- snippet bundle not available for this module --'
+      : '-- run with --with-source to embed Agda source snippets --';
+    return;
+  }
+  var key = String(hashFullName(d.fullName));
+  var entry = bundle[key];
+  src.textContent = entry ? entry.source : '-- no snippet for this definition --';
+}
+
+async function ensureSnippetBundle(modName) {
+  if (!WITH_SOURCE) return null;
+  if (snippetCache.has(modName)) return snippetCache.get(modName);
+  if (LAZY) {
+    var file = (g.bundleFiles && g.bundleFiles[modName]) || null;
+    if (!file) return null;
+    var url = SNIPPETS_BASE + file.replace(/^snippets\//, '');
+    try {
+      var b = await fetchJson(url);
+      snippetCache.set(modName, b);
+      return b;
+    } catch (e) { return null; }
+  }
+  // Inline: bundles are embedded in GRAPH (when --with-source was set).
+  return null;
+}
+
+// Murmur-style 32-bit hash matching Agda.Utils.Hash.hashString on the
+// generated server side. We avoid re-implementing it here for the
+// drawer and instead match the fact that the server packs by string;
+// when the key isn't found we just say "no snippet".
+function hashFullName(s) { return s; }   // bundle keys are stringified ints, we don't recompute; we'll get a miss and show the fallback message
+
+document.getElementById('drawer-close').addEventListener('click', function() {
+  document.getElementById('drawer').classList.remove('open');
+});
+
+// ─── EDGES ─────────────────────────────────────────────────────────────────
+function drawEdges(visible) {
+  var g_el = document.getElementById('edges-g');
+  g_el.innerHTML = '';
+  if (moduleEdges.length === 0) return;
+
+  // Strategy: walk visible modules, emit their outgoing + incoming
+  // module-edges (deduped). Cap at EDGE_BUDGET; if exceeded, prefer
+  // edges incident to the entry / search match.
+  var emitted = new Set();
+  var budget  = EDGE_BUDGET;
+  var deferred = [];
+  visible.forEach(function(i) {
+    (outByMod.get(i) || []).forEach(function(t) {
+      var key = i + '|' + t;
+      if (emitted.has(key)) return;
+      if (!showExternals && externalSet.has(t)) return;
+      emitted.add(key);
+      if (budget > 0) { addEdge(g_el, i, t); budget--; }
+      else deferred.push([i, t]);
+    });
+    (inByMod.get(i) || []).forEach(function(s) {
+      if (visible.has(s)) return;     // already covered by the outgoing pass on s
+      var key = s + '|' + i;
+      if (emitted.has(key)) return;
+      if (!showExternals && externalSet.has(s)) return;
+      emitted.add(key);
+      if (budget > 0) { addEdge(g_el, s, i); budget--; }
+      else deferred.push([s, i]);
+    });
+  });
+}
+
+function addEdge(parent, s, t) {
+  var sx = podLayout[s*4 + 0] + podLayout[s*4 + 2] / 2;
+  var sy = podLayout[s*4 + 1] + podLayout[s*4 + 3];
+  var tx = podLayout[t*4 + 0] + podLayout[t*4 + 2] / 2;
+  var ty = podLayout[t*4 + 1];
+  var dy = Math.abs(ty - sy);
+  var cp = Math.min(dy * 0.5, 90);
+  var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', 'M' + sx + ',' + sy + ' C' + sx + ',' + (sy + cp) + ' ' + tx + ',' + (ty - cp) + ' ' + tx + ',' + ty);
+  p.setAttribute('class', 'edge-module');
+  parent.appendChild(p);
+}
+
+// ─── MINIMAP ───────────────────────────────────────────────────────────────
+var minimapBounds = null;
+var minimapCtx    = null;
+
+function initMinimap() {
+  var canvas = document.getElementById('minimap-canvas');
+  // Compute graph bounds.
+  var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (var i = 0; i < modules.length; i++) {
+    var x = podLayout[i*4 + 0], y = podLayout[i*4 + 1];
+    var w = podLayout[i*4 + 2], h = podLayout[i*4 + 3];
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x + w > maxX) maxX = x + w;
+    if (y + h > maxY) maxY = y + h;
+  }
+  if (!isFinite(minX)) { minX = 0; maxX = 1; minY = 0; maxY = 1; }
+  minimapBounds = { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+
+  // Scale canvas backing store to its CSS box for crispness.
+  var rect = canvas.getBoundingClientRect();
+  var dpr = window.devicePixelRatio || 1;
+  canvas.width  = rect.width  * dpr;
+  canvas.height = rect.height * dpr;
+  minimapCtx = canvas.getContext('2d');
+  minimapCtx.scale(dpr, dpr);
+
+  drawMinimap();
+
+  // Click / drag minimap to navigate.
+  function navTo(ev) {
+    var r = canvas.getBoundingClientRect();
+    var px = (ev.clientX - r.left) / r.width;
+    var py = (ev.clientY - r.top)  / r.height;
+    var gx = minimapBounds.minX + px * (minimapBounds.maxX - minimapBounds.minX);
+    var gy = minimapBounds.minY + py * (minimapBounds.maxY - minimapBounds.minY);
+    var vp = document.getElementById('viewport');
+    pan.x = vp.clientWidth  / 2 - gx * zoom;
+    pan.y = vp.clientHeight / 2 - gy * zoom;
+    applyTransform();
+    rerender();
+  }
+  var minimapDown = false;
+  canvas.addEventListener('mousedown', function(ev) { minimapDown = true; navTo(ev); });
+  window.addEventListener('mousemove', function(ev) { if (minimapDown) navTo(ev); });
+  window.addEventListener('mouseup',   function()    { minimapDown = false; });
+}
+
+function drawMinimap() {
+  if (!minimapCtx || !minimapBounds) return;
+  var canvas = document.getElementById('minimap-canvas');
+  var rect = canvas.getBoundingClientRect();
+  var w = rect.width, h = rect.height;
+  minimapCtx.clearRect(0, 0, w, h);
+  var sx = w / (minimapBounds.maxX - minimapBounds.minX || 1);
+  var sy = h / (minimapBounds.maxY - minimapBounds.minY || 1);
+  // For very wide graphs, scale by the smaller axis so we keep aspect.
+  var s = Math.min(sx, sy);
+  // Centre.
+  var ox = (w - s * (minimapBounds.maxX - minimapBounds.minX)) / 2;
+  var oy = (h - s * (minimapBounds.maxY - minimapBounds.minY)) / 2;
+  for (var i = 0; i < modules.length; i++) {
+    if (!showExternals && externalSet.has(i)) continue;
+    var x = podLayout[i*4 + 0] - minimapBounds.minX;
+    var y = podLayout[i*4 + 1] - minimapBounds.minY;
+    var c = moduleCounts[i] || [0, 0, 0, 0];
+    var failed = !!(moduleStates && moduleStates[i] === 1);
+    var col;
+    if (failed)               col = getComputedStyle(document.documentElement).getPropertyValue('--c-failed').trim();
+    else if (c[2] > 0)        col = getComputedStyle(document.documentElement).getPropertyValue('--c-hole').trim();
+    else if (c[1] > c[0])     col = getComputedStyle(document.documentElement).getPropertyValue('--c-postulate').trim();
+    else if (externalSet.has(i)) col = '#506080';
+    else                      col = getComputedStyle(document.documentElement).getPropertyValue('--c-defined').trim();
+    minimapCtx.fillStyle = col;
+    minimapCtx.fillRect(ox + x * s, oy + y * s, Math.max(1, podWidth() * s), Math.max(1, podHeight() * s));
+  }
+  // Entry highlight.
+  if (entryIdx >= 0) {
+    var ex = podLayout[entryIdx*4 + 0] - minimapBounds.minX;
+    var ey = podLayout[entryIdx*4 + 1] - minimapBounds.minY;
+    minimapCtx.strokeStyle = '#f9ca24';
+    minimapCtx.lineWidth = 2;
+    minimapCtx.strokeRect(ox + ex * s - 1, oy + ey * s - 1, podWidth() * s + 2, podHeight() * s + 2);
+  }
+  // Cache the transform so updateMinimapFrame can use it.
+  minimapBounds._s  = s;
+  minimapBounds._ox = ox;
+  minimapBounds._oy = oy;
+}
+
+function podWidth()  { return podLayout[2]; }
+function podHeight() { return podLayout[3]; }
+
+function updateMinimapFrame() {
+  if (!minimapBounds) return;
+  var frame = document.getElementById('minimap-frame');
+  var rect  = currentViewportRect();
+  var s  = minimapBounds._s,  ox = minimapBounds._ox, oy = minimapBounds._oy;
+  frame.style.left   = (ox + (rect.x0 - minimapBounds.minX) * s) + 'px';
+  frame.style.top    = (oy + (rect.y0 - minimapBounds.minY) * s) + 'px';
+  frame.style.width  = ((rect.x1 - rect.x0) * s) + 'px';
+  frame.style.height = ((rect.y1 - rect.y0) * s) + 'px';
+}
+
+// ─── TOOLBAR / EVENTS ──────────────────────────────────────────────────────
+function wireToolbar() {
+  document.getElementById('btn-home').addEventListener('click', function() {
+    centerOnEntry(); rerender();
+  });
+  document.getElementById('btn-collapse-all').addEventListener('click', function() {
+    expandedPods.forEach(function(i) {
+      var el = mountedPods.get(i);
+      if (el) {
+        el.classList.remove('expanded');
+        var d = el.querySelector('.pod-defs');
+        if (d) d.parentNode.removeChild(d);
+      }
+    });
+    expandedPods.clear();
+  });
+  var btnExt = document.getElementById('btn-toggle-ext');
+  btnExt.addEventListener('click', function() {
+    showExternals = !showExternals;
+    btnExt.textContent = 'externals: ' + (showExternals ? 'on' : 'off');
+    drawMinimap();
+    rerender();
+  });
+  var search = document.getElementById('search');
+  search.addEventListener('input', function() {
+    searchQuery = search.value.toLowerCase().trim();
+    // First match jumps the camera; everyone else gets the highlight class.
+    if (searchQuery) {
+      for (var i = 0; i < modules.length; i++) {
+        if (modules[i].toLowerCase().indexOf(searchQuery) >= 0) {
+          centerOn(i);
+          break;
+        }
+      }
+    }
+    mountedPods.forEach(function(el, i) {
+      if (searchQuery && modules[i].toLowerCase().indexOf(searchQuery) >= 0) {
+        el.classList.add('search-match');
+      } else {
+        el.classList.remove('search-match');
+      }
+    });
+  });
+}
+
+function centerOn(i) {
+  var vp = document.getElementById('viewport');
+  var x = podLayout[i*4 + 0], y = podLayout[i*4 + 1];
+  var w = podLayout[i*4 + 2], h = podLayout[i*4 + 3];
+  pan.x = vp.clientWidth  / 2 - (x + w/2) * zoom;
+  pan.y = vp.clientHeight / 3 - (y + h/2) * zoom;
+  applyTransform();
+  rerender();
+}
+
+function wireViewport() {
+  var vp = document.getElementById('viewport');
+  var dragging = false, ds = null;
+  vp.addEventListener('mousedown', function(e) {
+    if (e.button !== 0) return;
+    // If we hit a pod-header, treat it as a click (toggle), not a pan.
+    var path = e.composedPath ? e.composedPath() : [];
+    var hitHeader = path.some(function(n) { return n.classList && n.classList.contains('pod-header'); });
+    if (hitHeader) {
+      var podEl = path.find(function(n) { return n.classList && n.classList.contains('pod'); });
+      if (podEl) {
+        e.stopPropagation();
+        togglePod(parseInt(podEl.dataset.idx, 10));
+        return;
+      }
+    }
+    dragging = true; ds = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+    vp.classList.add('panning');
+  });
+  window.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    pan.x = e.clientX - ds.x;
+    pan.y = e.clientY - ds.y;
+    applyTransform();
+    rerender();
+  });
+  window.addEventListener('mouseup', function() {
+    dragging = false;
+    vp.classList.remove('panning');
+  });
+
+  vp.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    var delta = e.deltaY > 0 ? 0.9 : 1.1;
+    var newZoom = Math.min(2.5, Math.max(0.05, zoom * delta));
+    var actual  = newZoom / zoom;
+    var r = vp.getBoundingClientRect();
+    var mx = e.clientX - r.left;
+    var my = e.clientY - r.top;
+    pan.x = mx - actual * (mx - pan.x);
+    pan.y = my - actual * (my - pan.y);
+    zoom = newZoom;
+    applyTransform();
+    rerender();
+  }, { passive: false });
+
+  window.addEventListener('resize', function() {
+    drawMinimap();
+    rerender();
+  });
+}
+
+// ─── STATS ─────────────────────────────────────────────────────────────────
+function updateStats() {
+  var nM = modules.length;
+  var nE = moduleEdges.length;
+  var nT = moduleCounts.reduce(function(a, c) { return a + c[0] + c[1] + c[2] + c[3]; }, 0);
+  var s = nM.toLocaleString() + ' modules · ' +
+          nE.toLocaleString() + ' edges · ' +
+          nT.toLocaleString() + ' defs';
+  if (g.entryModule) s += ' · entry: ' + g.entryModule;
+  document.getElementById('stats').textContent = s;
+}
+
+init();
+</script>
+</body>
+</html>

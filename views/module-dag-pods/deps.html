@@ -1,0 +1,1531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>agda-deps — Module DAG Pods</title>
+<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+<style>
+:root {
+  --c-defined:   #4caf50;
+  --c-postulate: #f44336;
+  --c-hole:      #9c27b0;
+  --c-failed:    #ff9800;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: #16213e;
+  border-bottom: 1px solid #0f3460;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+#toolbar .title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #a0b0d0;
+  margin-right: 4px;
+}
+
+#toolbar button {
+  background: #0f3460;
+  border: 1px solid #1a5276;
+  color: #c0d0e8;
+  padding: 4px 11px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+#toolbar button:hover { background: #1a5276; }
+#toolbar button.active { background: #1a5276; border-color: #4a80b0; }
+#toolbar button#btn-ext.ext-on { background: #0f3460; }
+#toolbar button#btn-ext.ext-off { background: #2a1a2e; border-color: #604070; color: #a090b0; }
+
+#search-box {
+  background: #0f2045;
+  border: 1px solid #1a5276;
+  color: #e0e0e0;
+  padding: 4px 9px;
+  border-radius: 5px;
+  font-size: 12px;
+  width: 190px;
+}
+#search-box::placeholder { color: #4a6080; }
+
+#stats { margin-left: auto; font-size: 11px; color: #506070; white-space: nowrap; }
+
+#main-area {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+#canvas-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  background: #12182a;
+}
+#canvas-wrap.panning { cursor: grabbing; }
+
+/* The SVG edge layer (pointer-events: none so pods are still clickable) */
+#svg-edges {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+#edges-g { /* transformed by JS */ }
+
+/* The pod DOM layer */
+#pods-layer {
+  position: absolute;
+  top: 0; left: 0;
+  transform-origin: 0 0;
+}
+
+/* ── Pod cards ── */
+.pod {
+  position: absolute;
+  border-radius: 9px;
+  border: 1.5px solid #2a4070;
+  background: #16213e;
+  box-shadow: 0 3px 14px rgba(0,0,0,0.45);
+  width: 210px;
+  transition: box-shadow 0.2s, border-color 0.2s;
+  user-select: none;
+}
+.pod.external {
+  border-style: dashed;
+  border-color: #3a4060;
+  background: #111928;
+  opacity: 0.82;
+}
+.pod.entry { border-color: #e94560; box-shadow: 0 0 18px rgba(233,69,96,0.25); }
+.pod.search-match { border-color: #f9ca24 !important; box-shadow: 0 0 14px rgba(249,202,36,0.35) !important; }
+.pod.hidden { display: none !important; }
+
+.pod-header {
+  display: flex;
+  align-items: center;
+  padding: 7px 9px;
+  gap: 5px;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+  transition: background 0.12s;
+}
+.pod-header:hover { background: rgba(255,255,255,0.05); }
+.pod.expanded .pod-header { border-bottom: 1px solid #1e3060; border-radius: 8px 8px 0 0; }
+
+.chevron {
+  font-size: 10px;
+  color: #5070a0;
+  transition: transform 0.22s;
+  flex-shrink: 0;
+  line-height: 1;
+  width: 12px;
+}
+.pod.expanded .chevron { transform: rotate(90deg); }
+
+.pod-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #c0d0f0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pod.external .pod-name { color: #7080a0; font-size: 10px; }
+.pod.entry .pod-name { color: #f07888; }
+
+.pod-swatches {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.swatch {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.swatch.defined   { background: var(--c-defined); }
+.swatch.postulate { background: var(--c-postulate); }
+.swatch.hole      { background: var(--c-hole); }
+.swatch.failed    { background: var(--c-failed); }
+
+.pod-count {
+  font-size: 9px;
+  color: #4a6070;
+  background: #0d1830;
+  border-radius: 8px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+/* ── Expanded definition list ── */
+.pod-defs {
+  display: none;
+  padding: 4px 6px 6px 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #2a4070 transparent;
+}
+.pod.expanded .pod-defs { display: block; }
+
+.def-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+  font-size: 10.5px;
+}
+.def-row:hover { background: rgba(255,255,255,0.07); }
+.def-row.search-match { background: rgba(249,202,36,0.13); }
+
+.def-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.def-dot.defined   { background: var(--c-defined); }
+.def-dot.postulate { background: var(--c-postulate); }
+.def-dot.hole      { background: var(--c-hole); }
+.def-dot.failed    { background: var(--c-failed); }
+
+.def-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #a8bed8;
+}
+
+/* anchor dot — connection point for leaf edges */
+.def-anchor {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.12);
+  flex-shrink: 0;
+}
+
+/* ── Side drawer ── */
+#drawer {
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 360px;
+  background: #16213e;
+  border-left: 1px solid #2a4070;
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  box-shadow: -8px 0 30px rgba(0,0,0,0.5);
+}
+#drawer.open { transform: translateX(0); }
+
+#drawer-hdr {
+  padding: 12px 14px 10px 14px;
+  border-bottom: 1px solid #2a4070;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#drawer-title { flex: 1; min-width: 0; }
+#drawer-def-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #c8d8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#drawer-mod-path {
+  font-size: 10px;
+  color: #5070a0;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#drawer-badge {
+  padding: 2px 8px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 1px;
+}
+#drawer-badge.defined   { background: var(--c-defined); }
+#drawer-badge.postulate { background: var(--c-postulate); }
+#drawer-badge.hole      { background: var(--c-hole); }
+#drawer-badge.failed    { background: var(--c-failed); }
+
+#drawer-close {
+  background: none;
+  border: none;
+  color: #5070a0;
+  font-size: 17px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 1px 2px;
+  flex-shrink: 0;
+}
+#drawer-close:hover { color: #c0d0f0; }
+
+#drawer-source-wrap {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+#drawer-source {
+  font-family: 'Fira Code', 'Consolas', 'SF Mono', monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  color: #a0c0d0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+#drawer-source.agda-html { background: transparent; }
+
+/* Agda HTML inline styles look OK on dark background; tweak anchors */
+#drawer-source a { color: inherit; text-decoration: none; }
+
+/* ── SVG edge styles ── */
+.edge-mod {
+  stroke: #3a6090;
+  stroke-width: 1.8;
+  fill: none;
+  opacity: 0.65;
+}
+.edge-leaf {
+  stroke: #5a88b8;
+  stroke-width: 1;
+  fill: none;
+  stroke-dasharray: 5 3;
+  opacity: 0.5;
+}
+.edge-ext {
+  stroke: #384060;
+  stroke-width: 1.2;
+  fill: none;
+  stroke-dasharray: 3 4;
+  opacity: 0.45;
+}
+
+/* Loading banner */
+#loading {
+  position: fixed; inset: 0;
+  background: #12182a;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 12px;
+  z-index: 9999;
+  font-size: 14px; color: #7090b0;
+}
+#loading.done { display: none; }
+#loading .spinner {
+  width: 30px; height: 30px;
+  border: 3px solid #1e3060;
+  border-top-color: #4a80b0;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Scale-warning banner — shown before layout for large graphs. */
+#scale-warn {
+  position: fixed; inset: 0;
+  background: rgba(18, 24, 42, 0.96);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10000;
+  color: #d0d8e8;
+  font-size: 14px;
+}
+#scale-warn.done { display: none; }
+#scale-warn .panel {
+  max-width: 600px;
+  background: #1a2240;
+  border: 1px solid #2a3868;
+  border-radius: 8px;
+  padding: 24px 28px;
+  line-height: 1.55;
+}
+#scale-warn h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  color: #ffaa55;
+}
+#scale-warn code {
+  background: #0c1228;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 13px;
+  color: #b8d0e8;
+}
+#scale-warn pre {
+  background: #0c1228;
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  overflow-x: auto;
+  color: #b8d0e8;
+  margin: 8px 0 14px;
+}
+#scale-warn .actions {
+  display: flex; gap: 10px;
+  margin-top: 14px;
+}
+#scale-warn button {
+  background: #2a3868;
+  color: #d0d8e8;
+  border: 1px solid #3a4880;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+#scale-warn button:hover { background: #3a4880; }
+#scale-warn button.primary {
+  background: #3a6090;
+  border-color: #4a80b0;
+}
+#scale-warn button.primary:hover { background: #4a80b0; }
+</style>
+</head>
+<body>
+
+<div id="loading"><div class="spinner"></div><div id="loading-msg">Loading graph…</div></div>
+
+<div id="toolbar">
+  <span class="title">agda-deps</span>
+  <button id="btn-expand-all">Expand all</button>
+  <button id="btn-collapse-all">Collapse all</button>
+  <button id="btn-ext" class="ext-on">Externals: on</button>
+  <button id="btn-relayout">Re-layout</button>
+  <input id="search-box" type="text" placeholder="Search modules / defs…" autocomplete="off">
+  <span id="stats"></span>
+</div>
+
+<div id="main-area">
+  <div id="canvas-wrap">
+    <svg id="svg-edges">
+      <defs>
+        <marker id="arr-mod" markerWidth="8" markerHeight="7" refX="7" refY="3.5" orient="auto">
+          <path d="M0,0.5 L0,6.5 L8,3.5 z" fill="#3a6090" opacity="0.8"/>
+        </marker>
+        <marker id="arr-leaf" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <path d="M0,0.5 L0,5.5 L7,3 z" fill="#5a88b8" opacity="0.7"/>
+        </marker>
+        <marker id="arr-ext" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <path d="M0,0.5 L0,5.5 L7,3 z" fill="#384060" opacity="0.6"/>
+        </marker>
+      </defs>
+      <g id="edges-g"></g>
+    </svg>
+    <div id="pods-layer"></div>
+  </div>
+  <div id="drawer">
+    <div id="drawer-hdr">
+      <div id="drawer-title">
+        <div id="drawer-def-name"></div>
+        <div id="drawer-mod-path"></div>
+      </div>
+      <span id="drawer-badge" class="defined">Defined</span>
+      <button id="drawer-close">✕</button>
+    </div>
+    <div id="drawer-source-wrap">
+      <pre id="drawer-source"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+var LAZY = false;
+var WITH_SOURCE = true;
+var GZIP_ENABLED = false;
+var AGDA_HTML_BASE = null;
+var GRAPH = {"v":2,"modules":["Agda.Builtin.Nat","Agda.Primitive","Agda.Primitive.Cubical","Bool","Bool.Bool","Coinductive","Coinductive.Stream","DeadPrivate","GoalsTest","Holes","List","List.List","Nat","Nat.Nat","Records","Records.Box","Records.Point","Test","Test.Exp","Where","Where._"],"files":["/home/mceresa/Repositories/Projects/AgdaDependencies/test/Bool.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Coinductive.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/DeadPrivate.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/GoalsTest.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Holes.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/List.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Nat.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Records.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Test.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Where.agda"],"moduleToFile":"////////////////AAAAAAAAAAABAAAAAQAAAP//////////BAAAAAUAAAAFAAAABgAAAAYAAAAHAAAABwAAAAcAAAAIAAAACAAAAAkAAAAJAAAA","fileToModules":[[3,4],[5,6],[],[],[9],[10,11],[12,13],[14,15,16],[17,18],[19,20]],"defs":{"names":["Records.Box.constructor","Bool.Bool","Test._++_","Holes.useMagic","Test.Exp.Plus","List.List.[]","Where._.sq","Test.Exp.Var","Test.eval\u0027","Test.Var-0","Nat.Nat.suc","List.List","Coinductive.Stream.tail","Nat._\u003c_","Where._.go","Test.eval","Records.double","Nat._-_","Where._.bump","Coinductive.Stream.head","Nat.Nat.zero","Holes.magic","Nat.suc-0","Records.Point.y","Records.Box.contents","Records.origin","Test.sum","List._∷_-1","Test.Int-0","Nat._*_","Nat.Nat","Nat._+_","Where.sumSquares","Records.Box","Records.mkPoint","Records.Box.count","Test.Exp.Int","Records.Point.constructor","Coinductive.zeros","Records.Point","Nat._==_","Records.Point.x","Test.Plus-1","Coinductive.Stream.constructor","Test.Exp","Where.weirdSum","Holes.unsolved#meta.3","Holes.incomplete","Test.Plus-0","Bool.Bool.true","List._∷_-0","Bool.Bool.false","Coinductive.mapSuc","Test.map","List.List._∷_","Records.sumCoords","Coinductive.Stream"],"modules":"DwAAAAMAAAARAAAACQAAABIAAAALAAAAFAAAABIAAAARAAAAEQAAAA0AAAAKAAAABgAAAAwAAAAUAAAAEQAAAA4AAAAMAAAAFAAAAAYAAAANAAAACQAAAAwAAAAQAAAADwAAAA4AAAARAAAACgAAABEAAAAMAAAADAAAAAwAAAATAAAADgAAAA4AAAAPAAAAEgAAABAAAAAFAAAADgAAAAwAAAAQAAAAEQAAAAYAAAARAAAAEwAAAAkAAAAJAAAAEQAAAAQAAAAKAAAABAAAAAUAAAARAAAACwAAAA4AAAAFAAAA","states":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAAAAAAAAAAAA","x":"7ny/P3S1DUB8m84+iGPdPwRWRkDVWys/TKaaP/32PUAFowpAz2ZZQBdIAECh80I/AU0YQBrAA0D3dZA/0gAaQL3jvD9pb/g/aW/QP40oDUCdEd0/HHzRP9xGE0BpAK8/bVbFP0p7uz9JLo8/zczMPGRdMEAwTM4/ih/TP1io1T8nMYg/QBOxP9nOrz/8GKs/ejYXQEvIlz+1pgFAqoKhP+Xy/z/4wqQ/mghjQCBjHkDAWyxAokXmP0Ot4T+Ybuo/wFtkQAu1BkAdWuQ9/BgTQNiBB0BxPbo+36YHP166sT+fzRJA","y":"ONucPimuCj4w9RM/BOecPw+cSz+Xizg/X5gcP6s+Dz8F3UY/nim0PtnOXz8EHCo/F7fRP+uQ+z7eAkE/F5pDP2tI7D7QD3M/n82SP0vI3z9hVFI/mbuuP3h6pT+J0pY/k29WPuM2ij98RFQ/n7BcP7hYcT4wEio/UMJMP3+8Zz/b3Bg/6Q6SPpjdoz8J/sc+uw8QP4/kij/IB60/zcyUP8Fu6D65jYY//fZtPynL+D8yrDI/RraLP+QUjT49Csc+FhM7Pwx5xD09LIw/0zBcPuoErD8F3TY/LJpWP1XZdz/c19k/"},"edges":{"outOffsets":"AAAAAAMAAAAFAAAACQAAAAwAAAAQAAAAEgAAABUAAAAYAAAAGwAAABsAAAAeAAAAIAAAACIAAAApAAAAMQAAADgAAAA8AAAAQAAAAEIAAABEAAAARgAAAEcAAABHAAAASgAAAE0AAABTAAAAWgAAAFoAAABaAAAAXwAAAGEAAABlAAAAaAAAAGwAAABxAAAAdAAAAHgAAAB7AAAAgQAAAIYAAACNAAAAkAAAAJAAAACSAAAAlQAAAJgAAACZAAAAmwAAAJsAAACdAAAAnQAAAJ8AAACmAAAAqgAAAK4AAAC0AAAAuQAAAA==","outTargets":"AAAAAB4AAAAhAAAAMQAAADMAAAACAAAABQAAAAsAAAA2AAAAFQAAAB4AAAAfAAAABAAAACoAAAAsAAAAMAAAAAUAAAALAAAACwAAAB0AAAAeAAAABwAAAAkAAAAsAAAAFAAAAB4AAAAsAAAACgAAABYAAAAeAAAABQAAADYAAAArAAAAOAAAAAEAAAAKAAAADQAAABQAAAAeAAAAMQAAADMAAAAFAAAABgAAAAsAAAAOAAAAFAAAAB4AAAAfAAAANgAAAAQAAAAHAAAADwAAAB4AAAAfAAAAJAAAACwAAAAdAAAAHgAAACEAAAAjAAAACgAAABEAAAAUAAAAHgAAAB4AAAAfAAAAKwAAADgAAAAUAAAAHgAAAB4AAAAeAAAAJQAAACcAAAAAAAAAHgAAACEAAAAUAAAAFwAAABkAAAAeAAAAJwAAACkAAAAFAAAACwAAABQAAAAaAAAAHgAAAB8AAAA2AAAACgAAABQAAAAdAAAAHgAAAB8AAAAKAAAAFAAAAAoAAAAUAAAAHgAAAB8AAAALAAAADgAAAB4AAAAAAAAAGAAAAB4AAAAjAAAAFwAAABkAAAAeAAAAJwAAACkAAAAAAAAAHgAAACEAAAAcAAAAHgAAACQAAAAsAAAAHgAAACUAAAAnAAAADAAAABMAAAAUAAAAHgAAACYAAAA4AAAAFwAAABkAAAAeAAAAJQAAACkAAAABAAAACgAAABQAAAAeAAAAKAAAADEAAAAzAAAAHgAAACUAAAAnAAAAKwAAADgAAAAEAAAABwAAACQAAAASAAAAHgAAAB8AAAAeAAAAHgAAAC4AAAABAAAAMQAAAAEAAAAzAAAACgAAAAwAAAATAAAAHgAAACYAAAA0AAAAOAAAAAUAAAALAAAANQAAADYAAAALAAAAGwAAADIAAAA2AAAAFwAAABkAAAAeAAAAHwAAACcAAAApAAAADAAAABMAAAAmAAAAKwAAADgAAAA=","inOffsets":"AAAAAAQAAAAIAAAACQAAAAkAAAAMAAAAEgAAABMAAAAWAAAAFgAAABcAAAAfAAAAJwAAACoAAAArAAAALQAAAC4AAAAuAAAALwAAADAAAAAzAAAAPwAAAEAAAABBAAAARQAAAEYAAABKAAAASwAAAEwAAABNAAAAUAAAAHIAAAB7AAAAewAAAH8AAAB/AAAAgQAAAIQAAACIAAAAiwAAAJEAAACSAAAAlgAAAJcAAACbAAAAoAAAAKAAAAChAAAAoQAAAKIAAACmAAAApwAAAKsAAACsAAAArQAAALMAAACzAAAAuQAAAA==","inTargets":"AAAAABgAAAAhAAAAIwAAAA0AAAAoAAAAMQAAADMAAAACAAAABAAAAA8AAAAsAAAAAgAAAAUAAAALAAAADgAAABoAAAA1AAAADgAAAAcAAAAPAAAALAAAAAcAAAAKAAAADQAAABEAAAAdAAAAHgAAAB8AAAAoAAAANAAAAAIAAAAFAAAABgAAAA4AAAAaAAAAIAAAADUAAAA2AAAAJgAAADQAAAA4AAAADQAAAA4AAAAgAAAADwAAABEAAAAtAAAAJgAAADQAAAA4AAAACAAAAA0AAAAOAAAAEQAAABQAAAAZAAAAGgAAAB0AAAAeAAAAHwAAACYAAAAoAAAAAwAAAAoAAAAZAAAAIgAAACcAAAA3AAAAIQAAABkAAAAiAAAAJwAAADcAAAAaAAAANgAAACQAAAAGAAAAEAAAAB0AAAAAAAAAAwAAAAYAAAAIAAAACgAAAA0AAAAOAAAADwAAABAAAAARAAAAEgAAABQAAAAVAAAAFwAAABgAAAAZAAAAGgAAAB0AAAAfAAAAIAAAACEAAAAiAAAAIwAAACQAAAAlAAAAJgAAACcAAAAoAAAAKQAAAC0AAAAuAAAALwAAADQAAAA3AAAAAwAAAA4AAAAPAAAAEgAAABoAAAAdAAAAHwAAAC0AAAA3AAAAAAAAABAAAAAYAAAAIwAAABAAAAAhAAAADwAAACQAAAAsAAAAFwAAACUAAAAnAAAAKQAAACYAAAA0AAAAOAAAABcAAAAZAAAAIgAAACUAAAApAAAANwAAACgAAAAZAAAAIgAAACcAAAA3AAAABAAAAAwAAAATAAAAKwAAADgAAAAEAAAABwAAAAgAAAAPAAAAJAAAAC8AAAAEAAAAAQAAAA0AAAAoAAAAMQAAADYAAAABAAAADQAAACgAAAAzAAAANAAAADUAAAACAAAACwAAAA4AAAAaAAAANQAAADYAAAAMAAAAEwAAACYAAAArAAAANAAAADgAAAA="},"definitionEdgesProvenance":"AQAAAQEBAQABAQABAQEAAQEAAAEAAQEAAQAAAQEAAQEBAAABAQEAAQEBAgACAQABAQEBAQABAQABAAABAQEBAAABAQABAAAAAQABAQABAQQBAAEBAAEBAAEBAQEBAAEBAQEBAAEAAgABAQEBAQQAAAEBAAABAAEAAAEAAQEBAAEAAQQBAQEAAQEAAQEBAAEAAQABAQECAAEAAAEAAQABAQEBAAQBAAEAAQEAAQEBAQQAAQABAQEEAQE=","transitiveEdges":"sAwAAIsMAACEDAAAowwAAJ4MAABzBAAAZgQAAOQCAADXAgAAywkAAL4JAACUCAAAiggAAK4IAACJCAAAgggAAJwIAACyCwAAzAsAAJ4LAACnCwAAoAsAALoLAADQCQAA8AkAANMJAAAQAQAA6AAAABQBAAAOAQAAIggAADAIAAAoCAAAIAgAALsBAACWAQAAmAEAAHUDAACDAwAAdgMAAFsDAAB7AwAAXgMAAOYBAADcAQAA6AUAAN4FAADVBQAA6QUAAM8FAAAABgAAfQAAAHcAAACoAAAA2AsAANILAAADDAAAzQgAANgIAADGCAAA1AgAAMgIAABICQAAPwkAAEYJAABGBQAAPQUAAEQFAABkCAAAWwgAAGIIAAC5BwAAsAcAALsHAACpBwAAqwcAAGYMAABdDAAAaAwAAFYMAABYDAAAuAUAAK8FAAClBQAAugUAAKgFAACqBQAAdwcAAHEHAAB8BwAAWQcAAHYFAAB5BQAAWAUAAOkHAADsBwAAywcAAB4AAAAhAAAAAAAAAK4DAACxAwAAswMAAJUKAADJAAAAbAAAAGoAAABcCwAAjgsAAOoKAAAaCwAAeAIAAKkCAAAoAQAAIgEAABEMAAA8DAAAOAwAACEMAADCBgAAuAYAAJIEAACIBAAAWAIAAEQCAABQAgAABQcAAPsGAADxBgAA5wMAAN0DAADTAwAAkwYAAIkGAAB/BgAAlAYAAOkIAAAGCQAAGwkAAPwIAAAZCQAA8ggAAOYCAAADAwAAGAMAAPkCAAAWAwAA7wIAAD4HAAArBwAAdAEAADwDAAAyAwAAKQMAAD0DAAAkAwAAIwMAAFQDAAAjCgAAJAoAACAEAAA=","moduleEdges":[[2,1],[3,1],[3,4],[4,3],[5,1],[5,6],[5,12],[5,13],[6,5],[7,0],[8,10],[8,12],[9,1],[9,12],[10,1],[10,11],[11,10],[12,1],[12,3],[12,4],[12,13],[13,12],[14,1],[14,12],[14,13],[14,15],[14,16],[15,12],[15,14],[16,12],[16,14],[17,1],[17,5],[17,9],[17,10],[17,11],[17,12],[17,13],[17,14],[17,18],[17,19],[18,12],[18,17],[19,1],[19,10],[19,12],[19,20],[20,10],[20,11],[20,12],[20,13]],"transitiveModuleEdges":[[3,1],[5,1],[5,12],[5,13],[9,1],[10,1],[12,1],[12,3],[12,4],[14,1],[14,12],[14,13],[14,15],[14,16],[15,12],[16,12],[17,1],[17,5],[17,9],[17,10],[17,11],[17,12],[17,13],[17,14],[17,19],[18,12],[19,1],[19,10],[19,12],[20,10],[20,11],[20,12],[20,13]],"moduleStates":"AAAAAAAAAAAAAAAAAAAAAAAAAAAA","moduleStateCounts":[[0,0,0,0],[0,0,0,0],[0,0,0,0],[1,0,0,0],[2,0,0,0],[3,0,0,0],[3,0,0,0],[0,0,0,0],[0,0,0,0],[1,1,2,0],[3,0,0,0],[2,0,0,0],[7,0,0,0],[2,0,0,0],[6,0,0,0],[3,0,0,0],[3,0,0,0],[10,0,0,0],[3,0,0,0],[2,0,0,0],[3,0,0,0]],"moduleDepth":"/////wEAAAD/////AgAAAAIAAAABAAAAAgAAAP//////////AQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAgAAAAIAAAAAAAAAAQAAAAEAAAACAAAA","modulePodLayout":"AIDewwAABEMAAEhDAABQQgAAV8MAAARDAABIQwAAUEIAgPLEAAAAAAAASEMAAFBCAMDVxAAAAAAAAEhDAABQQgAAucQAAAAAAABIQwAAUEIAQJzEAAAAAAAASEMAAFBCAAB/xAAAAAAAAEhDAABQQgCARcQAAAAAAABIQwAAUEIAAAzEAAAAAAAASEMAAFBCAAClwwAAAAAAAEhDAABQQgAAcEEAAARDAABIQwAAUEIAAMjCAAAAAAAASEMAAFBCAAB1QwAABEMAAEhDAABQQgAAAkMAAAAAAABIQwAAUEIAALRDAAAAAAAASEMAAFBCAIATRAAAAAAAAEhDAABQQgAATUQAAAAAAABIQwAAUEIAQINEAAAAAAAASEMAAFBCAACgRAAAAAAAAEhDAABQQgDAvEQAAAAAAABIQwAAUEIAgNlEAAAAAAAASEMAAFBC","fileTree":[{"name":"home","parent":-1,"fileIndex":null},{"name":"mceresa","parent":0,"fileIndex":null},{"name":"Repositories","parent":1,"fileIndex":null},{"name":"Projects","parent":2,"fileIndex":null},{"name":"AgdaDependencies","parent":3,"fileIndex":null},{"name":"test","parent":4,"fileIndex":null},{"name":"Bool.agda","parent":5,"fileIndex":0},{"name":"Coinductive.agda","parent":5,"fileIndex":1},{"name":"DeadPrivate.agda","parent":5,"fileIndex":2},{"name":"GoalsTest.agda","parent":5,"fileIndex":3},{"name":"Holes.agda","parent":5,"fileIndex":4},{"name":"List.agda","parent":5,"fileIndex":5},{"name":"Nat.agda","parent":5,"fileIndex":6},{"name":"Records.agda","parent":5,"fileIndex":7},{"name":"Test.agda","parent":5,"fileIndex":8},{"name":"Where.agda","parent":5,"fileIndex":9}],"moduleTree":[{"name":"Agda","parent":-1,"moduleIndex":null},{"name":"Builtin","parent":0,"moduleIndex":null},{"name":"Nat","parent":1,"moduleIndex":0},{"name":"Primitive","parent":0,"moduleIndex":1},{"name":"Cubical","parent":3,"moduleIndex":2},{"name":"Bool","parent":-1,"moduleIndex":3},{"name":"Bool","parent":5,"moduleIndex":4},{"name":"Coinductive","parent":-1,"moduleIndex":5},{"name":"Stream","parent":7,"moduleIndex":6},{"name":"DeadPrivate","parent":-1,"moduleIndex":7},{"name":"GoalsTest","parent":-1,"moduleIndex":8},{"name":"Holes","parent":-1,"moduleIndex":9},{"name":"List","parent":-1,"moduleIndex":10},{"name":"List","parent":12,"moduleIndex":11},{"name":"Nat","parent":-1,"moduleIndex":12},{"name":"Nat","parent":14,"moduleIndex":13},{"name":"Records","parent":-1,"moduleIndex":14},{"name":"Box","parent":16,"moduleIndex":15},{"name":"Point","parent":16,"moduleIndex":16},{"name":"Test","parent":-1,"moduleIndex":17},{"name":"Exp","parent":19,"moduleIndex":18},{"name":"Where","parent":-1,"moduleIndex":19},{"name":"_","parent":21,"moduleIndex":20}],"entryModule":"Test","externalModules":"AAAAAAEAAAACAAAA","bundleFiles":{"Bool":"snippets/Bool.json","Bool.Bool":"snippets/Bool.Bool.json","Coinductive":"snippets/Coinductive.json","Coinductive.Stream":"snippets/Coinductive.Stream.json","Holes":"snippets/Holes.json","List":"snippets/List.json","List.List":"snippets/List.List.json","Nat":"snippets/Nat.json","Nat.Nat":"snippets/Nat.Nat.json","Records":"snippets/Records.json","Records.Box":"snippets/Records.Box.json","Records.Point":"snippets/Records.Point.json","Test":"snippets/Test.json","Test.Exp":"snippets/Test.Exp.json","Where":"snippets/Where.json","Where._":"snippets/Where._.json"},"searchIndex":{"names":["agda.builtin.nat","agda.primitive","agda.primitive.cubical","bool","bool.bool","coinductive","coinductive.stream","deadprivate","goalstest","holes","list","list.list","nat","nat.nat","records","records.box","records.point","test","test.exp","where","where._","records.box.constructor","bool.bool","test._++_","holes.usemagic","test.exp.plus","list.list.[]","where._.sq","test.exp.var","test.eval\u0027","test.var-0","nat.nat.suc","list.list","coinductive.stream.tail","nat._\u003c_","where._.go","test.eval","records.double","nat._-_","where._.bump","coinductive.stream.head","nat.nat.zero","holes.magic","nat.suc-0","records.point.y","records.box.contents","records.origin","test.sum","list._∷_-1","test.int-0","nat._*_","nat.nat","nat._+_","where.sumsquares","records.box","records.mkpoint","records.box.count","test.exp.int","records.point.constructor","coinductive.zeros","records.point","nat._==_","records.point.x","test.plus-1","coinductive.stream.constructor","test.exp","where.weirdsum","holes.unsolved#meta.3","holes.incomplete","test.plus-0","bool.bool.true","list._∷_-0","bool.bool.false","coinductive.mapsuc","test.map","list.list._∷_","records.sumcoords","coinductive.stream"],"kinds":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB","bigrams":{"#m":[67],"*_":[50],"++":[23],"+_":[23,52],"-0":[30,43,49,69,71],"-1":[48,63],"-_":[38],".3":[67],".[":[26],"._":[20,23,27,34,35,38,39,48,50,52,61,71,75],".b":[0,4,15,21,22,39,45,54,56,70,72],".c":[2,21,45,56,58,64],".d":[37],".e":[18,25,28,29,36,57,65],".f":[72],".g":[35],".h":[40],".i":[49,57,68],".l":[11,26,32,75],".m":[42,55,73,74],".n":[0,13,31,41,51],".o":[46],".p":[1,2,16,25,44,58,60,62,63,69],".s":[6,27,31,33,40,43,47,53,64,76,77],".t":[33,70],".u":[24,67],".v":[28,30],".w":[66],".x":[62],".y":[44],".z":[41,59],"\u003c_":[34],"==":[61],"=_":[61],"[]":[26],"_*":[50],"_+":[23,52],"_-":[38,48,71],"_.":[27,35,39],"_\u003c":[34],"_=":[61],"_∷":[48,71,75],"a.":[0,1,2,67],"ad":[7,40],"ag":[0,1,2,24,42],"ai":[33],"al":[2,8,29,36,72],"am":[6,33,40,64,77],"ap":[73,74],"ar":[28,30,53],"at":[0,7,12,13,31,34,38,41,43,50,51,52,61],"bi":[2],"bl":[37],"bo":[3,4,15,21,22,45,54,56,70,72],"bu":[0,39],"c-":[43],"ca":[2],"co":[5,6,14,15,16,21,33,37,40,44,45,46,54,55,56,58,59,60,62,64,68,73,76,77],"ct":[5,6,21,33,40,58,59,64,73,77],"cu":[2],"d#":[67],"da":[0,1,2],"de":[7],"do":[37],"dp":[7],"ds":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,66,76],"du":[5,6,33,40,59,64,73,77],"e.":[2,6,20,27,33,35,39,40,53,59,64,66,73,77],"ea":[6,7,33,40,64,77],"ec":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,76],"ed":[67],"ei":[66],"em":[24],"en":[45],"er":[19,20,27,35,39,41,53,59,66],"es":[8,9,17,18,23,24,25,28,29,30,36,42,47,49,53,57,63,65,67,68,69,74],"et":[67,68],"ev":[29,36],"ex":[18,25,28,57,65],"fa":[72],"gd":[0,1,2],"gi":[24,42,46],"go":[8,35],"he":[19,20,27,35,39,40,53,66],"ho":[9,24,42,67,68],"ic":[2,24,42],"ig":[46],"il":[0,33],"im":[1,2],"in":[0,5,6,16,33,40,44,46,49,55,57,58,59,60,62,64,68,73,77],"ir":[66],"is":[10,11,26,32,48,71,75],"it":[1,2],"iv":[1,2,5,6,7,33,40,59,64,73,77],"kp":[55],"l\u0027":[29],"l.":[4,22,70,72],"le":[9,24,37,42,67,68],"li":[10,11,26,32,48,71,75],"ls":[8,72],"lt":[0],"lu":[25,63,69],"lv":[67],"m.":[33,40,64],"ma":[24,42,73,74],"mc":[76],"me":[67],"mi":[1,2],"mk":[55],"mp":[39,68],"ms":[53],"n.":[0],"na":[0,12,13,31,34,38,41,43,50,51,52,61],"nc":[68],"nd":[5,6,33,40,59,64,73,77],"ns":[21,58,64,67],"nt":[16,44,45,49,55,56,57,58,60,62],"oa":[8],"oi":[5,6,16,33,40,44,55,58,59,60,62,64,73,77],"ol":[3,4,9,22,24,42,67,68,70,72],"om":[68],"on":[21,45,58,64],"oo":[3,4,22,70,72,76],"or":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,64,76],"os":[59],"ou":[37,56],"ox":[15,21,45,54,56],"p.":[25,28,57],"pl":[25,63,68,69],"po":[16,44,55,58,60,62],"pr":[1,2,7],"ps":[73],"qu":[53],"r-":[30],"rd":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,66,76],"re":[6,14,15,16,19,20,21,27,33,35,37,39,40,44,45,46,53,54,55,56,58,60,62,64,66,76,77],"ri":[1,2,7,46],"ro":[41,59],"ru":[21,58,64,70],"s-":[63,69],"s.":[15,16,21,24,37,42,44,45,46,54,55,56,58,60,62,67,68,76],"se":[24,72],"so":[67],"sq":[27,53],"st":[6,8,10,11,17,18,21,23,25,26,28,29,30,32,33,36,40,47,48,49,57,58,63,64,65,69,71,74,75,77],"su":[31,43,47,53,66,73,76],"t-":[49],"t.":[11,13,18,23,25,26,28,29,30,31,32,34,36,38,41,43,44,47,48,49,50,51,52,57,58,61,62,63,65,69,71,74,75],"ta":[33,67],"te":[7,8,17,18,23,25,28,29,30,36,45,47,49,57,63,65,68,69,74],"ti":[0,1,2,5,6,33,40,59,64,73,77],"to":[21,58,64],"tr":[6,21,33,40,58,64,70,77],"ts":[45],"ua":[53],"ub":[2,37],"uc":[5,6,21,31,33,40,43,58,59,64,73,77],"ue":[70],"ui":[0],"um":[39,47,53,66,76],"un":[56,67],"us":[24,25,63,69],"va":[7,28,29,30,36],"ve":[1,2,5,6,33,40,59,64,67,73,77],"we":[66],"wh":[19,20,27,35,39,53,66],"x.":[21,45,56],"xp":[18,25,28,57,65],"ze":[41,59],"∷_":[48,71,75]}}};
+var GRAPH_URL = null;
+var SNIPPETS_BASE = null;
+var MODULES_BASE = null;
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// DECODER HELPERS (v2 schema)
+// ═══════════════════════════════════════════════════════════════════
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64ToInt32(b64)   { return new Int32Array(b64ToBytes(b64).buffer); }
+function b64ToInt8(b64)    { return new Int8Array (b64ToBytes(b64).buffer); }
+function b64ToFloat32(b64) { return new Float32Array(b64ToBytes(b64).buffer); }
+
+// ═══════════════════════════════════════════════════════════════════
+// GRAPH LOADING
+// ═══════════════════════════════════════════════════════════════════
+async function fetchJson(url) {
+  if (GZIP_ENABLED) {
+    try {
+      const rg = await fetch(url + '.gz');
+      if (rg.ok) {
+        const buf = await rg.arrayBuffer();
+        let inflated;
+        if (typeof DecompressionStream !== 'undefined') {
+          const ds = new DecompressionStream('gzip');
+          const w = ds.writable.getWriter();
+          w.write(buf); w.close();
+          const chunks = [];
+          const reader = ds.readable.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+          }
+          inflated = new TextDecoder().decode(
+            new Uint8Array(chunks.reduce((a, b) => a + b.length, 0)).fill(0).reduce(
+              (acc, _, i) => { acc[i] = chunks.flat()[i]; return acc; }, new Uint8Array(
+                chunks.reduce((a, c) => { const o = a.offset; for (let j=0; j<c.length; j++) a.buf[o+j]=c[j]; a.offset+=c.length; return a; },
+                  { buf: new Uint8Array(chunks.reduce((s,c) => s+c.length, 0)), offset: 0 }).buf.buffer
+              )
+            )
+          );
+          // simpler path:
+          const fullBuf = new Uint8Array(chunks.reduce((s,c)=>s+c.length,0));
+          let off = 0;
+          for (const c of chunks) { fullBuf.set(c, off); off += c.length; }
+          inflated = new TextDecoder().decode(fullBuf);
+        } else if (typeof pako !== 'undefined') {
+          inflated = new TextDecoder().decode(pako.inflate(new Uint8Array(buf)));
+        } else {
+          throw new Error('no decompressor');
+        }
+        return JSON.parse(inflated);
+      }
+    } catch (_) { /* fall through */ }
+  }
+  const r = await fetch(url);
+  return r.json();
+}
+
+async function loadGraph() {
+  if (LAZY) return fetchJson(GRAPH_URL);
+  return GRAPH;
+}
+
+async function loadModuleDetail(g, modName) {
+  if (!g.moduleFiles || !g.moduleFiles[modName]) return null;
+  return fetchJson(g.moduleFiles[modName]);
+}
+
+// Placeholder detail files — emitted by the producer for modules
+// that are declared in moduleFiles but have no kept defs (external
+// stdlib modules, all-filtered modules like DeadPrivate, or modules
+// in the failed-typecheck set under --keep-going). Detail JSON
+// carries { placeholder: true, reason: "external"|"failed"|"filtered",
+// module: "<name>", externalPostulates?: [...] }. We render an
+// in-pod message instead of trying to show empty defs.
+function placeholderReasonText(reason) {
+  switch (reason) {
+    case 'external':
+      return 'External module — outside the project root. ' +
+             'It was referenced but not analysed.';
+    case 'failed':
+      return 'This module failed to type-check (--keep-going). ' +
+             'Its contents are unknown.';
+    case 'filtered':
+      return 'Every definition in this module was filtered out ' +
+             '(private, generated, or module-instantiation copy).';
+    default:
+      return 'This module was not analysed.';
+  }
+}
+
+function renderPlaceholderHTML(detail) {
+  var reason = (detail && detail.reason) || 'unknown';
+  var reasonText = placeholderReasonText(reason);
+  var postulates = (detail && detail.externalPostulates) || [];
+  var extra = '';
+  if (postulates.length) {
+    var shown = postulates.slice(0, 6)
+                          .map(function(p) {
+                            return '<code style="background:#eef;padding:0 3px;border-radius:2px;font-size:10px;">' +
+                                    String(p).replace(/[&<>]/g, function(c) {
+                                      return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;';
+                                    }) +
+                                   '</code>';
+                          })
+                          .join(', ');
+    var more = postulates.length > 6 ? ' …' : '';
+    extra = '<div style="margin-top:6px;font-size:11px;color:#506080;">' +
+              'Postulates: ' + shown + more +
+            '</div>';
+  }
+  return '<div class="pod-placeholder" ' +
+              'style="padding:8px 6px;font-size:11px;color:#5a6f8a;' +
+                     'font-style:italic;line-height:1.45;">' +
+           '<div style="font-style:normal;font-size:10px;text-transform:uppercase;' +
+                       'letter-spacing:0.5px;color:#7a8aa0;margin-bottom:4px;">' +
+              reason +
+           '</div>' +
+           reasonText +
+           extra +
+         '</div>';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SNIPPET / SOURCE LOADING
+// ═══════════════════════════════════════════════════════════════════
+var snippetCache = Object.create(null);
+
+async function loadSnippetBundle(g, modName) {
+  if (snippetCache[modName] !== undefined) return snippetCache[modName];
+  if (!g.bundleFiles || !g.bundleFiles[modName]) {
+    snippetCache[modName] = {};
+    return {};
+  }
+  try {
+    const b = await fetchJson(g.bundleFiles[modName]);
+    const indexed = Object.create(null);
+    Object.keys(b).forEach(k => { indexed[k] = b[k]; });
+    snippetCache[modName] = indexed;
+    return indexed;
+  } catch (e) {
+    snippetCache[modName] = {};
+    return {};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════
+const state = {
+  expanded:     new Set(),   // module names currently expanded
+  showExt:      true,        // show external modules
+  search:       '',
+  zoom:         1,
+  panX:         0,
+  panY:         0,
+  layoutDone:   false,
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// GRAPH STRUCTURES (populated after data loads)
+// ═══════════════════════════════════════════════════════════════════
+let G = null;                 // raw graph data (v2)
+let modules  = [];            // [{name, isExternal, isEntry, defCount, stateCounts}]
+let modByName = Object.create(null);
+let modEdges  = [];           // [{src, tgt}] — inter-module edges
+let modEdgeSet = new Set();   // "src|||tgt"
+
+// Def data for inline mode (decoded arrays)
+let defsNames   = null;  // string[]
+let defsMods    = null;  // Int32Array  — module index per def
+let defsStates  = null;  // Int8Array   — 0=Defined 1=Post 2=Hole 3=Failed
+let defsHash    = null;  // number[]    — hashQName per def (from outOffsets logic)
+let defsByModIdx = Object.create(null);  // modIdx -> [{localName, state, defIdx}]
+
+// Per-module detail cache (lazy mode)
+const detailCache = Object.create(null);  // modName -> detail JSON
+
+// DOM refs
+const podsLayer = document.getElementById('pods-layer');
+const edgesG    = document.getElementById('edges-g');
+const podEls    = Object.create(null);   // modName -> DOM element
+const podPos    = Object.create(null);   // modName -> {x, y, w, h}
+
+// ═══════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════
+const STATE_NAMES = ['defined', 'postulate', 'hole', 'failed'];
+
+function stateClass(s) {
+  if (typeof s === 'number') return STATE_NAMES[s] || 'defined';
+  return (s || 'defined').toLowerCase();
+}
+
+function stateLabel(s) {
+  const c = stateClass(s);
+  return c.charAt(0).toUpperCase() + c.slice(1);
+}
+
+function shortModName(name) {
+  if (name.length <= 24) return name;
+  const parts = name.split('.');
+  if (parts.length > 3) return '…' + parts.slice(-2).join('.');
+  return name;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DATA PARSING
+// ═══════════════════════════════════════════════════════════════════
+function parseGraph(g) {
+  G = g;
+
+  // Decode binary fields
+  const extSet = new Set();
+  if (g.externalModules) {
+    const extArr = b64ToInt32(g.externalModules);
+    for (let i = 0; i < extArr.length; i++) extSet.add(extArr[i]);
+  }
+
+  const modStates = g.moduleStates ? b64ToInt8(g.moduleStates) : null;
+
+  // Build modules[]
+  modules = [];
+  modByName = Object.create(null);
+  const entryName = g.entryModule || null;
+
+  for (let mi = 0; mi < g.modules.length; mi++) {
+    const name = g.modules[mi];
+    const isExt = extSet.has(mi);
+    const isEntry = name === entryName;
+    const sc = (g.moduleStateCounts && g.moduleStateCounts[mi]) ? g.moduleStateCounts[mi] : [0,0,0,0];
+    const defCount = sc[0] + sc[1] + sc[2] + sc[3];
+    const mod = { name, isExt, isEntry, defCount, sc };
+    modules.push(mod);
+    modByName[name] = mod;
+  }
+
+  // Parse def arrays (inline mode)
+  if (g.defs) {
+    defsNames  = g.defs.names;
+    defsMods   = b64ToInt32(g.defs.modules);
+    defsStates = b64ToInt8(g.defs.states);
+
+    // Group by module index
+    defsByModIdx = Object.create(null);
+    for (let di = 0; di < defsNames.length; di++) {
+      const mi = defsMods[di];
+      if (!defsByModIdx[mi]) defsByModIdx[mi] = [];
+      defsByModIdx[mi].push({ localName: defsNames[di], state: defsStates[di], defIdx: di });
+    }
+  }
+
+  // Build module edges from moduleEdges (integer pairs into modules[])
+  modEdges = [];
+  modEdgeSet = new Set();
+  if (g.moduleEdges) {
+    for (const [si, ti] of g.moduleEdges) {
+      const src = g.modules[si];
+      const tgt = g.modules[ti];
+      if (!src || !tgt || src === tgt) continue;
+      const key = src + '|||' + tgt;
+      if (!modEdgeSet.has(key)) {
+        modEdgeSet.add(key);
+        modEdges.push({ src, tgt });
+      }
+    }
+  }
+
+  // Also synthesise module edges from leaf edges (inline only)
+  // for modules that have defs but weren't covered by moduleEdges
+  if (g.edges && g.defs) {
+    const outOffsets = b64ToInt32(g.edges.outOffsets);
+    const outTargets = b64ToInt32(g.edges.outTargets);
+    for (let di = 0; di < defsNames.length; di++) {
+      const srcMi = defsMods[di];
+      const start = outOffsets[di];
+      const end   = outOffsets[di + 1];
+      for (let ei = start; ei < end; ei++) {
+        const tdi  = outTargets[ei];
+        const tgtMi = defsMods[tdi];
+        if (srcMi === tgtMi) continue;
+        const src = g.modules[srcMi];
+        const tgt = g.modules[tgtMi];
+        if (!src || !tgt) continue;
+        const key = src + '|||' + tgt;
+        if (!modEdgeSet.has(key)) {
+          modEdgeSet.add(key);
+          modEdges.push({ src, tgt });
+        }
+      }
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// POD BUILDING
+// ═══════════════════════════════════════════════════════════════════
+function buildPods() {
+  podsLayer.innerHTML = '';
+  Object.keys(podEls).forEach(k => delete podEls[k]);
+
+  for (const mod of modules) {
+    const el = document.createElement('div');
+    let cls = 'pod';
+    if (mod.isExt)   cls += ' external';
+    if (mod.isEntry) cls += ' entry';
+    el.className = cls;
+    el.dataset.mod = mod.name;
+
+    // Header
+    const hdr = document.createElement('div');
+    hdr.className = 'pod-header';
+
+    const chev = document.createElement('span');
+    chev.className = 'chevron';
+    chev.textContent = '▶';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'pod-name';
+    nameEl.textContent = shortModName(mod.name);
+    nameEl.title = mod.name;
+
+    const swatches = document.createElement('div');
+    swatches.className = 'pod-swatches';
+    const stateKeys = ['defined','postulate','hole','failed'];
+    for (let si = 0; si < 4; si++) {
+      if (mod.sc[si] > 0) {
+        const s = document.createElement('span');
+        s.className = 'swatch ' + stateKeys[si];
+        s.title = mod.sc[si] + ' ' + stateKeys[si];
+        swatches.appendChild(s);
+      }
+    }
+
+    const countEl = document.createElement('div');
+    countEl.className = 'pod-count';
+    countEl.textContent = mod.defCount;
+
+    hdr.appendChild(chev);
+    hdr.appendChild(nameEl);
+    hdr.appendChild(swatches);
+    hdr.appendChild(countEl);
+
+    // Defs list (populated on expand for lazy; inline-filled immediately)
+    const defsList = document.createElement('div');
+    defsList.className = 'pod-defs';
+    defsList.dataset.loaded = LAZY ? 'no' : 'yes';
+
+    if (!LAZY) {
+      // Fill from inline data
+      const mi = G.modules.indexOf(mod.name);
+      const defs = defsByModIdx[mi] || [];
+      fillDefsList(defsList, defs, mod.name, null);
+    }
+
+    el.appendChild(hdr);
+    el.appendChild(defsList);
+    podsLayer.appendChild(el);
+    podEls[mod.name] = el;
+
+    hdr.addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePod(mod.name);
+    });
+  }
+}
+
+function fillDefsList(defsList, defs, modName, bundle) {
+  defsList.innerHTML = '';
+  for (const d of defs) {
+    const localName = typeof d.localName === 'string' ? d.localName : d.name;
+    const stCls = stateClass(d.state);
+
+    const row = document.createElement('div');
+    row.className = 'def-row';
+    row.dataset.defName = localName;
+    row.dataset.modName = modName;
+
+    const dot = document.createElement('span');
+    dot.className = 'def-dot ' + stCls;
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'def-name';
+    // Strip module prefix for display
+    const fullName = localName.startsWith(modName + '.') ? localName.slice(modName.length + 1) : localName;
+    nameSpan.textContent = fullName;
+    nameSpan.title = localName;
+
+    const anchor = document.createElement('span');
+    anchor.className = 'def-anchor';
+    anchor.dataset.defKey = modName + '::' + localName;
+
+    row.appendChild(dot);
+    row.appendChild(nameSpan);
+    row.appendChild(anchor);
+    defsList.appendChild(row);
+
+    row.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openDrawer(modName, localName, stCls, bundle);
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EXPAND / COLLAPSE
+// ═══════════════════════════════════════════════════════════════════
+async function togglePod(modName) {
+  const el = podEls[modName];
+  if (!el) return;
+
+  if (state.expanded.has(modName)) {
+    // Collapse
+    state.expanded.delete(modName);
+    el.classList.remove('expanded');
+    scheduleRelayout();
+    return;
+  }
+
+  // Expand
+  state.expanded.add(modName);
+  el.classList.add('expanded');
+
+  // Lazy: load detail + optionally snippets
+  if (LAZY) {
+    const defsList = el.querySelector('.pod-defs');
+    if (defsList.dataset.loaded === 'no') {
+      defsList.innerHTML = '<div style="color:#5070a0;font-size:10px;padding:4px 4px;">Loading…</div>';
+      try {
+        const detail = await loadModuleDetail(G, modName);
+        detailCache[modName] = detail;
+
+        if (detail && detail.placeholder) {
+          defsList.innerHTML = renderPlaceholderHTML(detail);
+          defsList.dataset.loaded = 'yes';
+        } else {
+          let bundle = null;
+          if (WITH_SOURCE) bundle = await loadSnippetBundle(G, modName);
+
+          let defs = [];
+          if (detail && detail.defs) {
+            defs = detail.defs.names.map((n, i) => ({
+              localName: n,
+              state: Array.isArray(detail.defs.states) ? detail.defs.states[i] :
+                b64ToInt8(detail.defs.states)[i]
+            }));
+          }
+          fillDefsList(defsList, defs, modName, bundle);
+          defsList.dataset.loaded = 'yes';
+        }
+      } catch (err) {
+        defsList.innerHTML = '<div style="color:#a04050;font-size:10px;padding:4px;">Failed to load.</div>';
+      }
+    }
+  }
+
+  scheduleRelayout();
+}
+
+let relayoutTimer = null;
+function scheduleRelayout() {
+  if (relayoutTimer) clearTimeout(relayoutTimer);
+  relayoutTimer = setTimeout(() => {
+    computeAndApplyLayout();
+    drawEdges();
+  }, 40);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DAGRE LAYOUT
+// ═══════════════════════════════════════════════════════════════════
+const POD_W       = 210;
+const POD_H_COLL  = 42;   // collapsed header height approx
+const COL_SEP     = 50;
+const ROW_SEP     = 70;
+
+function podHeight(modName) {
+  const el = podEls[modName];
+  if (!el) return POD_H_COLL;
+  return Math.max(POD_H_COLL, el.offsetHeight || POD_H_COLL);
+}
+
+function computeAndApplyLayout() {
+  if (typeof dagre === 'undefined') {
+    console.warn('dagre not loaded; using fallback layout');
+    fallbackLayout();
+    return;
+  }
+
+  // Separate internal and external modules
+  const internalMods = modules.filter(m => !m.isExt);
+  const externalMods = modules.filter(m => m.isExt);
+
+  // Build dagre graph for internals
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({
+    rankdir: 'TB',
+    nodesep: COL_SEP,
+    ranksep: ROW_SEP,
+    marginx:  20,
+    marginy:  20,
+    // longest-path is O(V+E) and the only ranker robust at this scale:
+    //   - network-simplex crashes with "graphEdge is undefined" in
+    //     dagre 0.8.5 when the externals filter leaves disconnected
+    //     components (common on ~1k-module projects like the reference corpus).
+    //   - tight-tree is O(V*E) worst-case and visibly hangs on a few
+    //     thousand edges. Layout quality difference is small for the
+    //     module-DAG shape; if you need the densest packing, switch
+    //     to --view=big-module-dag-pods (pre-computes layout Haskell-side).
+    ranker: 'longest-path',
+  });
+  g.setDefaultEdgeLabel(() => ({}));
+
+  for (const mod of internalMods) {
+    const h = podHeight(mod.name);
+    g.setNode(mod.name, { width: POD_W, height: h, label: mod.name });
+  }
+
+  for (const { src, tgt } of modEdges) {
+    const sm = modByName[src], tm = modByName[tgt];
+    if (!sm || !tm || sm.isExt || tm.isExt) continue;
+    if (!g.hasNode(src) || !g.hasNode(tgt)) continue;
+    g.setEdge(src, tgt);
+  }
+
+  dagre.layout(g);
+
+  // Apply positions
+  let maxY = 0;
+  for (const mod of internalMods) {
+    const n = g.node(mod.name);
+    if (!n) continue;
+    const x = n.x - POD_W / 2;
+    const y = n.y - n.height / 2;
+    podPos[mod.name] = { x, y, w: POD_W, h: n.height };
+    maxY = Math.max(maxY, y + n.height);
+  }
+
+  // Place externals in a row below the internal DAG
+  if (state.showExt && externalMods.length > 0) {
+    const extY = maxY + ROW_SEP + 20;
+    const totalExtW = externalMods.length * POD_W + (externalMods.length - 1) * COL_SEP;
+    let extX = -totalExtW / 2;
+    for (const mod of externalMods) {
+      const h = podHeight(mod.name);
+      podPos[mod.name] = { x: extX, y: extY, w: POD_W, h };
+      extX += POD_W + COL_SEP;
+    }
+  }
+
+  applyPodPositions();
+}
+
+function fallbackLayout() {
+  // Simple BFS rank layout without dagre
+  const mNames = modules.map(m => m.name);
+  const inDeg = Object.create(null);
+  mNames.forEach(m => inDeg[m] = 0);
+  modEdges.forEach(({ src, tgt }) => { inDeg[tgt] = (inDeg[tgt] || 0) + 1; });
+
+  const rank = Object.create(null);
+  const queue = [];
+  mNames.forEach(m => {
+    if (!inDeg[m]) { rank[m] = 0; queue.push(m); }
+  });
+  let qi = 0;
+  while (qi < queue.length) {
+    const m = queue[qi++];
+    for (const { src, tgt } of modEdges) {
+      if (src !== m) continue;
+      rank[tgt] = Math.max(rank[tgt] || 0, rank[m] + 1);
+      queue.push(tgt);
+    }
+  }
+  mNames.forEach(m => { if (rank[m] === undefined) rank[m] = 0; });
+
+  const byRank = Object.create(null);
+  mNames.forEach(m => {
+    const r = rank[m];
+    (byRank[r] = byRank[r] || []).push(m);
+  });
+
+  const ranks = Object.keys(byRank).map(Number).sort((a, b) => a - b);
+  let yOff = 20;
+  ranks.forEach(r => {
+    const row = byRank[r];
+    const totalW = row.length * POD_W + (row.length - 1) * COL_SEP;
+    let xStart = -totalW / 2;
+    let rowH = 0;
+    row.forEach(m => rowH = Math.max(rowH, podHeight(m)));
+    row.forEach(m => {
+      podPos[m] = { x: xStart, y: yOff, w: POD_W, h: podHeight(m) };
+      xStart += POD_W + COL_SEP;
+    });
+    yOff += rowH + ROW_SEP;
+  });
+
+  applyPodPositions();
+}
+
+function applyPodPositions() {
+  for (const mod of modules) {
+    const el = podEls[mod.name];
+    if (!el) continue;
+    const pos = podPos[mod.name];
+    if (!pos) continue;
+    el.style.left = pos.x + 'px';
+    el.style.top  = pos.y + 'px';
+  }
+  updateExtVisibility();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EDGE DRAWING
+// ═══════════════════════════════════════════════════════════════════
+function getModCenter(modName, side) {
+  const pos = podPos[modName];
+  const el  = podEls[modName];
+  if (!pos || !el) return null;
+  const w = pos.w || POD_W;
+  const h = el.offsetHeight || pos.h || POD_H_COLL;
+  const cx = pos.x + w / 2;
+  return side === 'bottom'
+    ? { x: cx, y: pos.y + h }
+    : { x: cx, y: pos.y };
+}
+
+function getAnchorPos(modName, defKey) {
+  const anchor = podsLayer.querySelector(`.def-anchor[data-def-key="${CSS.escape(modName + '::' + defKey)}"]`);
+  if (!anchor) return null;
+  const ar = anchor.getBoundingClientRect();
+  const wr = document.getElementById('canvas-wrap').getBoundingClientRect();
+  // Convert screen coords → world coords (accounting for pan+zoom)
+  const sx = (ar.left + ar.width / 2 - wr.left - state.panX) / state.zoom;
+  const sy = (ar.top + ar.height / 2 - wr.top  - state.panY) / state.zoom;
+  return { x: sx, y: sy };
+}
+
+function bezierPath(x1, y1, x2, y2) {
+  const dy  = Math.abs(y2 - y1);
+  const cp  = Math.min(Math.max(dy * 0.45, 30), 150);
+  const dir = y2 >= y1 ? 1 : -1;
+  return `M${x1},${y1} C${x1},${y1 + dir * cp} ${x2},${y2 - dir * cp} ${x2},${y2}`;
+}
+
+function isVisible(modName) {
+  const mod = modByName[modName];
+  if (!mod) return false;
+  if (mod.isExt && !state.showExt) return false;
+  return true;
+}
+
+function drawEdges() {
+  edgesG.innerHTML = '';
+
+  for (const { src, tgt } of modEdges) {
+    if (!isVisible(src) || !isVisible(tgt)) continue;
+
+    const srcExp = state.expanded.has(src);
+    const tgtExp = state.expanded.has(tgt);
+
+    if (srcExp && tgtExp && G.edges && !LAZY) {
+      // Try leaf-level edges between these two expanded pods
+      let drew = false;
+      const outOffsets = b64ToInt32(G.edges.outOffsets);
+      const outTargets = b64ToInt32(G.edges.outTargets);
+      const srcMi = G.modules.indexOf(src);
+      const tgtMi = G.modules.indexOf(tgt);
+
+      const srcDefs = defsByModIdx[srcMi] || [];
+      for (const sd of srcDefs) {
+        const start = outOffsets[sd.defIdx];
+        const end   = outOffsets[sd.defIdx + 1];
+        for (let ei = start; ei < end; ei++) {
+          const tdi = outTargets[ei];
+          if (defsMods[tdi] !== tgtMi) continue;
+          const td = (defsByModIdx[tgtMi] || []).find(d => d.defIdx === tdi);
+          if (!td) continue;
+
+          const fp = getAnchorPos(src, sd.localName);
+          const tp = getAnchorPos(tgt, td.localName);
+          if (!fp || !tp) continue;
+
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', bezierPath(fp.x, fp.y, tp.x, tp.y));
+          path.setAttribute('class', 'edge-leaf');
+          path.setAttribute('marker-end', 'url(#arr-leaf)');
+          edgesG.appendChild(path);
+          drew = true;
+        }
+      }
+
+      if (!drew) {
+        // Fallback to module edge
+        drawModEdge(src, tgt, false);
+      }
+    } else if (srcExp && tgtExp && LAZY && detailCache[src] && detailCache[tgt]) {
+      // Leaf edges in lazy mode from cached detail
+      let drew = false;
+      const detail = detailCache[src];
+      if (detail && detail.outEdges) {
+        const tgtMi = G.modules.indexOf(tgt);
+        for (const [localIdx, , tgtModIdx] of detail.outEdges) {
+          if (tgtModIdx !== tgtMi) continue;
+          const srcDef = detail.defs && detail.defs.names[localIdx];
+          const tgtDetailDefs = detailCache[tgt] && detailCache[tgt].defs;
+          // We don't know the tgt def name from this edge, fall through
+          if (!srcDef || !tgtDetailDefs) continue;
+
+          const fp = getAnchorPos(src, srcDef);
+          if (!fp) continue;
+          const tp = getModCenter(tgt, 'top');
+          if (!tp) continue;
+
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', bezierPath(fp.x, fp.y, tp.x, tp.y));
+          path.setAttribute('class', 'edge-leaf');
+          path.setAttribute('marker-end', 'url(#arr-leaf)');
+          edgesG.appendChild(path);
+          drew = true;
+        }
+      }
+      if (!drew) drawModEdge(src, tgt, false);
+    } else {
+      // Module-level edge
+      const isExtEdge = (modByName[src] && modByName[src].isExt) ||
+                        (modByName[tgt] && modByName[tgt].isExt);
+      drawModEdge(src, tgt, isExtEdge);
+    }
+  }
+}
+
+function drawModEdge(src, tgt, isExt) {
+  const from = getModCenter(src, 'bottom');
+  const to   = getModCenter(tgt, 'top');
+  if (!from || !to) return;
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', bezierPath(from.x, from.y, to.x, to.y));
+  path.setAttribute('class', isExt ? 'edge-ext' : 'edge-mod');
+  path.setAttribute('marker-end', isExt ? 'url(#arr-ext)' : 'url(#arr-mod)');
+  edgesG.appendChild(path);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DRAWER
+// ═══════════════════════════════════════════════════════════════════
+async function openDrawer(modName, defName, stCls, bundleArg) {
+  document.getElementById('drawer-def-name').textContent =
+    defName.startsWith(modName + '.') ? defName.slice(modName.length + 1) : defName;
+  document.getElementById('drawer-mod-path').textContent = modName;
+  const badge = document.getElementById('drawer-badge');
+  badge.textContent = stateLabel(stCls);
+  badge.className = stCls;
+
+  const srcEl = document.getElementById('drawer-source');
+  srcEl.className = '';
+  srcEl.innerHTML = '';
+
+  document.getElementById('drawer').classList.add('open');
+
+  if (!WITH_SOURCE) {
+    srcEl.textContent = '-- Source not available.\n-- Re-run with --with-source to enable.\n';
+    return;
+  }
+
+  srcEl.textContent = '-- Loading…';
+
+  try {
+    let bundle = bundleArg;
+    if (!bundle) bundle = await loadSnippetBundle(G, modName);
+    if (!bundle) { srcEl.textContent = '-- No source bundle for this module.'; return; }
+
+    // Look up by defName (full or local)
+    const fullKey = defName;
+    const localKey = defName.startsWith(modName + '.') ? defName.slice(modName.length + 1) : defName;
+    const entry = bundle[fullKey] || bundle[localKey];
+
+    if (!entry) {
+      srcEl.textContent = '-- Source not found for: ' + defName;
+      return;
+    }
+
+    // entry.source may be highlighted HTML (contains <a> tags) or plain text
+    const src = entry.source || '';
+    if (src.includes('<a ') || src.includes('<span')) {
+      srcEl.className = 'agda-html';
+      srcEl.innerHTML = src;
+    } else {
+      srcEl.textContent = src;
+    }
+  } catch (e) {
+    srcEl.textContent = '-- Error loading source: ' + e.message;
+  }
+}
+
+document.getElementById('drawer-close').addEventListener('click', () => {
+  document.getElementById('drawer').classList.remove('open');
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// SEARCH
+// ═══════════════════════════════════════════════════════════════════
+function applySearch() {
+  const q = state.search.toLowerCase().trim();
+
+  for (const mod of modules) {
+    const el = podEls[mod.name];
+    if (!el) continue;
+    const modMatch = q && mod.name.toLowerCase().includes(q);
+    el.classList.toggle('search-match', !!modMatch);
+  }
+
+  // Also highlight matching def rows
+  podsLayer.querySelectorAll('.def-row').forEach(row => {
+    const dn = (row.dataset.defName || '').toLowerCase();
+    const mn = (row.dataset.modName || '').toLowerCase();
+    const match = q && (dn.includes(q) || mn.includes(q));
+    row.classList.toggle('search-match', !!match);
+  });
+
+  // Also use searchIndex if available
+  if (G && G.searchIndex && q) {
+    const si = G.searchIndex;
+    const names = si.names;
+    for (let i = 0; i < names.length; i++) {
+      if (names[i].toLowerCase().includes(q)) {
+        const modName = names[i];
+        const el = podEls[modName];
+        if (el) el.classList.add('search-match');
+      }
+    }
+  }
+}
+
+document.getElementById('search-box').addEventListener('input', (e) => {
+  state.search = e.target.value;
+  applySearch();
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// EXTERNAL VISIBILITY
+// ═══════════════════════════════════════════════════════════════════
+function updateExtVisibility() {
+  for (const mod of modules) {
+    if (!mod.isExt) continue;
+    const el = podEls[mod.name];
+    if (!el) continue;
+    el.classList.toggle('hidden', !state.showExt);
+  }
+  drawEdges();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PAN & ZOOM
+// ═══════════════════════════════════════════════════════════════════
+const canvasWrap = document.getElementById('canvas-wrap');
+
+function applyTransform() {
+  podsLayer.style.transform =
+    `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+  edgesG.setAttribute('transform',
+    `translate(${state.panX} ${state.panY}) scale(${state.zoom})`);
+}
+
+let dragging = false, dragStart = null;
+canvasWrap.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  dragging = true;
+  dragStart = { x: e.clientX - state.panX, y: e.clientY - state.panY };
+  canvasWrap.classList.add('panning');
+});
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  state.panX = e.clientX - dragStart.x;
+  state.panY = e.clientY - dragStart.y;
+  applyTransform();
+  drawEdges();
+});
+window.addEventListener('mouseup', () => {
+  if (!dragging) return;
+  dragging = false;
+  canvasWrap.classList.remove('panning');
+  drawEdges();
+});
+
+canvasWrap.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.88 : 1.14;
+  const rect = canvasWrap.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  state.panX = mx - delta * (mx - state.panX);
+  state.panY = my - delta * (my - state.panY);
+  state.zoom = Math.min(4, Math.max(0.1, state.zoom * delta));
+  applyTransform();
+  drawEdges();
+}, { passive: false });
+
+// ═══════════════════════════════════════════════════════════════════
+// TOOLBAR BUTTONS
+// ═══════════════════════════════════════════════════════════════════
+document.getElementById('btn-expand-all').addEventListener('click', () => {
+  for (const mod of modules) {
+    state.expanded.add(mod.name);
+    const el = podEls[mod.name];
+    if (el) el.classList.add('expanded');
+    // For inline mode defs are already populated; lazy mode shows spinner on first expand
+  }
+  scheduleRelayout();
+});
+
+document.getElementById('btn-collapse-all').addEventListener('click', () => {
+  state.expanded.clear();
+  for (const mod of modules) {
+    const el = podEls[mod.name];
+    if (el) el.classList.remove('expanded');
+  }
+  scheduleRelayout();
+});
+
+const btnExt = document.getElementById('btn-ext');
+btnExt.addEventListener('click', () => {
+  state.showExt = !state.showExt;
+  btnExt.textContent = 'Externals: ' + (state.showExt ? 'on' : 'off');
+  btnExt.classList.toggle('ext-on', state.showExt);
+  btnExt.classList.toggle('ext-off', !state.showExt);
+  computeAndApplyLayout();
+  drawEdges();
+});
+
+document.getElementById('btn-relayout').addEventListener('click', () => {
+  computeAndApplyLayout();
+  drawEdges();
+});
+
+window.addEventListener('resize', () => {
+  drawEdges();
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════
+// Scale-warning thresholds. Above these, the in-browser dagre layout
+// and ~one-SVG-path-per-edge rendering pattern push browser memory
+// hard enough to OOM on real workstations. Prompt the user to use
+// --view=big-module-dag-pods instead (pre-computed layout Haskell-side,
+// viewport-virtualised pods, capped edge budget).
+const SCALE_WARN_MODULES = 500;
+const SCALE_WARN_EDGES   = 5000;
+
+function showScaleWarning(numModules, numEdges) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.id = 'scale-warn';
+    overlay.innerHTML =
+      '<div class="panel">' +
+        '<h2>Large graph — heads up</h2>' +
+        '<p>This project has <strong>' + numModules + ' modules</strong> ' +
+        'and <strong>' + numEdges + ' module-level edges</strong>. The ' +
+        '<code>module-dag-pods</code> view does its layout in-browser ' +
+        'and creates one SVG path per edge; at this scale you may run ' +
+        'out of memory or wait minutes for the layout to finish.</p>' +
+        '<p>Recommended: re-run with the purpose-built large-graph view:</p>' +
+        '<pre>cabal run agda-deps -- --format=html --view=big-module-dag-pods --lazy \\\n' +
+        '  -i &lt;include-path&gt; -o &lt;out-dir&gt; &lt;Main.agda&gt;</pre>' +
+        '<p>That view pre-computes layout in Haskell, virtualises the ' +
+        'viewport, and caps edges to keep the DOM small.</p>' +
+        '<div class="actions">' +
+          '<button class="primary" id="scale-warn-recommended">Stop &amp; use --view=big-module-dag-pods</button>' +
+          '<button id="scale-warn-continue">Render anyway</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    overlay.querySelector('#scale-warn-recommended').addEventListener('click', () => {
+      resolve(false);
+    });
+    overlay.querySelector('#scale-warn-continue').addEventListener('click', () => {
+      overlay.classList.add('done');
+      resolve(true);
+    });
+  });
+}
+
+async function main() {
+  const loadMsg = document.getElementById('loading-msg');
+
+  try {
+    loadMsg.textContent = 'Loading graph…';
+    const g = await loadGraph();
+    parseGraph(g);
+
+    if (modules.length > SCALE_WARN_MODULES || modEdges.length > SCALE_WARN_EDGES) {
+      // Hide the spinner while waiting on the user — confusing otherwise.
+      document.getElementById('loading').classList.add('done');
+      const proceed = await showScaleWarning(modules.length, modEdges.length);
+      if (!proceed) {
+        // User chose the recommended path; freeze the page with a hint.
+        document.body.innerHTML =
+          '<div style="padding:40px;font:14px sans-serif;color:#d0d8e8;background:#12182a;min-height:100vh;">' +
+          '<h2 style="color:#ffaa55;margin-top:0">Re-run with --view=big-module-dag-pods</h2>' +
+          '<p>The view best suited to this project size.</p>' +
+          '</div>';
+        return;
+      }
+      document.getElementById('loading').classList.remove('done');
+    }
+
+    loadMsg.textContent = 'Building pods…';
+    buildPods();
+
+    loadMsg.textContent = 'Computing layout…';
+    // Give the browser a frame to render the pods before measuring heights
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    computeAndApplyLayout();
+
+    // Center view
+    const cw = canvasWrap.clientWidth;
+    const ch = canvasWrap.clientHeight;
+    state.panX = cw / 2;
+    state.panY = 40;
+    applyTransform();
+
+    // Another frame after positioning, then draw edges
+    await new Promise(r => requestAnimationFrame(r));
+    computeAndApplyLayout();
+    drawEdges();
+
+    // Stats
+    const nInternal = modules.filter(m => !m.isExt).length;
+    const nExt = modules.filter(m => m.isExt).length;
+    const nDefs = modules.reduce((s, m) => s + m.defCount, 0);
+    document.getElementById('stats').textContent =
+      `${nInternal} modules · ${nDefs} defs · ${modEdges.length} edges` +
+      (nExt > 0 ? ` · ${nExt} external` : '');
+
+    document.getElementById('loading').classList.add('done');
+  } catch (err) {
+    loadMsg.textContent = 'Error: ' + err.message;
+    console.error(err);
+  }
+}
+
+main();
+</script>
+</body>
+</html>

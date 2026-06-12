@@ -1,0 +1,1770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  Reading-Order Linear Narrative view for agda-deps.
+
+  Lays every definition out in strict topological order as a single
+  scrollable textbook chapter. Chapters group consecutive defs sharing
+  a module; section numbers are §<chapter>.<within-chapter>. A progress
+  strip on top has hotspots on holes / postulates / failed modules.
+
+  Topo order is computed in JS via Kahn's algorithm over the CSR
+  edge graph (or per-module outEdges in lazy mode). On Agda's normal
+  DAG output there are no cycles; on the rare cycle (e.g. mutual
+  blocks, with-functions referencing their parent), the residual set
+  is appended at the end and flagged with a `.cycle` marker.
+-->
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>agda-deps · reading-order narrative</title>
+<script>window.__gzipEnabled = false;</script>
+<script>
+  if (window.__gzipEnabled && typeof DecompressionStream === 'undefined') {
+    document.write('<scr'+'ipt src="https://unpkg.com/pako@2.1.0/dist/pako_inflate.min.js"></scr'+'ipt>');
+  }
+</script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --font-serif: "Iowan Old Style", "Charter", "Cambria", "Source Serif Pro", Georgia, serif;
+  --font-sans:  "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono:  "JetBrains Mono", "Fira Code", "Cascadia Code", "Source Code Pro", ui-monospace, monospace;
+
+  --bg:           #1a1d23;
+  --bg-deep:      #14171c;
+  --bg-soft:      #232831;
+  --bg-rule:      #2a2f39;
+  --bg-card:      #1f2229;
+
+  --text:         #e8e3d4;
+  --text-strong:  #fbf6e8;
+  --text-muted:   #a8a294;
+  --text-faint:   #6c6759;
+  --text-link:    #8ab8ff;
+
+  --accent:       #d6a847;
+  --accent-soft:  #5c4a20;
+
+  --c-defined:   #4caf50;
+  --c-postulate: #f44336;
+  --c-hole:      #9c27b0;
+  --c-failed:    #ff9800;
+
+  --c-defined-bg:   rgba(108,192,112,0.10);
+  --c-postulate-bg: rgba(224,122,122,0.12);
+  --c-hole-bg:      rgba(201,139,224,0.12);
+  --c-failed-bg:    rgba(217,122,71,0.12);
+
+  --margin-w: 280px;
+  --content-w: 700px;
+  --progress-h: 36px;
+  --gutter: 56px;
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.72;
+  font-feature-settings: "kern", "liga", "onum";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+}
+
+/* ── Progress strip ──────────────────────────────────────────────── */
+#progress-strip {
+  position: fixed; top: 0; left: 0; right: 0; height: var(--progress-h);
+  z-index: 200;
+  background: linear-gradient(to bottom, rgba(20,23,28,0.96), rgba(20,23,28,0.82));
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--bg-rule);
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 18px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+#progress-title {
+  color: var(--text-muted); white-space: nowrap;
+  font-weight: 500; letter-spacing: 0.02em;
+  overflow: hidden; text-overflow: ellipsis; max-width: 38%;
+}
+#progress-title b {
+  color: var(--accent); font-weight: 600;
+  font-family: var(--font-mono); font-size: 11.5px;
+}
+#progress-rail {
+  flex: 1; position: relative; height: 6px;
+  background: var(--bg-soft);
+  border-radius: 3px; cursor: pointer;
+  overflow: visible;
+}
+#progress-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 0%;
+  background: linear-gradient(to right, var(--accent), #f0c878);
+  border-radius: 3px;
+  transition: width 80ms linear;
+}
+.progress-hotspot {
+  position: absolute; top: -3px;
+  width: 4px; height: 12px;
+  border-radius: 2px;
+  pointer-events: auto; cursor: pointer;
+}
+.progress-hotspot.hole       { background: var(--c-hole);      box-shadow: 0 0 6px var(--c-hole); }
+.progress-hotspot.postulate  { background: var(--c-postulate); box-shadow: 0 0 4px var(--c-postulate); }
+.progress-hotspot.failed     { background: var(--c-failed);    box-shadow: 0 0 4px var(--c-failed); }
+.progress-hotspot:hover::after {
+  content: attr(data-label);
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  background: var(--bg-deep);
+  color: var(--text-strong);
+  font-size: 11px; padding: 3px 8px; border-radius: 4px;
+  white-space: nowrap; border: 1px solid var(--bg-rule);
+  font-family: var(--font-mono);
+  pointer-events: none; z-index: 300;
+}
+
+#strip-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.strip-btn {
+  font-family: var(--font-sans);
+  font-size: 11.5px; font-weight: 500;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--bg-rule);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+.strip-btn:hover { background: var(--bg-soft); color: var(--text-strong); }
+.strip-btn.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+/* ── Layout ─────────────────────────────────────────────────────── */
+#layout {
+  margin-top: var(--progress-h);
+  padding: 60px var(--gutter) 200px;
+  max-width: calc(var(--content-w) + var(--margin-w) + 80px);
+  margin-left: auto; margin-right: auto;
+  display: grid;
+  grid-template-columns: var(--content-w) var(--margin-w);
+  gap: 24px;
+  align-items: start;
+}
+#reading { min-width: 0; }
+#margin-rail {
+  position: sticky;
+  top: calc(var(--progress-h) + 24px);
+  align-self: start;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+/* ── Frontmatter ─────────────────────────────────────────────────── */
+.frontmatter {
+  border-bottom: 1px solid var(--bg-rule);
+  padding-bottom: 32px;
+  margin-bottom: 48px;
+}
+.frontmatter .eyebrow {
+  font-family: var(--font-sans);
+  font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+.frontmatter h1 {
+  font-size: 44px; font-weight: 700;
+  line-height: 1.15;
+  color: var(--text-strong);
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+}
+.frontmatter .subtitle {
+  font-style: italic;
+  color: var(--text-muted);
+  font-size: 19px;
+  margin-bottom: 24px;
+}
+.frontmatter .byline {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--text-faint);
+  display: flex; gap: 18px; flex-wrap: wrap;
+}
+.frontmatter .byline strong { color: var(--text); font-weight: 500; }
+.abstract {
+  font-style: italic;
+  font-size: 15.5px;
+  color: var(--text-muted);
+  border-left: 3px solid var(--accent);
+  padding: 4px 0 4px 18px;
+  margin-top: 28px;
+  max-width: 600px;
+}
+.skip-link {
+  display: inline-block; margin-top: 20px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-link);
+  text-decoration: none;
+  border: 1px solid var(--bg-rule);
+  border-radius: 4px;
+  padding: 6px 12px;
+}
+.skip-link:hover { background: var(--bg-soft); border-color: var(--text-link); }
+.skip-link::before { content: "\2193 "; opacity: 0.7; }
+
+/* ── Chapter ─────────────────────────────────────────────────────── */
+.chapter {
+  margin-top: 70px;
+  scroll-margin-top: calc(var(--progress-h) + 20px);
+}
+.chapter:first-of-type { margin-top: 30px; }
+.chapter-header { margin-bottom: 28px; position: relative; }
+.chapter-num {
+  font-family: var(--font-sans);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 4px;
+}
+.chapter-title {
+  font-size: 32px; font-weight: 700;
+  color: var(--text-strong);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  font-family: var(--font-serif);
+  word-break: break-word;
+}
+.chapter-title .mod-prefix {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+.chapter-meta {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 12px;
+  display: flex; gap: 14px; flex-wrap: wrap;
+  align-items: center;
+}
+.chapter-meta .meta-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  display: inline-block; margin-right: 6px;
+  vertical-align: middle;
+}
+.chapter.external .chapter-title { color: var(--text-muted); font-style: italic; }
+.chapter.external .chapter-num::after { content: " · external"; color: var(--text-faint); }
+
+/* ── Definition (section) ───────────────────────────────────────── */
+.def {
+  margin-top: 36px;
+  scroll-margin-top: calc(var(--progress-h) + 20px);
+  position: relative;
+}
+.def-anchor {
+  position: absolute; left: -30px; top: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.def:hover .def-anchor { opacity: 1; }
+.def-header {
+  display: flex; align-items: baseline; gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.def-section-num {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+}
+.def-name {
+  font-family: var(--font-mono);
+  font-size: 17.5px;
+  font-weight: 600;
+  color: var(--text-strong);
+  letter-spacing: -0.01em;
+  word-break: break-word;
+}
+.def-tags { display: inline-flex; gap: 5px; align-items: center; }
+.tag {
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+  border: 1px solid;
+}
+.tag.state-D { color: var(--c-defined);   border-color: var(--c-defined);   background: var(--c-defined-bg); }
+.tag.state-P { color: var(--c-postulate); border-color: var(--c-postulate); background: var(--c-postulate-bg); }
+.tag.state-H { color: var(--c-hole);      border-color: var(--c-hole);      background: var(--c-hole-bg); }
+.tag.state-F { color: var(--c-failed);    border-color: var(--c-failed);    background: var(--c-failed-bg); }
+.tag.kind {
+  color: var(--text-faint);
+  border-color: var(--bg-rule);
+  background: var(--bg-soft);
+}
+.tag.cycle {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+}
+
+.def-signature {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  background: var(--bg-deep);
+  border: 1px solid var(--bg-rule);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  padding: 10px 14px;
+  margin: 12px 0 16px;
+  color: var(--text);
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+}
+.def.state-P .def-signature { border-left-color: var(--c-postulate); }
+.def.state-H .def-signature { border-left-color: var(--c-hole); }
+.def.state-F .def-signature { border-left-color: var(--c-failed); }
+.def.state-D .def-signature { border-left-color: var(--c-defined); }
+
+.def-signature .Agda {
+  font-family: var(--font-mono);
+  white-space: pre;
+}
+.def-signature .placeholder {
+  color: var(--text-faint); font-style: italic;
+}
+
+.def-body {
+  font-size: 16.5px;
+  color: var(--text);
+  max-width: 640px;
+  margin-top: 14px;
+}
+.def-body p { margin-bottom: 12px; }
+.def-body em { color: var(--text-strong); font-style: italic; }
+.def-body code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-soft);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--text-strong);
+}
+.def-body.hidden { display: none; }
+
+/* Cross-reference pills */
+.def-xrefs {
+  margin-top: 18px;
+  border-top: 1px dashed var(--bg-rule);
+  padding-top: 12px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.xref-row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.xref-label {
+  color: var(--text-faint);
+  font-weight: 600;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  min-width: 84px;
+  flex-shrink: 0;
+}
+.xref-pills { display: flex; gap: 5px; flex-wrap: wrap; }
+.xref-pill {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 9px;
+  background: var(--bg-soft);
+  color: var(--text-link);
+  border-radius: 11px;
+  text-decoration: none;
+  border: 1px solid var(--bg-rule);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  cursor: pointer;
+}
+.xref-pill:hover { background: var(--bg-card); border-color: var(--text-link); color: var(--text-strong); }
+.xref-pill .num {
+  color: var(--text-faint);
+  font-size: 10px;
+  margin-right: 4px;
+}
+.xref-pill.s-P { color: var(--c-postulate); }
+.xref-pill.s-H { color: var(--c-hole); }
+.xref-pill.s-F { color: var(--c-failed); }
+.xref-pill.ext { color: var(--text-faint); cursor: default; }
+.xref-pill.ext:hover { background: var(--bg-soft); border-color: var(--bg-rule); color: var(--text-faint); }
+.xref-empty {
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: 11.5px;
+}
+.xref-more {
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-style: italic;
+}
+
+.def.flash { animation: defFlash 1.2s ease-out; }
+@keyframes defFlash {
+  0%,100% { background: transparent; }
+  20%     { background: rgba(214, 168, 71, 0.10); border-radius: 6px; }
+}
+
+/* ── Skim mode ──────────────────────────────────────────────────── */
+body.skim .def-body { display: none; }
+body.skim .def { margin-top: 18px; }
+body.skim .def-signature { margin-bottom: 0; }
+body.skim .def-xrefs { padding-top: 8px; margin-top: 10px; }
+
+/* ── Second-reading mode ───────────────────────────────────────── */
+body.second-reading .def[data-kind="Constructor"],
+body.second-reading .def[data-kind="Projection"],
+body.second-reading .def[data-kind="Datatype"],
+body.second-reading .def[data-kind="Record"] {
+  opacity: 0.42;
+}
+body.second-reading .def[data-kind="Constructor"]:hover,
+body.second-reading .def[data-kind="Projection"]:hover,
+body.second-reading .def[data-kind="Datatype"]:hover,
+body.second-reading .def[data-kind="Record"]:hover {
+  opacity: 1;
+}
+body.second-reading .def[data-state="P"],
+body.second-reading .def[data-state="H"],
+body.second-reading .def[data-state="F"] {
+  opacity: 1;
+}
+body.second-reading .chapter.external { opacity: 0.55; }
+
+/* ── Marginalia ──────────────────────────────────────────────────── */
+.marg-card {
+  background: var(--bg-card);
+  border: 1px solid var(--bg-rule);
+  border-radius: 6px;
+  padding: 14px 14px 16px;
+  margin-bottom: 16px;
+}
+.marg-card .marg-eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 8px;
+}
+#where-am-i .marg-pos {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+#where-am-i .marg-pos b { color: var(--accent); }
+#where-am-i .marg-chapter {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-strong);
+  line-height: 1.3;
+  margin-top: 4px;
+  word-break: break-word;
+}
+#where-am-i .marg-section {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-link);
+  margin-top: 2px;
+  word-break: break-word;
+}
+
+#toc-card {
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+  font-size: 12px;
+}
+#toc-card::-webkit-scrollbar { width: 4px; }
+#toc-card::-webkit-scrollbar-thumb { background: var(--bg-rule); border-radius: 2px; }
+.toc-entry {
+  display: flex; gap: 6px; align-items: baseline;
+  padding: 2.5px 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color 0.1s;
+}
+.toc-entry:hover { color: var(--text-strong); }
+.toc-entry.active { color: var(--accent); font-weight: 600; }
+.toc-entry.chapter-entry {
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 8px;
+  border-top: 1px solid var(--bg-rule);
+  padding-top: 6px;
+}
+.toc-entry.chapter-entry:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+.toc-entry .toc-num {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  min-width: 32px;
+}
+.toc-entry.section-entry .toc-num { padding-left: 8px; }
+.toc-entry .toc-text {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.toc-entry .toc-state {
+  width: 5px; height: 5px; border-radius: 50%;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.toc-state.D { background: var(--c-defined); }
+.toc-state.P { background: var(--c-postulate); }
+.toc-state.H { background: var(--c-hole); }
+.toc-state.F { background: var(--c-failed); }
+
+.mini-graph {
+  position: relative;
+  margin: 4px 0 0;
+  padding: 12px 10px 10px;
+  border: 1px dashed var(--bg-rule);
+  border-radius: 4px;
+  background: rgba(0,0,0,0.18);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.mini-graph::before {
+  content: "FIGURE";
+  position: absolute; top: -8px; left: 8px;
+  background: var(--bg-card);
+  padding: 0 6px;
+  font-family: var(--font-sans);
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--text-faint);
+}
+.mg-row { display: flex; gap: 5px; align-items: baseline; padding: 1.5px 0; }
+.mg-arrow { color: var(--text-faint); flex-shrink: 0; width: 14px; }
+.mg-node {
+  color: var(--text-link);
+  text-decoration: none;
+  cursor: pointer;
+  word-break: break-all;
+}
+.mg-node.s-P { color: var(--c-postulate); }
+.mg-node.s-H { color: var(--c-hole); }
+.mg-node.s-F { color: var(--c-failed); }
+.mg-node.ext { color: var(--text-faint); cursor: default; }
+.mg-node:hover:not(.ext) { text-decoration: underline; }
+.mg-self {
+  color: var(--accent);
+  font-weight: 700;
+  padding-left: 14px;
+  display: inline-block;
+}
+.mg-empty { color: var(--text-faint); font-style: italic; }
+.mg-more  { color: var(--text-faint); font-style: italic; font-size: 9.5px; }
+
+/* ── Backmatter ─────────────────────────────────────────────────── */
+.backmatter {
+  margin-top: 100px;
+  padding-top: 36px;
+  border-top: 2px solid var(--accent);
+  text-align: center;
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 15px;
+}
+.backmatter .qed {
+  display: inline-block;
+  margin-top: 14px;
+  width: 14px; height: 14px;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+/* ── Loading / error ───────────────────────────────────────────── */
+#loading, #err {
+  position: fixed; inset: 0; display: flex; align-items: center;
+  justify-content: center; background: var(--bg); z-index: 500;
+  padding: 24px; text-align: center;
+}
+#err { display: none; }
+#err.visible { display: flex; }
+#err pre {
+  background: var(--bg-card); border: 1px solid var(--bg-rule);
+  border-radius: 6px; padding: 12px; font-family: var(--font-mono);
+  font-size: 12px; color: var(--c-postulate); max-width: 600px;
+  white-space: pre-wrap; text-align: left;
+}
+#loading .spinner {
+  width: 36px; height: 36px;
+  border: 3px solid var(--bg-rule);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto 16px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 1100px) {
+  #layout { grid-template-columns: 1fr; padding: 60px 32px 200px; }
+  #margin-rail { position: static; margin-top: 60px; max-width: 600px; }
+  #toc-card { max-height: 400px; }
+}
+</style>
+</head>
+<body>
+
+<div id="progress-strip">
+  <div id="progress-title">
+    A reading of <b id="entry-mod">—</b> · §<span id="cur-section">—</span>
+  </div>
+  <div id="progress-rail" title="Click to seek; hotspots show holes / postulates / failed modules">
+    <div id="progress-fill"></div>
+  </div>
+  <div id="strip-actions">
+    <button class="strip-btn" id="btn-skim"    title="Hide bodies, show only signatures">Skim</button>
+    <button class="strip-btn" id="btn-2nd"     title="Dim utility scaffolding so theorems pop">2nd reading</button>
+    <button class="strip-btn" id="btn-theorem" title="Skip to the final definition (last in topo order)">→ Theorem</button>
+  </div>
+</div>
+
+<div id="layout">
+  <article id="reading">
+    <header class="frontmatter">
+      <div class="eyebrow">A reading of an Agda project</div>
+      <h1 id="title">Definitions in topological order</h1>
+      <p class="subtitle" id="subtitle">
+        From the first axiom to the final definition &mdash; every entry exactly once,
+        in the order the type checker is forced to see them.
+      </p>
+      <div class="byline" id="byline"></div>
+      <p class="abstract">
+        Reading a proof project as if it were a textbook chapter: axioms first, derived
+        constructions in the middle, and the headline theorems last. Each definition appears
+        exactly once, numbered after its module, with a marginalia card showing where you
+        are in the build-up. Hotspots on the progress strip flag the open holes and
+        postulates you still depend on.
+      </p>
+      <a class="skip-link" id="skip-link" href="#">Skip to the final definition</a>
+    </header>
+
+    <div id="chapters"></div>
+
+    <div class="backmatter">
+      End of the reading.
+      <br/><span class="qed"></span>
+    </div>
+  </article>
+
+  <aside id="margin-rail">
+    <div class="marg-card" id="where-am-i">
+      <div class="marg-eyebrow">You are here</div>
+      <div class="marg-pos"><b id="m-chapter-num">—</b> · <span id="m-progress-pct">0%</span></div>
+      <div class="marg-chapter" id="m-chapter">(scroll to begin)</div>
+      <div class="marg-section" id="m-section">—</div>
+    </div>
+
+    <div class="marg-card" id="figure-card" style="display:none">
+      <div class="marg-eyebrow">Figure · Local dep graph</div>
+      <div class="mini-graph" id="mini-graph"></div>
+    </div>
+
+    <div class="marg-card" id="toc-card">
+      <div class="marg-eyebrow">Contents</div>
+      <div id="toc-list"></div>
+    </div>
+  </aside>
+</div>
+
+<div id="loading"><div><div class="spinner"></div>Loading dependency graph&hellip;</div></div>
+<div id="err"><div><h2 style="margin-bottom:12px;color:var(--c-postulate)">Error</h2><pre id="err-body"></pre></div></div>
+
+<script>
+// ─── DATA LOADING PRELUDE ──────────────────────────────────────────────────
+var LAZY = false;
+var WITH_SOURCE = true;
+var GZIP_ENABLED = false;
+var AGDA_HTML_BASE = null;
+var GRAPH = {"v":2,"modules":["Agda.Builtin.Nat","Agda.Primitive","Agda.Primitive.Cubical","Bool","Bool.Bool","Coinductive","Coinductive.Stream","DeadPrivate","GoalsTest","Holes","List","List.List","Nat","Nat.Nat","Records","Records.Box","Records.Point","Test","Test.Exp","Where","Where._"],"files":["/home/mceresa/Repositories/Projects/AgdaDependencies/test/Bool.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Coinductive.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/DeadPrivate.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/GoalsTest.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Holes.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/List.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Nat.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Records.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Test.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Where.agda"],"moduleToFile":"////////////////AAAAAAAAAAABAAAAAQAAAP//////////BAAAAAUAAAAFAAAABgAAAAYAAAAHAAAABwAAAAcAAAAIAAAACAAAAAkAAAAJAAAA","fileToModules":[[3,4],[5,6],[],[],[9],[10,11],[12,13],[14,15,16],[17,18],[19,20]],"defs":{"names":["Records.Box.constructor","Bool.Bool","Test._++_","Holes.useMagic","Test.Exp.Plus","List.List.[]","Where._.sq","Test.Exp.Var","Test.eval\u0027","Test.Var-0","Nat.Nat.suc","List.List","Coinductive.Stream.tail","Nat._\u003c_","Where._.go","Test.eval","Records.double","Nat._-_","Where._.bump","Coinductive.Stream.head","Nat.Nat.zero","Holes.magic","Nat.suc-0","Records.Point.y","Records.Box.contents","Records.origin","Test.sum","List._∷_-1","Test.Int-0","Nat._*_","Nat.Nat","Nat._+_","Where.sumSquares","Records.Box","Records.mkPoint","Records.Box.count","Test.Exp.Int","Records.Point.constructor","Coinductive.zeros","Records.Point","Nat._==_","Records.Point.x","Test.Plus-1","Coinductive.Stream.constructor","Test.Exp","Where.weirdSum","Holes.unsolved#meta.3","Holes.incomplete","Test.Plus-0","Bool.Bool.true","List._∷_-0","Bool.Bool.false","Coinductive.mapSuc","Test.map","List.List._∷_","Records.sumCoords","Coinductive.Stream"],"modules":"DwAAAAMAAAARAAAACQAAABIAAAALAAAAFAAAABIAAAARAAAAEQAAAA0AAAAKAAAABgAAAAwAAAAUAAAAEQAAAA4AAAAMAAAAFAAAAAYAAAANAAAACQAAAAwAAAAQAAAADwAAAA4AAAARAAAACgAAABEAAAAMAAAADAAAAAwAAAATAAAADgAAAA4AAAAPAAAAEgAAABAAAAAFAAAADgAAAAwAAAAQAAAAEQAAAAYAAAARAAAAEwAAAAkAAAAJAAAAEQAAAAQAAAAKAAAABAAAAAUAAAARAAAACwAAAA4AAAAFAAAA","states":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAAAAAAAAAAAA","x":"7ny/P3S1DUB8m84+iGPdPwRWRkDVWys/TKaaP/32PUAFowpAz2ZZQBdIAECh80I/AU0YQBrAA0D3dZA/0gAaQL3jvD9pb/g/aW/QP40oDUCdEd0/HHzRP9xGE0BpAK8/bVbFP0p7uz9JLo8/zczMPGRdMEAwTM4/ih/TP1io1T8nMYg/QBOxP9nOrz/8GKs/ejYXQEvIlz+1pgFAqoKhP+Xy/z/4wqQ/mghjQCBjHkDAWyxAokXmP0Ot4T+Ybuo/wFtkQAu1BkAdWuQ9/BgTQNiBB0BxPbo+36YHP166sT+fzRJA","y":"ONucPimuCj4w9RM/BOecPw+cSz+Xizg/X5gcP6s+Dz8F3UY/nim0PtnOXz8EHCo/F7fRP+uQ+z7eAkE/F5pDP2tI7D7QD3M/n82SP0vI3z9hVFI/mbuuP3h6pT+J0pY/k29WPuM2ij98RFQ/n7BcP7hYcT4wEio/UMJMP3+8Zz/b3Bg/6Q6SPpjdoz8J/sc+uw8QP4/kij/IB60/zcyUP8Fu6D65jYY//fZtPynL+D8yrDI/RraLP+QUjT49Csc+FhM7Pwx5xD09LIw/0zBcPuoErD8F3TY/LJpWP1XZdz/c19k/"},"edges":{"outOffsets":"AAAAAAMAAAAFAAAACQAAAAwAAAAQAAAAEgAAABUAAAAYAAAAGwAAABsAAAAeAAAAIAAAACIAAAApAAAAMQAAADgAAAA8AAAAQAAAAEIAAABEAAAARgAAAEcAAABHAAAASgAAAE0AAABTAAAAWgAAAFoAAABaAAAAXwAAAGEAAABlAAAAaAAAAGwAAABxAAAAdAAAAHgAAAB7AAAAgQAAAIYAAACNAAAAkAAAAJAAAACSAAAAlQAAAJgAAACZAAAAmwAAAJsAAACdAAAAnQAAAJ8AAACmAAAAqgAAAK4AAAC0AAAAuQAAAA==","outTargets":"AAAAAB4AAAAhAAAAMQAAADMAAAACAAAABQAAAAsAAAA2AAAAFQAAAB4AAAAfAAAABAAAACoAAAAsAAAAMAAAAAUAAAALAAAACwAAAB0AAAAeAAAABwAAAAkAAAAsAAAAFAAAAB4AAAAsAAAACgAAABYAAAAeAAAABQAAADYAAAArAAAAOAAAAAEAAAAKAAAADQAAABQAAAAeAAAAMQAAADMAAAAFAAAABgAAAAsAAAAOAAAAFAAAAB4AAAAfAAAANgAAAAQAAAAHAAAADwAAAB4AAAAfAAAAJAAAACwAAAAdAAAAHgAAACEAAAAjAAAACgAAABEAAAAUAAAAHgAAAB4AAAAfAAAAKwAAADgAAAAUAAAAHgAAAB4AAAAeAAAAJQAAACcAAAAAAAAAHgAAACEAAAAUAAAAFwAAABkAAAAeAAAAJwAAACkAAAAFAAAACwAAABQAAAAaAAAAHgAAAB8AAAA2AAAACgAAABQAAAAdAAAAHgAAAB8AAAAKAAAAFAAAAAoAAAAUAAAAHgAAAB8AAAALAAAADgAAAB4AAAAAAAAAGAAAAB4AAAAjAAAAFwAAABkAAAAeAAAAJwAAACkAAAAAAAAAHgAAACEAAAAcAAAAHgAAACQAAAAsAAAAHgAAACUAAAAnAAAADAAAABMAAAAUAAAAHgAAACYAAAA4AAAAFwAAABkAAAAeAAAAJQAAACkAAAABAAAACgAAABQAAAAeAAAAKAAAADEAAAAzAAAAHgAAACUAAAAnAAAAKwAAADgAAAAEAAAABwAAACQAAAASAAAAHgAAAB8AAAAeAAAAHgAAAC4AAAABAAAAMQAAAAEAAAAzAAAACgAAAAwAAAATAAAAHgAAACYAAAA0AAAAOAAAAAUAAAALAAAANQAAADYAAAALAAAAGwAAADIAAAA2AAAAFwAAABkAAAAeAAAAHwAAACcAAAApAAAADAAAABMAAAAmAAAAKwAAADgAAAA=","inOffsets":"AAAAAAQAAAAIAAAACQAAAAkAAAAMAAAAEgAAABMAAAAWAAAAFgAAABcAAAAfAAAAJwAAACoAAAArAAAALQAAAC4AAAAuAAAALwAAADAAAAAzAAAAPwAAAEAAAABBAAAARQAAAEYAAABKAAAASwAAAEwAAABNAAAAUAAAAHIAAAB7AAAAewAAAH8AAAB/AAAAgQAAAIQAAACIAAAAiwAAAJEAAACSAAAAlgAAAJcAAACbAAAAoAAAAKAAAAChAAAAoQAAAKIAAACmAAAApwAAAKsAAACsAAAArQAAALMAAACzAAAAuQAAAA==","inTargets":"AAAAABgAAAAhAAAAIwAAAA0AAAAoAAAAMQAAADMAAAACAAAABAAAAA8AAAAsAAAAAgAAAAUAAAALAAAADgAAABoAAAA1AAAADgAAAAcAAAAPAAAALAAAAAcAAAAKAAAADQAAABEAAAAdAAAAHgAAAB8AAAAoAAAANAAAAAIAAAAFAAAABgAAAA4AAAAaAAAAIAAAADUAAAA2AAAAJgAAADQAAAA4AAAADQAAAA4AAAAgAAAADwAAABEAAAAtAAAAJgAAADQAAAA4AAAACAAAAA0AAAAOAAAAEQAAABQAAAAZAAAAGgAAAB0AAAAeAAAAHwAAACYAAAAoAAAAAwAAAAoAAAAZAAAAIgAAACcAAAA3AAAAIQAAABkAAAAiAAAAJwAAADcAAAAaAAAANgAAACQAAAAGAAAAEAAAAB0AAAAAAAAAAwAAAAYAAAAIAAAACgAAAA0AAAAOAAAADwAAABAAAAARAAAAEgAAABQAAAAVAAAAFwAAABgAAAAZAAAAGgAAAB0AAAAfAAAAIAAAACEAAAAiAAAAIwAAACQAAAAlAAAAJgAAACcAAAAoAAAAKQAAAC0AAAAuAAAALwAAADQAAAA3AAAAAwAAAA4AAAAPAAAAEgAAABoAAAAdAAAAHwAAAC0AAAA3AAAAAAAAABAAAAAYAAAAIwAAABAAAAAhAAAADwAAACQAAAAsAAAAFwAAACUAAAAnAAAAKQAAACYAAAA0AAAAOAAAABcAAAAZAAAAIgAAACUAAAApAAAANwAAACgAAAAZAAAAIgAAACcAAAA3AAAABAAAAAwAAAATAAAAKwAAADgAAAAEAAAABwAAAAgAAAAPAAAAJAAAAC8AAAAEAAAAAQAAAA0AAAAoAAAAMQAAADYAAAABAAAADQAAACgAAAAzAAAANAAAADUAAAACAAAACwAAAA4AAAAaAAAANQAAADYAAAAMAAAAEwAAACYAAAArAAAANAAAADgAAAA="},"definitionEdgesProvenance":"AQAAAQEBAQABAQABAQEAAQEAAAEAAQEAAQAAAQEAAQEBAAABAQEAAQEBAgACAQABAQEBAQABAQABAAABAQEBAAABAQABAAAAAQABAQABAQQBAAEBAAEBAAEBAQEBAAEBAQEBAAEAAgABAQEBAQQAAAEBAAABAAEAAAEAAQEBAAEAAQQBAQEAAQEAAQEBAAEAAQABAQECAAEAAAEAAQABAQEBAAQBAAEAAQEAAQEBAQQAAQABAQEEAQE=","transitiveEdges":"sAwAAIsMAACEDAAAowwAAJ4MAABzBAAAZgQAAOQCAADXAgAAywkAAL4JAACUCAAAiggAAK4IAACJCAAAgggAAJwIAACyCwAAzAsAAJ4LAACnCwAAoAsAALoLAADQCQAA8AkAANMJAAAQAQAA6AAAABQBAAAOAQAAIggAADAIAAAoCAAAIAgAALsBAACWAQAAmAEAAHUDAACDAwAAdgMAAFsDAAB7AwAAXgMAAOYBAADcAQAA6AUAAN4FAADVBQAA6QUAAM8FAAAABgAAfQAAAHcAAACoAAAA2AsAANILAAADDAAAzQgAANgIAADGCAAA1AgAAMgIAABICQAAPwkAAEYJAABGBQAAPQUAAEQFAABkCAAAWwgAAGIIAAC5BwAAsAcAALsHAACpBwAAqwcAAGYMAABdDAAAaAwAAFYMAABYDAAAuAUAAK8FAAClBQAAugUAAKgFAACqBQAAdwcAAHEHAAB8BwAAWQcAAHYFAAB5BQAAWAUAAOkHAADsBwAAywcAAB4AAAAhAAAAAAAAAK4DAACxAwAAswMAAJUKAADJAAAAbAAAAGoAAABcCwAAjgsAAOoKAAAaCwAAeAIAAKkCAAAoAQAAIgEAABEMAAA8DAAAOAwAACEMAADCBgAAuAYAAJIEAACIBAAAWAIAAEQCAABQAgAABQcAAPsGAADxBgAA5wMAAN0DAADTAwAAkwYAAIkGAAB/BgAAlAYAAOkIAAAGCQAAGwkAAPwIAAAZCQAA8ggAAOYCAAADAwAAGAMAAPkCAAAWAwAA7wIAAD4HAAArBwAAdAEAADwDAAAyAwAAKQMAAD0DAAAkAwAAIwMAAFQDAAAjCgAAJAoAACAEAAA=","moduleEdges":[[2,1],[3,1],[3,4],[4,3],[5,1],[5,6],[5,12],[5,13],[6,5],[7,0],[8,10],[8,12],[9,1],[9,12],[10,1],[10,11],[11,10],[12,1],[12,3],[12,4],[12,13],[13,12],[14,1],[14,12],[14,13],[14,15],[14,16],[15,12],[15,14],[16,12],[16,14],[17,1],[17,5],[17,9],[17,10],[17,11],[17,12],[17,13],[17,14],[17,18],[17,19],[18,12],[18,17],[19,1],[19,10],[19,12],[19,20],[20,10],[20,11],[20,12],[20,13]],"transitiveModuleEdges":[[3,1],[5,1],[5,12],[5,13],[9,1],[10,1],[12,1],[12,3],[12,4],[14,1],[14,12],[14,13],[14,15],[14,16],[15,12],[16,12],[17,1],[17,5],[17,9],[17,10],[17,11],[17,12],[17,13],[17,14],[17,19],[18,12],[19,1],[19,10],[19,12],[20,10],[20,11],[20,12],[20,13]],"moduleStates":"AAAAAAAAAAAAAAAAAAAAAAAAAAAA","moduleStateCounts":[[0,0,0,0],[0,0,0,0],[0,0,0,0],[1,0,0,0],[2,0,0,0],[3,0,0,0],[3,0,0,0],[0,0,0,0],[0,0,0,0],[1,1,2,0],[3,0,0,0],[2,0,0,0],[7,0,0,0],[2,0,0,0],[6,0,0,0],[3,0,0,0],[3,0,0,0],[10,0,0,0],[3,0,0,0],[2,0,0,0],[3,0,0,0]],"moduleDepth":"/////wEAAAD/////AgAAAAIAAAABAAAAAgAAAP//////////AQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAgAAAAIAAAAAAAAAAQAAAAEAAAACAAAA","modulePodLayout":"AIDewwAABEMAAEhDAABQQgAAV8MAAARDAABIQwAAUEIAgPLEAAAAAAAASEMAAFBCAMDVxAAAAAAAAEhDAABQQgAAucQAAAAAAABIQwAAUEIAQJzEAAAAAAAASEMAAFBCAAB/xAAAAAAAAEhDAABQQgCARcQAAAAAAABIQwAAUEIAAAzEAAAAAAAASEMAAFBCAAClwwAAAAAAAEhDAABQQgAAcEEAAARDAABIQwAAUEIAAMjCAAAAAAAASEMAAFBCAAB1QwAABEMAAEhDAABQQgAAAkMAAAAAAABIQwAAUEIAALRDAAAAAAAASEMAAFBCAIATRAAAAAAAAEhDAABQQgAATUQAAAAAAABIQwAAUEIAQINEAAAAAAAASEMAAFBCAACgRAAAAAAAAEhDAABQQgDAvEQAAAAAAABIQwAAUEIAgNlEAAAAAAAASEMAAFBC","fileTree":[{"name":"home","parent":-1,"fileIndex":null},{"name":"mceresa","parent":0,"fileIndex":null},{"name":"Repositories","parent":1,"fileIndex":null},{"name":"Projects","parent":2,"fileIndex":null},{"name":"AgdaDependencies","parent":3,"fileIndex":null},{"name":"test","parent":4,"fileIndex":null},{"name":"Bool.agda","parent":5,"fileIndex":0},{"name":"Coinductive.agda","parent":5,"fileIndex":1},{"name":"DeadPrivate.agda","parent":5,"fileIndex":2},{"name":"GoalsTest.agda","parent":5,"fileIndex":3},{"name":"Holes.agda","parent":5,"fileIndex":4},{"name":"List.agda","parent":5,"fileIndex":5},{"name":"Nat.agda","parent":5,"fileIndex":6},{"name":"Records.agda","parent":5,"fileIndex":7},{"name":"Test.agda","parent":5,"fileIndex":8},{"name":"Where.agda","parent":5,"fileIndex":9}],"moduleTree":[{"name":"Agda","parent":-1,"moduleIndex":null},{"name":"Builtin","parent":0,"moduleIndex":null},{"name":"Nat","parent":1,"moduleIndex":0},{"name":"Primitive","parent":0,"moduleIndex":1},{"name":"Cubical","parent":3,"moduleIndex":2},{"name":"Bool","parent":-1,"moduleIndex":3},{"name":"Bool","parent":5,"moduleIndex":4},{"name":"Coinductive","parent":-1,"moduleIndex":5},{"name":"Stream","parent":7,"moduleIndex":6},{"name":"DeadPrivate","parent":-1,"moduleIndex":7},{"name":"GoalsTest","parent":-1,"moduleIndex":8},{"name":"Holes","parent":-1,"moduleIndex":9},{"name":"List","parent":-1,"moduleIndex":10},{"name":"List","parent":12,"moduleIndex":11},{"name":"Nat","parent":-1,"moduleIndex":12},{"name":"Nat","parent":14,"moduleIndex":13},{"name":"Records","parent":-1,"moduleIndex":14},{"name":"Box","parent":16,"moduleIndex":15},{"name":"Point","parent":16,"moduleIndex":16},{"name":"Test","parent":-1,"moduleIndex":17},{"name":"Exp","parent":19,"moduleIndex":18},{"name":"Where","parent":-1,"moduleIndex":19},{"name":"_","parent":21,"moduleIndex":20}],"entryModule":"Test","externalModules":"AAAAAAEAAAACAAAA","bundleFiles":{"Bool":"snippets/Bool.json","Bool.Bool":"snippets/Bool.Bool.json","Coinductive":"snippets/Coinductive.json","Coinductive.Stream":"snippets/Coinductive.Stream.json","Holes":"snippets/Holes.json","List":"snippets/List.json","List.List":"snippets/List.List.json","Nat":"snippets/Nat.json","Nat.Nat":"snippets/Nat.Nat.json","Records":"snippets/Records.json","Records.Box":"snippets/Records.Box.json","Records.Point":"snippets/Records.Point.json","Test":"snippets/Test.json","Test.Exp":"snippets/Test.Exp.json","Where":"snippets/Where.json","Where._":"snippets/Where._.json"},"searchIndex":{"names":["agda.builtin.nat","agda.primitive","agda.primitive.cubical","bool","bool.bool","coinductive","coinductive.stream","deadprivate","goalstest","holes","list","list.list","nat","nat.nat","records","records.box","records.point","test","test.exp","where","where._","records.box.constructor","bool.bool","test._++_","holes.usemagic","test.exp.plus","list.list.[]","where._.sq","test.exp.var","test.eval\u0027","test.var-0","nat.nat.suc","list.list","coinductive.stream.tail","nat._\u003c_","where._.go","test.eval","records.double","nat._-_","where._.bump","coinductive.stream.head","nat.nat.zero","holes.magic","nat.suc-0","records.point.y","records.box.contents","records.origin","test.sum","list._∷_-1","test.int-0","nat._*_","nat.nat","nat._+_","where.sumsquares","records.box","records.mkpoint","records.box.count","test.exp.int","records.point.constructor","coinductive.zeros","records.point","nat._==_","records.point.x","test.plus-1","coinductive.stream.constructor","test.exp","where.weirdsum","holes.unsolved#meta.3","holes.incomplete","test.plus-0","bool.bool.true","list._∷_-0","bool.bool.false","coinductive.mapsuc","test.map","list.list._∷_","records.sumcoords","coinductive.stream"],"kinds":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB","bigrams":{"#m":[67],"*_":[50],"++":[23],"+_":[23,52],"-0":[30,43,49,69,71],"-1":[48,63],"-_":[38],".3":[67],".[":[26],"._":[20,23,27,34,35,38,39,48,50,52,61,71,75],".b":[0,4,15,21,22,39,45,54,56,70,72],".c":[2,21,45,56,58,64],".d":[37],".e":[18,25,28,29,36,57,65],".f":[72],".g":[35],".h":[40],".i":[49,57,68],".l":[11,26,32,75],".m":[42,55,73,74],".n":[0,13,31,41,51],".o":[46],".p":[1,2,16,25,44,58,60,62,63,69],".s":[6,27,31,33,40,43,47,53,64,76,77],".t":[33,70],".u":[24,67],".v":[28,30],".w":[66],".x":[62],".y":[44],".z":[41,59],"\u003c_":[34],"==":[61],"=_":[61],"[]":[26],"_*":[50],"_+":[23,52],"_-":[38,48,71],"_.":[27,35,39],"_\u003c":[34],"_=":[61],"_∷":[48,71,75],"a.":[0,1,2,67],"ad":[7,40],"ag":[0,1,2,24,42],"ai":[33],"al":[2,8,29,36,72],"am":[6,33,40,64,77],"ap":[73,74],"ar":[28,30,53],"at":[0,7,12,13,31,34,38,41,43,50,51,52,61],"bi":[2],"bl":[37],"bo":[3,4,15,21,22,45,54,56,70,72],"bu":[0,39],"c-":[43],"ca":[2],"co":[5,6,14,15,16,21,33,37,40,44,45,46,54,55,56,58,59,60,62,64,68,73,76,77],"ct":[5,6,21,33,40,58,59,64,73,77],"cu":[2],"d#":[67],"da":[0,1,2],"de":[7],"do":[37],"dp":[7],"ds":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,66,76],"du":[5,6,33,40,59,64,73,77],"e.":[2,6,20,27,33,35,39,40,53,59,64,66,73,77],"ea":[6,7,33,40,64,77],"ec":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,76],"ed":[67],"ei":[66],"em":[24],"en":[45],"er":[19,20,27,35,39,41,53,59,66],"es":[8,9,17,18,23,24,25,28,29,30,36,42,47,49,53,57,63,65,67,68,69,74],"et":[67,68],"ev":[29,36],"ex":[18,25,28,57,65],"fa":[72],"gd":[0,1,2],"gi":[24,42,46],"go":[8,35],"he":[19,20,27,35,39,40,53,66],"ho":[9,24,42,67,68],"ic":[2,24,42],"ig":[46],"il":[0,33],"im":[1,2],"in":[0,5,6,16,33,40,44,46,49,55,57,58,59,60,62,64,68,73,77],"ir":[66],"is":[10,11,26,32,48,71,75],"it":[1,2],"iv":[1,2,5,6,7,33,40,59,64,73,77],"kp":[55],"l\u0027":[29],"l.":[4,22,70,72],"le":[9,24,37,42,67,68],"li":[10,11,26,32,48,71,75],"ls":[8,72],"lt":[0],"lu":[25,63,69],"lv":[67],"m.":[33,40,64],"ma":[24,42,73,74],"mc":[76],"me":[67],"mi":[1,2],"mk":[55],"mp":[39,68],"ms":[53],"n.":[0],"na":[0,12,13,31,34,38,41,43,50,51,52,61],"nc":[68],"nd":[5,6,33,40,59,64,73,77],"ns":[21,58,64,67],"nt":[16,44,45,49,55,56,57,58,60,62],"oa":[8],"oi":[5,6,16,33,40,44,55,58,59,60,62,64,73,77],"ol":[3,4,9,22,24,42,67,68,70,72],"om":[68],"on":[21,45,58,64],"oo":[3,4,22,70,72,76],"or":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,64,76],"os":[59],"ou":[37,56],"ox":[15,21,45,54,56],"p.":[25,28,57],"pl":[25,63,68,69],"po":[16,44,55,58,60,62],"pr":[1,2,7],"ps":[73],"qu":[53],"r-":[30],"rd":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,66,76],"re":[6,14,15,16,19,20,21,27,33,35,37,39,40,44,45,46,53,54,55,56,58,60,62,64,66,76,77],"ri":[1,2,7,46],"ro":[41,59],"ru":[21,58,64,70],"s-":[63,69],"s.":[15,16,21,24,37,42,44,45,46,54,55,56,58,60,62,67,68,76],"se":[24,72],"so":[67],"sq":[27,53],"st":[6,8,10,11,17,18,21,23,25,26,28,29,30,32,33,36,40,47,48,49,57,58,63,64,65,69,71,74,75,77],"su":[31,43,47,53,66,73,76],"t-":[49],"t.":[11,13,18,23,25,26,28,29,30,31,32,34,36,38,41,43,44,47,48,49,50,51,52,57,58,61,62,63,65,69,71,74,75],"ta":[33,67],"te":[7,8,17,18,23,25,28,29,30,36,45,47,49,57,63,65,68,69,74],"ti":[0,1,2,5,6,33,40,59,64,73,77],"to":[21,58,64],"tr":[6,21,33,40,58,64,70,77],"ts":[45],"ua":[53],"ub":[2,37],"uc":[5,6,21,31,33,40,43,58,59,64,73,77],"ue":[70],"ui":[0],"um":[39,47,53,66,76],"un":[56,67],"us":[24,25,63,69],"va":[7,28,29,30,36],"ve":[1,2,5,6,33,40,59,64,67,73,77],"we":[66],"wh":[19,20,27,35,39,53,66],"x.":[21,45,56],"xp":[18,25,28,57,65],"ze":[41,59],"∷_":[48,71,75]}}};
+var GRAPH_URL = null;
+var SNIPPETS_BASE = null;
+var MODULES_BASE = null;
+
+// ─── BASE64 DECODERS ───────────────────────────────────────────────────────
+function b64Bytes(b64) {
+  if (!b64) return new Uint8Array(0);
+  var bin = atob(b64), out = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64ToInt32(b64)   { return new Int32Array(b64Bytes(b64).buffer); }
+function b64ToInt8(b64)    { return new Int8Array(b64Bytes(b64).buffer); }
+function b64ToFloat32(b64) { return new Float32Array(b64Bytes(b64).buffer); }
+
+// ─── FETCH HELPERS ─────────────────────────────────────────────────────────
+async function fetchJson(url) {
+  if (GZIP_ENABLED && window.pako) {
+    try {
+      var r = await fetch(url + '.gz');
+      if (r.ok) {
+        var ab = await r.arrayBuffer();
+        var txt = pako.inflate(new Uint8Array(ab), {to:'string'});
+        return JSON.parse(txt);
+      }
+    } catch(e) {}
+  }
+  var r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching ' + url);
+  return r.json();
+}
+
+async function loadGraph() {
+  if (LAZY) return await fetchJson(GRAPH_URL);
+  return GRAPH;
+}
+
+function showErr(msg) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('err-body').textContent = msg;
+  document.getElementById('err').classList.add('visible');
+}
+
+// ─── APP STATE ─────────────────────────────────────────────────────────────
+// Flat per-def state, kept Int8Array / Int32Array-style where possible
+// so we don't materialise per-def objects for very large graphs.
+var STATE_LETTER = ['D','P','H','F'];
+var STATE_NAME   = ['Defined','Postulate','Hole','Failed'];
+
+var g            = null;     // parsed graph.json
+var defNames     = [];       // [String]
+var defMods      = null;     // Int32Array — module index per def
+var defStates    = null;     // Int8Array  — 0/1/2/3
+var outAdj       = [];       // [[Int]]   per-def out-neighbour list (def indices)
+var inAdj        = [];       // [[Int]]   reverse
+var topoOrder    = [];       // [Int]     def-index sequence
+var topoCycleSet = new Set();// def-indices that ended up in a residual cycle bucket
+var positionOf   = null;     // Int32Array — def-index → position in topoOrder
+var externals    = new Set();// module names that are external
+var entryModule  = null;     // String | null
+var sectionLabel = [];       // [String] parallel to topoOrder ("3.2")
+var chapterNum   = [];       // [Int]    parallel to topoOrder
+var sectionId    = [];       // [String] parallel to topoOrder ("sec-3-2")
+var snippetCache = Object.create(null); // modName → bundle | null | 'pending'
+
+// Placeholder detail files — emitted by the producer for modules
+// that are declared in moduleFiles but have no kept defs (external
+// stdlib modules, all-filtered modules, or modules in the failed-
+// typecheck set under --keep-going). We render them as italicised
+// in-prose asides between chapters instead of silently skipping.
+var placeholderModules = Object.create(null);  // modName -> detail
+
+function placeholderReasonText(reason) {
+  switch (reason) {
+    case 'external':
+      return 'External module — outside the project root. Skipping.';
+    case 'failed':
+      return 'This module failed to type-check (--keep-going). Skipping.';
+    case 'filtered':
+      return 'Every definition in this module was filtered out. Skipping.';
+    default:
+      return 'This module was not analysed.';
+  }
+}
+
+function renderPlaceholderHTML(detail) {
+  var reason     = (detail && detail.reason) || 'unknown';
+  var modName    = (detail && detail.module) || '';
+  var reasonText = placeholderReasonText(reason);
+  var postulates = (detail && detail.externalPostulates) || [];
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  var modPart = modName ? '<code style="font-family:var(--font-mono);font-style:normal;' +
+                                  'background:rgba(0,0,0,0.04);padding:0 4px;border-radius:3px;">' +
+                            escHtml(modName) + '</code> &mdash; '
+                        : '';
+  var extra = '';
+  if (postulates.length) {
+    var shown = postulates.slice(0, 6).map(escHtml).join(', ');
+    var more  = postulates.length > 6 ? ', …' : '';
+    extra = ' <span style="color:var(--text-faint);font-size:0.92em;">' +
+             '(postulates: ' + shown + more + ')</span>';
+  }
+  return '<aside class="narrative-aside" ' +
+              'style="margin:18px 0 22px;padding:8px 14px;' +
+                     'border-left:3px solid var(--text-faint);' +
+                     'color:var(--text-muted);font-style:italic;' +
+                     'font-family:var(--font-serif,Georgia,serif);font-size:0.96em;' +
+                     'line-height:1.55;">' +
+           '(' + modPart + escHtml(reasonText) + extra + ')' +
+         '</aside>';
+}
+
+// IntersectionObserver for "you are here" scrollspy.
+var observer = null;
+var lastActiveSec = null;
+
+// ─── INIT ──────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    g = await loadGraph();
+  } catch(e) {
+    showErr('Failed to load graph data: ' + e.message +
+      (LAZY ? '\n\nThe lazy bundle uses fetch(); make sure you serve via HTTP (e.g. `python -m http.server`), not file://.' : ''));
+    return;
+  }
+
+  if (!g || !g.modules) {
+    showErr('Graph payload is missing or malformed.');
+    return;
+  }
+
+  // Externals
+  if (g.externalModules) {
+    var ext = b64ToInt32(g.externalModules);
+    for (var i = 0; i < ext.length; i++) {
+      if (ext[i] !== 0 && g.modules[i]) externals.add(g.modules[i]);
+    }
+  }
+  entryModule = g.entryModule || null;
+
+  // Decode defs + edges. Two ingest paths.
+  if (LAZY) {
+    await ingestLazy();
+  } else {
+    ingestInline();
+  }
+
+  if (defNames.length === 0) {
+    // Still possible (e.g. skip-agda mode) — render an empty narrative
+    // gracefully rather than crashing.
+    document.getElementById('loading').style.display = 'none';
+    renderFrontmatter();
+    document.getElementById('chapters').innerHTML =
+      '<p style="color:var(--text-muted);font-style:italic;margin:40px 0;">' +
+      'No definitions to read. The graph contains only modules, no leaf-level ' +
+      'definitions (this happens with <code>--skip-agda</code>).</p>';
+    return;
+  }
+
+  // Topological ordering. Cycles, when present, are appended at the end.
+  computeTopoOrder();
+  computeSectionNumbers();
+
+  document.getElementById('loading').style.display = 'none';
+
+  renderFrontmatter();
+  renderNarrative();
+  renderToc();
+  renderProgressHotspots();
+  wireUI();
+
+  // Initial scrollspy activation.
+  if (sectionId.length > 0) activate(sectionId[0]);
+}
+
+// ─── INGEST (inline) ───────────────────────────────────────────────────────
+// Inline mode payload carries the full CSR adjacency and all defs.
+function ingestInline() {
+  if (!g.defs) { defNames = []; return; }
+  defNames  = g.defs.names || [];
+  defMods   = g.defs.modules ? b64ToInt32(g.defs.modules) : new Int32Array(defNames.length);
+  defStates = g.defs.states  ? b64ToInt8(g.defs.states)   : new Int8Array(defNames.length);
+
+  outAdj = new Array(defNames.length);
+  inAdj  = new Array(defNames.length);
+  for (var i = 0; i < defNames.length; i++) { outAdj[i] = []; inAdj[i] = []; }
+
+  if (g.edges) {
+    var off = b64ToInt32(g.edges.outOffsets);
+    var tgt = b64ToInt32(g.edges.outTargets);
+    // The CSR may have come from a Haskell side where off.length === N+1; tolerate either.
+    var N = defNames.length;
+    for (var u = 0; u < N; u++) {
+      var s = off[u], e = (u + 1 < off.length) ? off[u + 1] : tgt.length;
+      for (var k = s; k < e; k++) {
+        var v = tgt[k];
+        if (v >= 0 && v < N) {
+          outAdj[u].push(v);
+          inAdj[v].push(u);
+        }
+      }
+    }
+  }
+}
+
+// ─── INGEST (lazy) ─────────────────────────────────────────────────────────
+// Lazy mode: graph.json has only module-level data. Per-module detail
+// files carry the defs and their outEdges. Each outEdge is
+// [localSourceIdx, tgtLocalIdx, tgtModuleIdx]; we have to flatten this
+// into a single global def index space.
+async function ingestLazy() {
+  if (!g.moduleFiles) { defNames = []; return; }
+
+  var modList = g.modules;
+  var modIdx = {};
+  modList.forEach(function(m, i) { modIdx[m] = i; });
+
+  // Pull every module detail file in parallel. With ~1k modules this is
+  // a lot of round-trips on large-scale projects; the narrative view
+  // is best for medium projects, but we don't gate on size.
+  var entries = Object.keys(g.moduleFiles);
+  var details = {};
+  var fetches = entries.map(async function(m) {
+    try {
+      details[m] = await fetchJson(g.moduleFiles[m]);
+    } catch(e) {
+      details[m] = null;
+    }
+  });
+  await Promise.all(fetches);
+
+  // Record placeholder detail JSON (external/failed/filtered modules
+  // with no kept defs) so renderNarrative can interleave italicised
+  // asides at appropriate chapter boundaries instead of silently
+  // skipping these modules.
+  for (var pmi = 0; pmi < modList.length; pmi++) {
+    var pdet = details[modList[pmi]];
+    if (pdet && pdet.placeholder) {
+      placeholderModules[modList[pmi]] = pdet;
+    }
+  }
+
+  // Assign each module a base offset, in g.modules order.
+  var moduleOffset = new Int32Array(modList.length);
+  var totalDefs = 0;
+  for (var i = 0; i < modList.length; i++) {
+    moduleOffset[i] = totalDefs;
+    var det = details[modList[i]];
+    // Skip placeholders for offset accounting — they contribute no defs.
+    if (det && !det.placeholder && det.defs && det.defs.names) totalDefs += det.defs.names.length;
+  }
+
+  defNames  = new Array(totalDefs);
+  defMods   = new Int32Array(totalDefs);
+  defStates = new Int8Array(totalDefs);
+  outAdj    = new Array(totalDefs);
+  inAdj     = new Array(totalDefs);
+  for (var k = 0; k < totalDefs; k++) { outAdj[k] = []; inAdj[k] = []; }
+
+  // Pass 1: lay out defs.
+  for (var mi = 0; mi < modList.length; mi++) {
+    var det = details[modList[mi]];
+    if (!det || det.placeholder || !det.defs || !det.defs.names) continue;
+    var names = det.defs.names;
+    var sts   = det.defs.states ? b64ToInt8(det.defs.states) : null;
+    var base  = moduleOffset[mi];
+    for (var j = 0; j < names.length; j++) {
+      defNames[base + j] = names[j];
+      defMods[base + j]  = mi;
+      defStates[base + j] = sts ? sts[j] : 0;
+    }
+  }
+
+  // Pass 2: wire edges. det.outEdges = [[localSrc, tgtLocal, tgtModIdx], ...]
+  for (var mi2 = 0; mi2 < modList.length; mi2++) {
+    var det2 = details[modList[mi2]];
+    if (!det2 || det2.placeholder || !det2.outEdges) continue;
+    var base2 = moduleOffset[mi2];
+    for (var ei = 0; ei < det2.outEdges.length; ei++) {
+      var e = det2.outEdges[ei];
+      var src = base2 + e[0];
+      var tm  = e[2];
+      if (tm < 0 || tm >= modList.length) continue;
+      var tgt = moduleOffset[tm] + e[1];
+      if (src < totalDefs && tgt < totalDefs && tgt >= 0) {
+        outAdj[src].push(tgt);
+        inAdj[tgt].push(src);
+      }
+    }
+  }
+}
+
+// ─── TOPO ORDER (Kahn's algorithm) ─────────────────────────────────────────
+// Standard Kahn's with a stable tiebreak: among nodes whose in-degree
+// just dropped to zero, prefer the one in the same module as the most
+// recently emitted def (keeps chapters from fragmenting), then break
+// ties by module name + def name. Cycles: any node never reaching
+// in-degree 0 is added at the end in alphabetical order and flagged.
+function computeTopoOrder() {
+  var N = defNames.length;
+  var inDeg = new Int32Array(N);
+  for (var u = 0; u < N; u++) {
+    var outs = outAdj[u];
+    for (var k = 0; k < outs.length; k++) inDeg[outs[k]]++;
+  }
+
+  // Two-tier ready bucket: those in the "current module" go first, in
+  // insertion order; everything else goes through a separate queue.
+  var currentMod = -1;
+  var sameModQueue = [];   // FIFO of def-indices in currentMod
+  // Other-module ready set: keyed by module name for stability.
+  // Use Map<moduleIndex, array> to keep insertion order per module.
+  var readyByMod = new Map();
+  var modReadyOrder = []; // module indices in the order they first showed up as ready
+
+  function enqueue(v) {
+    var m = defMods[v];
+    if (m === currentMod) {
+      sameModQueue.push(v);
+      return;
+    }
+    if (!readyByMod.has(m)) {
+      readyByMod.set(m, []);
+      modReadyOrder.push(m);
+    }
+    readyByMod.get(m).push(v);
+  }
+
+  for (var i = 0; i < N; i++) {
+    if (inDeg[i] === 0) enqueue(i);
+  }
+
+  var out = new Array(N);
+  var outLen = 0;
+
+  while (outLen < N) {
+    var next = -1;
+
+    if (sameModQueue.length > 0) {
+      next = sameModQueue.shift();
+    } else {
+      // Pick the module that's been waiting longest and has at least
+      // one ready def. (Filter out modules that have been drained.)
+      while (modReadyOrder.length > 0) {
+        var mi = modReadyOrder[0];
+        var arr = readyByMod.get(mi);
+        if (arr && arr.length > 0) {
+          next = arr.shift();
+          break;
+        }
+        modReadyOrder.shift();
+        readyByMod.delete(mi);
+      }
+    }
+
+    if (next < 0) {
+      // Residual: every remaining node is in a cycle. Emit them in a
+      // stable order so reload-after-reload narratives match.
+      var residual = [];
+      for (var r = 0; r < N; r++) if (inDeg[r] > 0 && out.indexOf(r) === -1) residual.push(r);
+      // dedup-vs-already-emitted via a Set for safety
+      var emitted = new Set();
+      for (var z = 0; z < outLen; z++) emitted.add(out[z]);
+      residual = residual.filter(function(x){ return !emitted.has(x); });
+      residual.sort(function(a, b) {
+        var ma = defMods[a], mb = defMods[b];
+        if (ma !== mb) {
+          var na = g.modules[ma] || '', nb = g.modules[mb] || '';
+          return na < nb ? -1 : na > nb ? 1 : 0;
+        }
+        return defNames[a] < defNames[b] ? -1 : defNames[a] > defNames[b] ? 1 : 0;
+      });
+      for (var rr = 0; rr < residual.length; rr++) {
+        out[outLen++] = residual[rr];
+        topoCycleSet.add(residual[rr]);
+      }
+      break;
+    }
+
+    out[outLen++] = next;
+    currentMod = defMods[next];
+
+    // Drain newly-zero dependants into the queues.
+    var outs = outAdj[next];
+    for (var k = 0; k < outs.length; k++) {
+      var v = outs[k];
+      if (--inDeg[v] === 0) enqueue(v);
+    }
+  }
+
+  topoOrder = out.slice(0, outLen);
+  positionOf = new Int32Array(N);
+  for (var p = 0; p < topoOrder.length; p++) positionOf[topoOrder[p]] = p;
+}
+
+// ─── SECTION NUMBERING ─────────────────────────────────────────────────────
+// Chapter = ordinal of first-time-seeing module along topoOrder.
+// Section = within-chapter ordinal.
+function computeSectionNumbers() {
+  sectionLabel = new Array(topoOrder.length);
+  chapterNum   = new Array(topoOrder.length);
+  sectionId    = new Array(topoOrder.length);
+
+  var moduleChapter = new Map(); // module-index → chapter-number
+  var nextChapter = 0;
+  var withinChapter = 0;
+  var currentChapter = -1;
+
+  for (var p = 0; p < topoOrder.length; p++) {
+    var d = topoOrder[p];
+    var m = defMods[d];
+
+    var ch;
+    if (moduleChapter.has(m)) {
+      ch = moduleChapter.get(m);
+    } else {
+      nextChapter++;
+      ch = nextChapter;
+      moduleChapter.set(m, ch);
+    }
+
+    if (ch !== currentChapter) {
+      currentChapter = ch;
+      withinChapter = 0;
+    }
+    withinChapter++;
+
+    chapterNum[p]   = ch;
+    sectionLabel[p] = ch + '.' + withinChapter;
+    sectionId[p]    = 'sec-' + ch + '-' + withinChapter;
+  }
+}
+
+// ─── FRONTMATTER ───────────────────────────────────────────────────────────
+function renderFrontmatter() {
+  document.title = 'agda-deps · reading order';
+  document.getElementById('entry-mod').textContent = entryModule || '(no entry)';
+
+  var nMods = g.modules.length;
+  var nDefs = defNames.length;
+  var nEdges = 0;
+  for (var i = 0; i < outAdj.length; i++) nEdges += outAdj[i].length;
+  var holes = 0, posts = 0, faileds = 0;
+  for (var j = 0; j < defStates.length; j++) {
+    if (defStates[j] === 1) posts++;
+    else if (defStates[j] === 2) holes++;
+    else if (defStates[j] === 3) faileds++;
+  }
+
+  if (entryModule) {
+    document.getElementById('title').textContent =
+      'A reading of ' + entryModule + ', in topological order';
+  } else {
+    document.getElementById('title').textContent =
+      'Definitions in topological order';
+  }
+
+  var byline = document.getElementById('byline');
+  var parts = [
+    '<span><strong>' + nMods.toLocaleString() + '</strong> modules</span>',
+    '<span><strong>' + nDefs.toLocaleString() + '</strong> definitions</span>',
+    '<span><strong>' + nEdges.toLocaleString() + '</strong> dep&#8209;edges</span>'
+  ];
+  if (holes)   parts.push('<span><strong>' + holes   + '</strong> open holes</span>');
+  if (posts)   parts.push('<span><strong>' + posts   + '</strong> postulates</span>');
+  if (faileds) parts.push('<span><strong>' + faileds + '</strong> failed</span>');
+  byline.innerHTML = parts.join('');
+
+  // "Skip to the final definition" — last in topo order, ideally
+  // headline. We just point at the last section.
+  var skip = document.getElementById('skip-link');
+  if (topoOrder.length > 0) {
+    var lastIdx = topoOrder.length - 1;
+    skip.href = '#' + sectionId[lastIdx];
+    skip.innerHTML = 'Skip to the final definition (&sect;' +
+      sectionLabel[lastIdx] + ' &mdash; <code>' +
+      escapeHtml(shortName(defNames[topoOrder[lastIdx]])) + '</code>)';
+  } else {
+    skip.style.display = 'none';
+  }
+}
+
+// ─── NARRATIVE RENDER ──────────────────────────────────────────────────────
+function renderNarrative() {
+  var root = document.getElementById('chapters');
+  var html = '';
+
+  // Placeholder asides — italicised in-prose notes for modules that
+  // were referenced but not analysed (external stdlib, failed
+  // type-check, or all-filtered). Rendered as a frontmatter block
+  // before chapter 1 so the reader knows what was elided.
+  var placeholderNames = Object.keys(placeholderModules);
+  if (placeholderNames.length) {
+    placeholderNames.sort();
+    html += '<div class="narrative-asides-block" style="margin:24px 0 32px;">';
+    placeholderNames.forEach(function(mn) {
+      html += renderPlaceholderHTML(placeholderModules[mn]);
+    });
+    html += '</div>';
+  }
+
+  var lastChapter = -1;
+  // Per-chapter aggregated counts so the chapter header can show them.
+  // Precompute one pass.
+  var chapterCounts = new Map(); // ch → {d, p, h, f, total, modIdx, firstSecIdx}
+  for (var p = 0; p < topoOrder.length; p++) {
+    var ch = chapterNum[p];
+    var d  = topoOrder[p];
+    var s  = defStates[d];
+    var rec = chapterCounts.get(ch);
+    if (!rec) {
+      rec = { d: 0, p: 0, h: 0, f: 0, total: 0, modIdx: defMods[d], firstSecIdx: p };
+      chapterCounts.set(ch, rec);
+    }
+    rec.total++;
+    if (s === 0) rec.d++;
+    else if (s === 1) rec.p++;
+    else if (s === 2) rec.h++;
+    else if (s === 3) rec.f++;
+  }
+
+  for (var p2 = 0; p2 < topoOrder.length; p2++) {
+    var ch2 = chapterNum[p2];
+    if (ch2 !== lastChapter) {
+      if (lastChapter !== -1) html += '</section>'; // close previous chapter
+      lastChapter = ch2;
+      var rec2 = chapterCounts.get(ch2);
+      var modName = g.modules[rec2.modIdx] || '(unknown)';
+      var isExt = externals.has(modName);
+      html += '<section class="chapter' + (isExt ? ' external' : '') +
+              '" id="ch-' + ch2 + '" data-mod="' + escapeHtml(modName) + '">';
+      html += '<header class="chapter-header">';
+      html += '<span class="chapter-num">Chapter ' + ch2 + '</span>';
+      html += '<h2 class="chapter-title"><span class="mod-prefix">module </span>' +
+              escapeHtml(modName) + '</h2>';
+      var meta = [];
+      if (rec2.d) meta.push('<span><span class="meta-dot" style="background:var(--c-defined)"></span>' + rec2.d + ' defined</span>');
+      if (rec2.p) meta.push('<span><span class="meta-dot" style="background:var(--c-postulate)"></span>' + rec2.p + ' postulate</span>');
+      if (rec2.h) meta.push('<span><span class="meta-dot" style="background:var(--c-hole)"></span>' + rec2.h + ' hole</span>');
+      if (rec2.f) meta.push('<span><span class="meta-dot" style="background:var(--c-failed)"></span>' + rec2.f + ' failed</span>');
+      if (meta.length) html += '<div class="chapter-meta">' + meta.join('') + '</div>';
+      if (entryModule && modName === entryModule) {
+        html += '<p style="font-family:var(--font-sans);font-size:12.5px;color:var(--accent);margin-top:8px;">' +
+                '★ Entry module &mdash; the goal of the reading.</p>';
+      }
+      html += '</header>';
+    }
+
+    html += renderDefBlock(p2);
+  }
+  if (lastChapter !== -1) html += '</section>';
+
+  root.innerHTML = html;
+
+  // Wire up xref pill clicks (smooth scroll + flash). Delegated.
+  root.addEventListener('click', function(ev) {
+    var a = ev.target.closest('.xref-pill[data-target]');
+    if (a) {
+      ev.preventDefault();
+      jumpTo(a.dataset.target);
+      return;
+    }
+  });
+}
+
+// Render one definition block at topoOrder position p.
+function renderDefBlock(p) {
+  var d = topoOrder[p];
+  var name = defNames[d];
+  var modName = g.modules[defMods[d]] || '';
+  var fullName = modName ? (modName + '.' + name) : name;
+  var state = defStates[d]; // 0..3
+  var stateL = STATE_LETTER[state] || 'D';
+  var sec = sectionLabel[p];
+  var id  = sectionId[p];
+  var isCycle = topoCycleSet.has(d);
+
+  var html = '<article class="def state-' + stateL +
+             '" id="' + id + '" data-id="' + escapeHtml(fullName) +
+             '" data-state="' + stateL +
+             '" data-def-idx="' + d + '"' +
+             '>';
+  html += '<a class="def-anchor" href="#' + id + '">&sect;' + sec + '</a>';
+  html += '<div class="def-header">';
+  html += '<span class="def-section-num">&sect;' + sec + '</span>';
+  html += '<span class="def-name">' + escapeHtml(shortName(name)) + '</span>';
+  html += '<span class="def-tags">';
+  html += '<span class="tag state-' + stateL + '">' + STATE_NAME[state] + '</span>';
+  if (isCycle) html += '<span class="tag cycle" title="In a strongly-connected component / mutual block">cycle</span>';
+  html += '</span></div>';
+
+  // Signature placeholder. If we have a snippet via WITH_SOURCE we lazily
+  // load it once visible (lazy mode) or pull from inline GRAPH (inline mode).
+  html += '<pre class="def-signature" data-snippet-target="1">' +
+          '<span class="placeholder">' + escapeHtml(fullName) + '</span></pre>';
+
+  // Body: short generated prose; user can hide via Skim mode.
+  html += '<div class="def-body">' + renderProse(d, modName, name, state) + '</div>';
+
+  // Inline depends-on / used-by pills.
+  html += renderXrefs(d);
+
+  html += '</article>';
+  return html;
+}
+
+function renderProse(d, modName, name, state) {
+  // Lightweight, auto-generated description so the page reads as prose
+  // even before --with-source is enabled. Mostly explanatory: what
+  // state the def is in, how it relates to its neighbours.
+  var inN = inAdj[d].length;
+  var outN = outAdj[d].length;
+  var fragments = [];
+
+  if (state === 1) {
+    fragments.push('<em>' + escapeHtml(shortName(name)) + '</em> is a <strong>postulate</strong>: ' +
+      'asserted to exist without proof. Every later definition that depends on it ' +
+      'inherits that trust.');
+  } else if (state === 2) {
+    fragments.push('<em>' + escapeHtml(shortName(name)) + '</em> contains an <strong>unsolved meta</strong> &mdash; ' +
+      'an open obligation. The type is known, but the body is a hole.');
+  } else if (state === 3) {
+    fragments.push('<em>' + escapeHtml(shortName(name)) + '</em> belongs to a <strong>failed module</strong>: ' +
+      'Agda could not type-check the source. The relationship below is best-effort, ' +
+      'based on the precomputed import graph.');
+  }
+
+  if (outN === 0 && inN === 0) {
+    fragments.push('A solitary definition: it depends on nothing in this graph, and nothing depends on it.');
+  } else if (outN === 0) {
+    fragments.push('A leaf in dependency terms &mdash; it is used by ' + inN +
+      ' later definition' + (inN === 1 ? '' : 's') + ' but rests on no earlier one.');
+  } else if (inN === 0) {
+    fragments.push('Sits at the end of its chain: it depends on ' + outN +
+      ' earlier definition' + (outN === 1 ? '' : 's') + ' and is used by nothing further down.');
+  } else {
+    fragments.push('Depends on ' + outN + ' earlier definition' + (outN === 1 ? '' : 's') +
+      '; used by ' + inN + ' later definition' + (inN === 1 ? '' : 's') + '.');
+  }
+
+  return '<p>' + fragments.join(' ') + '</p>';
+}
+
+function renderXrefs(d) {
+  var outs = outAdj[d];
+  var ins  = inAdj[d];
+
+  var html = '<div class="def-xrefs">';
+  html += renderXrefRow('Depends on', outs);
+  html += renderXrefRow('Used by',    ins);
+  html += '</div>';
+  return html;
+}
+
+function renderXrefRow(label, list) {
+  var MAX_PILLS = 24;
+  var html = '<div class="xref-row"><span class="xref-label">' + label + '</span><div class="xref-pills">';
+  if (list.length === 0) {
+    html += '<span class="xref-empty">none</span>';
+  } else {
+    var shown = list.slice(0, MAX_PILLS);
+    for (var i = 0; i < shown.length; i++) {
+      var di = shown[i];
+      var dn = defNames[di];
+      var dm = g.modules[defMods[di]] || '';
+      var ds = STATE_LETTER[defStates[di]] || 'D';
+      var pos = positionOf[di];
+      var sec = (pos >= 0 && pos < sectionLabel.length) ? sectionLabel[pos] : null;
+      var anchorId = (pos >= 0 && pos < sectionId.length) ? sectionId[pos] : null;
+      var isExt = externals.has(dm);
+      var label2 = escapeHtml(shortName(dn));
+      if (isExt && !sec) {
+        html += '<span class="xref-pill ext" title="' + escapeHtml(dm + '.' + dn) + ' (external)">' +
+                label2 + '</span>';
+      } else if (anchorId) {
+        var secHtml = sec ? '<span class="num">&sect;' + sec + '</span>' : '';
+        html += '<a class="xref-pill s-' + ds + '" data-target="' + anchorId +
+                '" title="' + escapeHtml(dm + '.' + dn) + '">' + secHtml + label2 + '</a>';
+      } else {
+        html += '<span class="xref-pill" title="' + escapeHtml(dm + '.' + dn) + '">' + label2 + '</span>';
+      }
+    }
+    if (list.length > MAX_PILLS) {
+      html += '<span class="xref-more">+ ' + (list.length - MAX_PILLS) + ' more</span>';
+    }
+  }
+  html += '</div></div>';
+  return html;
+}
+
+// ─── TOC ──────────────────────────────────────────────────────────────────
+function renderToc() {
+  var tocList = document.getElementById('toc-list');
+  var html = '';
+  var lastCh = -1;
+  // Cap large project TOCs to keep DOM size sane; mark the cutoff.
+  var CAP = 4000;
+  var seenChapters = new Set();
+
+  for (var p = 0; p < topoOrder.length && p < CAP; p++) {
+    var ch = chapterNum[p];
+    var d  = topoOrder[p];
+    var modName = g.modules[defMods[d]] || '';
+    if (!seenChapters.has(ch)) {
+      seenChapters.add(ch);
+      html += '<div class="toc-entry chapter-entry" data-target="ch-' + ch + '">' +
+              '<span class="toc-num">Ch ' + ch + '</span>' +
+              '<span class="toc-text" title="' + escapeHtml(modName) + '">' + escapeHtml(modName) + '</span>' +
+              '</div>';
+      lastCh = ch;
+    }
+    var stateL = STATE_LETTER[defStates[d]] || 'D';
+    html += '<div class="toc-entry section-entry" data-target="' + sectionId[p] + '">' +
+            '<span class="toc-num">&sect;' + sectionLabel[p] + '</span>' +
+            '<span class="toc-text" title="' + escapeHtml(defNames[d]) + '">' +
+            escapeHtml(shortName(defNames[d])) + '</span>' +
+            '<span class="toc-state ' + stateL + '" title="' + STATE_NAME[defStates[d]] + '"></span>' +
+            '</div>';
+  }
+  if (topoOrder.length > CAP) {
+    html += '<div style="font-size:10.5px;color:var(--text-faint);font-style:italic;padding-top:8px;">' +
+            '(showing first ' + CAP + ' of ' + topoOrder.length + ' &mdash; scroll the main reading column for the rest)</div>';
+  }
+  tocList.innerHTML = html;
+
+  tocList.addEventListener('click', function(e) {
+    var row = e.target.closest('.toc-entry');
+    if (!row) return;
+    jumpTo(row.dataset.target);
+  });
+}
+
+// ─── PROGRESS STRIP HOTSPOTS ──────────────────────────────────────────────
+function renderProgressHotspots() {
+  var rail = document.getElementById('progress-rail');
+  var N = topoOrder.length;
+  if (N === 0) return;
+  // Cap hotspots so a project with thousands of holes doesn't render
+  // thousands of DOM elements. 200 is plenty for a visual heatmap;
+  // user can still find them via TOC.
+  var HOTCAP = 400;
+  var hot = [];
+  for (var p = 0; p < N; p++) {
+    var d = topoOrder[p];
+    var s = defStates[d];
+    if (s === 1 || s === 2 || s === 3) {
+      hot.push({ p: p, d: d, s: s });
+    }
+  }
+  // Down-sample if needed.
+  if (hot.length > HOTCAP) {
+    var step = hot.length / HOTCAP;
+    var sampled = [];
+    for (var i = 0; i < HOTCAP; i++) sampled.push(hot[Math.floor(i * step)]);
+    hot = sampled;
+  }
+  hot.forEach(function(h) {
+    var pct = (h.p / Math.max(1, N - 1)) * 100;
+    var el = document.createElement('div');
+    el.className = 'progress-hotspot ' + (h.s === 1 ? 'postulate' : h.s === 2 ? 'hole' : 'failed');
+    el.style.left = pct.toFixed(3) + '%';
+    el.dataset.label = '§' + sectionLabel[h.p] + ' · ' + shortName(defNames[h.d]) +
+      ' [' + STATE_NAME[h.s] + ']';
+    el.addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      jumpTo(sectionId[h.p]);
+    });
+    rail.appendChild(el);
+  });
+
+  // Click on empty rail = seek
+  rail.addEventListener('click', function(ev) {
+    if (ev.target !== rail && ev.target.id !== 'progress-fill') return;
+    var r = rail.getBoundingClientRect();
+    var t = (ev.clientX - r.left) / r.width;
+    var i = Math.min(N - 1, Math.max(0, Math.round(t * (N - 1))));
+    jumpTo(sectionId[i]);
+  });
+}
+
+// ─── SCROLLSPY ─────────────────────────────────────────────────────────────
+function setupScrollspy() {
+  if (observer) observer.disconnect();
+  // We pick whichever .def is closest below the progress strip.
+  var stripH = document.getElementById('progress-strip').offsetHeight + 12;
+  observer = new IntersectionObserver(function(entries) {
+    var best = null;
+    var bestDist = Infinity;
+    entries.forEach(function(en) {
+      if (!en.isIntersecting) return;
+      var top = en.target.getBoundingClientRect().top;
+      var d = Math.abs(top - stripH);
+      if (d < bestDist) { bestDist = d; best = en.target; }
+    });
+    if (best) activate(best.id);
+  }, {
+    rootMargin: '-40px 0px -60% 0px',
+    threshold: [0, 0.2, 0.5, 1]
+  });
+  document.querySelectorAll('.def').forEach(function(el) { observer.observe(el); });
+}
+
+function activate(secId) {
+  if (!secId || secId === lastActiveSec) return;
+  lastActiveSec = secId;
+
+  var el = document.getElementById(secId);
+  if (!el) return;
+
+  // Find the position in the topoOrder by parsing the section id back.
+  // We stored sectionId[p] = 'sec-<ch>-<within>', and rely on the DOM
+  // attribute 'data-def-idx' on the rendered .def to find the def index.
+  var idx = parseInt(el.dataset.defIdx, 10);
+  var p   = (idx >= 0 && idx < positionOf.length) ? positionOf[idx] : -1;
+  if (p < 0) return;
+
+  var d       = idx;
+  var modName = g.modules[defMods[d]] || '';
+  var name    = defNames[d];
+  var sec     = sectionLabel[p];
+  var ch      = chapterNum[p];
+
+  document.getElementById('m-chapter').textContent = modName || '(unknown module)';
+  document.getElementById('m-section').textContent = '§' + sec + ' · ' + shortName(name);
+  document.getElementById('m-chapter-num').textContent = 'Ch ' + ch;
+
+  var pct = ((p + 1) / topoOrder.length) * 100;
+  document.getElementById('progress-fill').style.width = pct.toFixed(2) + '%';
+  document.getElementById('m-progress-pct').textContent = Math.round(pct) + '%';
+  document.getElementById('cur-section').textContent = sec;
+
+  // TOC highlight
+  var rows = document.querySelectorAll('.toc-entry');
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var t = r.dataset.target;
+    r.classList.toggle('active', t === secId || t === ('ch-' + ch));
+  }
+
+  // Marginalia mini-graph
+  renderMiniGraph(d, p);
+
+  // Lazy snippet hydration (best-effort).
+  if (WITH_SOURCE) hydrateSnippet(el, d, modName);
+}
+
+// ─── MINI-GRAPH (marginalia) ──────────────────────────────────────────────
+function renderMiniGraph(d, p) {
+  var card = document.getElementById('figure-card');
+  var mg   = document.getElementById('mini-graph');
+  card.style.display = 'block';
+
+  var MAX = 6;
+  var ins  = inAdj[d];
+  var outs = outAdj[d];
+
+  var html = '';
+
+  // Deps (out) — sorted by topo position so they read in narrative order.
+  var depList = outs.slice().sort(function(a,b){ return positionOf[a] - positionOf[b]; });
+  if (depList.length === 0) {
+    html += '<div class="mg-row"><span class="mg-arrow">→</span><span class="mg-empty">no earlier dependencies</span></div>';
+  } else {
+    depList.slice(0, MAX).forEach(function(di) {
+      html += depRow('→', di);
+    });
+    if (depList.length > MAX) {
+      html += '<div class="mg-row mg-more">+ ' + (depList.length - MAX) + ' more</div>';
+    }
+  }
+
+  html += '<div class="mg-row"><span class="mg-self">▣ ' +
+          escapeHtml(shortName(defNames[d])) + ' §' + sectionLabel[p] + '</span></div>';
+
+  var byList = ins.slice().sort(function(a,b){ return positionOf[a] - positionOf[b]; });
+  if (byList.length === 0) {
+    html += '<div class="mg-row"><span class="mg-arrow">↑</span><span class="mg-empty">not used downstream &mdash; a leaf</span></div>';
+  } else {
+    byList.slice(0, MAX).forEach(function(di) {
+      html += depRow('↑', di);
+    });
+    if (byList.length > MAX) {
+      html += '<div class="mg-row mg-more">+ ' + (byList.length - MAX) + ' more</div>';
+    }
+  }
+
+  mg.innerHTML = html;
+}
+
+function depRow(arrow, di) {
+  var dn = defNames[di];
+  var dm = g.modules[defMods[di]] || '';
+  var ds = STATE_LETTER[defStates[di]] || 'D';
+  var pos = positionOf[di];
+  var sec = (pos >= 0 && pos < sectionLabel.length) ? sectionLabel[pos] : null;
+  var anchor = (pos >= 0 && pos < sectionId.length) ? sectionId[pos] : null;
+  var isExt = externals.has(dm);
+  var secStr = sec ? ' §' + sec : '';
+  if (isExt || !anchor) {
+    return '<div class="mg-row"><span class="mg-arrow">' + arrow + '</span>' +
+           '<span class="mg-node ext" title="' + escapeHtml(dm + '.' + dn) + '">' +
+           escapeHtml(shortName(dn)) + ' <em style="opacity:0.6">(ext)</em></span></div>';
+  }
+  return '<div class="mg-row"><span class="mg-arrow">' + arrow + '</span>' +
+         '<a class="mg-node s-' + ds + '" data-target="' + anchor +
+         '" title="' + escapeHtml(dm + '.' + dn) + '">' +
+         escapeHtml(shortName(dn)) + secStr + '</a></div>';
+}
+
+// Delegated click for mini-graph nodes
+document.addEventListener('click', function(ev) {
+  var n = ev.target.closest('.mg-node[data-target]');
+  if (!n) return;
+  ev.preventDefault();
+  jumpTo(n.dataset.target);
+});
+
+// ─── SNIPPET HYDRATION ────────────────────────────────────────────────────
+function hydrateSnippet(el, d, modName) {
+  var sigEl = el.querySelector('.def-signature');
+  if (!sigEl || sigEl.dataset.hydrated === '1') return;
+  sigEl.dataset.hydrated = '1';
+
+  // Decide source of the snippet bundle.
+  if (LAZY) {
+    if (!g.bundleFiles || !g.bundleFiles[modName]) return;
+    if (snippetCache[modName] === undefined) {
+      snippetCache[modName] = 'pending';
+      fetchJson(g.bundleFiles[modName]).then(function(bundle) {
+        snippetCache[modName] = bundle || null;
+        injectSnippet(sigEl, d, modName);
+      }).catch(function() {
+        snippetCache[modName] = null;
+      });
+      return;
+    }
+    if (snippetCache[modName] === 'pending') return;
+    injectSnippet(sigEl, d, modName);
+  } else {
+    // Inline mode: WITH_SOURCE without --lazy currently doesn't embed
+    // per-def snippets into the inline GRAPH literal. We display a
+    // non-fatal placeholder. (Future work: thread inline snippets
+    // through.)
+  }
+}
+
+function injectSnippet(sigEl, d, modName) {
+  var bundle = snippetCache[modName];
+  if (!bundle) return;
+  // The bundle is keyed by hashQName (a 64-bit integer rendered in
+  // decimal). We don't have that hash on the JS side, so we walk
+  // the bundle entries and match by `name` suffix in the source.
+  // This is a best-effort fallback; some name shadowing edge cases
+  // may miss. (The same lookup limitation exists in notion-doc.)
+  var qname = (g.modules[defMods[d]] || '') + '.' + defNames[d];
+  var shortN = defNames[d];
+  // Pick the entry whose source mentions the short name first; failing
+  // that, fall back to the first entry.
+  var keys = Object.keys(bundle);
+  if (keys.length === 0) return;
+
+  // Try a direct key match (covers any future indexing change).
+  if (bundle[qname]) return finishInjection(sigEl, bundle[qname]);
+  if (bundle[shortN]) return finishInjection(sigEl, bundle[shortN]);
+  if (bundle[String(d)]) return finishInjection(sigEl, bundle[String(d)]);
+
+  // Heuristic: scan for the short name appearing in the snippet source.
+  for (var i = 0; i < keys.length; i++) {
+    var entry = bundle[keys[i]];
+    if (!entry || !entry.source) continue;
+    if (entry.source.indexOf('>' + shortN + '<') !== -1 ||
+        entry.source.indexOf(shortN + ' ') !== -1 ||
+        entry.source.indexOf(shortN + ' ') !== -1) {
+      finishInjection(sigEl, entry);
+      return;
+    }
+  }
+}
+
+function finishInjection(sigEl, entry) {
+  if (!entry || !entry.source) return;
+  var src = entry.source;
+  var looksLikeHtml = src.indexOf('<') !== -1;
+  if (looksLikeHtml) {
+    sigEl.innerHTML = '<span class="Agda">' + src + '</span>';
+  } else {
+    sigEl.textContent = src;
+  }
+}
+
+// ─── UI WIRE-UP ────────────────────────────────────────────────────────────
+function wireUI() {
+  var skim = document.getElementById('btn-skim');
+  skim.addEventListener('click', function() {
+    document.body.classList.toggle('skim');
+    skim.classList.toggle('on');
+  });
+
+  var second = document.getElementById('btn-2nd');
+  second.addEventListener('click', function() {
+    document.body.classList.toggle('second-reading');
+    second.classList.toggle('on');
+  });
+
+  var theorem = document.getElementById('btn-theorem');
+  theorem.addEventListener('click', function() {
+    if (topoOrder.length === 0) return;
+    var last = topoOrder.length - 1;
+    jumpTo(sectionId[last]);
+  });
+
+  setupScrollspy();
+}
+
+// ─── HELPERS ───────────────────────────────────────────────────────────────
+function jumpTo(targetId) {
+  var t = document.getElementById(targetId);
+  if (!t) return;
+  t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  t.classList.remove('flash');
+  // Force reflow so the animation can restart.
+  void t.offsetWidth;
+  t.classList.add('flash');
+}
+
+function shortName(name) {
+  // Many defs come pre-qualified ("Foo.Bar.baz") because the backend
+  // prettyShows the full qname. Drop the module prefix for the
+  // narrative reading.
+  if (!name) return '';
+  var idx = name.lastIndexOf('.');
+  if (idx >= 0 && idx < name.length - 1) return name.slice(idx + 1);
+  return name;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' })[c];
+  });
+}
+
+init();
+</script>
+</body>
+</html>

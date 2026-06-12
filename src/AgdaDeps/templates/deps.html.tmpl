@@ -1,0 +1,1581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- agda-deps · legacy cytoscape template: single-page definition dependency graph rendered with cytoscape.js. -->
+<meta charset="utf-8">
+<title>agda-deps</title>
+<script src="https://unpkg.com/cytoscape@3/dist/cytoscape.min.js"></script>
+<script>window.__gzipEnabled = __GZIP_ENABLED__;</script>
+<script>
+  if (window.__gzipEnabled && typeof DecompressionStream === 'undefined') {
+    document.write('<scr' + 'ipt src="https://unpkg.com/pako@2.1.0/dist/pako_inflate.min.js"></scr' + 'ipt>');
+  }
+</script>
+<style>
+  :root {
+    --c-defined:   __COLOR_DEFINED__;
+    --c-postulate: __COLOR_POSTULATE__;
+    --c-hole:      __COLOR_HOLE__;
+    --c-failed:    __COLOR_FAILED__;
+    --fg: #222;
+    --fg-mute: #666;
+    --fg-faint: #999;
+    --bg: #fff;
+    --bg-side: #fafafa;
+    --bg-hdr: #f0f0f0;
+    --line: #ddd;
+    --accent: #2469d6;
+  }
+  html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+  #app { display: flex; height: 100%; }
+  #sidebar {
+    width: 340px; min-width: 240px; max-width: 600px;
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; box-sizing: border-box;
+    background: var(--bg-side);
+    user-select: none;
+  }
+  #sidebar h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--fg-mute); margin: 0; padding: 6px 10px 4px 10px; }
+  #cy { flex: 1; height: 100%; position: relative; }
+
+  /* Header bar */
+  #hdr { display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--bg-hdr); }
+  #hdr .title { font-weight: 600; font-size: 13px; }
+  #hdr .status { margin-left: auto; font-size: 11px; color: var(--fg-mute); }
+
+  /* Search */
+  #search-row { display: flex; gap: 4px; padding: 6px 10px;
+    border-bottom: 1px solid var(--line); }
+  #search-row input { flex: 1; min-width: 0; font-size: 12px; padding: 4px 6px;
+    border: 1px solid #ccc; border-radius: 3px; background: #fff; }
+  #search-row button { font-size: 12px; padding: 2px 8px; cursor: pointer;
+    border: 1px solid #ccc; background: #fff; border-radius: 3px; }
+  #search-status { padding: 0 10px 4px 10px; font-size: 11px; color: var(--fg-mute); min-height: 14px; }
+
+  /* Spacing slider */
+  #spacing-row { display: flex; gap: 6px; align-items: center;
+    padding: 4px 10px 6px 10px; border-bottom: 1px solid var(--line); font-size: 11px; color: var(--fg-mute); }
+  #spacing-row input[type=range] { flex: 1; min-width: 0; }
+  #spacing-row .spacing-val { min-width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Panes (file / module) — vertically split, draggable */
+  #panes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .pane { display: flex; flex-direction: column; min-height: 60px; overflow: hidden; }
+  .pane > h2 { display: flex; align-items: center; }
+  .pane > h2 .count { margin-left: auto; font-weight: normal; color: var(--fg-faint); }
+  .pane .scroll { flex: 1; overflow: auto; padding: 0 4px 4px 4px; font-size: 12px; }
+  #resizer { height: 4px; background: var(--line); cursor: row-resize; flex: 0 0 4px; }
+  #resizer:hover { background: var(--accent); }
+
+  /* Trees (file + module) — shared rules */
+  .tree details { margin: 0; }
+  .tree details > summary {
+    cursor: pointer; padding: 1px 2px; list-style: none;
+    display: flex; align-items: center; gap: 4px; line-height: 1.5;
+  }
+  .tree details > summary::-webkit-details-marker { display: none; }
+  .tree details > summary::before {
+    content: '\25B8'; display: inline-block; width: 10px;
+    color: var(--fg-faint); font-size: 9px; flex: 0 0 10px;
+  }
+  .tree details[open] > summary::before { content: '\25BE'; }
+  .tree .row {
+    display: flex; align-items: center; gap: 4px;
+    padding: 1px 2px 1px 14px; line-height: 1.5; cursor: pointer;
+  }
+  .tree .row:hover, .tree summary:hover { background: rgba(36, 105, 214, 0.08); }
+  .tree .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree .name.entry { font-weight: bold; }
+  .tree .name.external { color: var(--fg-faint); font-style: italic; }
+  .tree .leaf-icon {
+    flex: 0 0 10px; color: var(--fg-faint); font-size: 9px;
+  }
+  .tree .pill {
+    flex: 0 0 auto; font-size: 9px; line-height: 12px;
+    padding: 0 4px; border-radius: 6px; background: #eee; color: var(--fg-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .tree .pill .p-D { color: var(--c-defined); font-weight: bold; }
+  .tree .pill .p-P { color: var(--c-postulate); font-weight: bold; }
+  .tree .pill .p-H { color: var(--c-hole); font-weight: bold; }
+  .tree .pill .p-F { color: var(--c-failed); font-weight: bold; }
+  .tree .children { margin-left: 12px; }
+
+  .linked { background: rgba(36, 105, 214, 0.22) !important; }
+  .search-hit { background: rgba(255, 215, 0, 0.35); }
+  .flash { animation: flash 0.6s ease-out; }
+  @keyframes flash {
+    0%   { background: rgba(255, 215, 0, 0.7); }
+    100% { background: transparent; }
+  }
+
+  /* Legend */
+  #legend { padding: 6px 10px; border-top: 1px solid var(--line); font-size: 10px; color: var(--fg-mute); }
+  #legend summary { cursor: pointer; padding: 2px 0; }
+  #legend ul { list-style: none; padding: 0; margin: 4px 0 0 0; }
+  #legend li { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+  #legend .swatch {
+    flex: 0 0 14px; width: 14px; height: 10px; border: 1px solid #888; display: inline-block;
+  }
+  #legend .sw-r { border-radius: 2px; }
+  #legend .sw-t { width: 0; height: 0; border: 6px solid transparent; border-bottom-color: var(--c-postulate); background: transparent; border-radius: 0; }
+  #legend .sw-d { width: 8px; height: 8px; background: var(--c-hole); transform: rotate(45deg); border: 1px dashed #444; }
+  #legend .sw-o { width: 10px; height: 10px; background: var(--c-failed); clip-path: polygon(30% 0,70% 0,100% 30%,100% 70%,70% 100%,30% 100%,0 70%,0 30%); border: none; }
+
+  /* Banner */
+  #banner {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 6px 10px; background: #fff3cd; border-bottom: 1px solid #e0c97a;
+    color: #5b4a00; font-size: 12px; z-index: 20;
+  }
+  #banner.error { background: #f8d7da; border-color: #e09a9a; color: #5b1a1a; }
+  #banner code { background: #fff; padding: 1px 4px; border-radius: 3px; }
+
+  /* Source drawer (right) */
+  #drawer {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: 45%; min-width: 320px; max-width: 720px;
+    background: #fff; border-left: 1px solid var(--line);
+    box-shadow: -2px 0 6px rgba(0,0,0,0.08);
+    transform: translateX(100%); transition: transform 180ms ease-out;
+    display: flex; flex-direction: column; z-index: 10;
+  }
+  #drawer.open { transform: translateX(0); }
+  #drawer header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--bg-side);
+    font-size: 13px;
+  }
+  #drawer header .title { font-weight: bold; }
+  #drawer header .mod { color: var(--fg-mute); margin-left: 6px; font-weight: normal; }
+  #drawer header button {
+    background: transparent; border: none; font-size: 18px; cursor: pointer;
+    color: #444; padding: 0 4px;
+  }
+  #drawer-body {
+    flex: 1; overflow: auto; background: #fff;
+    display: grid; grid-template-columns: auto 1fr; align-items: start;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px; line-height: 1.45;
+  }
+  #drawer-gutter {
+    margin: 0; padding: 12px 8px 12px 12px;
+    text-align: right; color: var(--fg-faint);
+    border-right: 1px solid #eee; background: #fafafa;
+    user-select: none; white-space: pre;
+  }
+  #drawer-body pre { margin: 0; padding: 12px; white-space: pre; tab-size: 2; }
+  #drawer-code { background: transparent; padding: 0; }
+  #drawer-fallback { display: none; padding: 16px; font-size: 13px; color: var(--fg-mute); }
+  #drawer-fallback code { background: #eee; padding: 1px 4px; border-radius: 3px; }
+
+  /* Agda highlighting (inlined from Agda.css) */
+  .Agda .Comment       { color: #B22222 }
+  .Agda .Keyword       { color: #CD6600 }
+  .Agda .String        { color: #B22222 }
+  .Agda .Number        { color: #A020F0 }
+  .Agda .Symbol        { color: #404040 }
+  .Agda .PrimitiveType { color: #0000CD }
+  .Agda .Hole          { background: #B4EEB4 }
+  .Agda .Bound, .Agda .Generalizable { color: black }
+  .Agda .InductiveConstructor   { color: #008B00 }
+  .Agda .CoinductiveConstructor { color: #8B7500 }
+  .Agda .Datatype, .Agda .Function, .Agda .Macro,
+  .Agda .Module:not(_), .Agda .Postulate, .Agda .Primitive, .Agda .Record { color: #0000CD }
+  .Agda .Field { color: #EE1289 }
+  .Agda .UnsolvedMeta, .Agda .UnsolvedConstraint { color: black; background: yellow }
+  .Agda .TerminationProblem     { color: black; background: #FFA07A }
+  .Agda .IncompletePattern      { color: black; background: #F5DEB3 }
+  .Agda .Error                  { color: red;   text-decoration: underline }
+  .Agda .Deadcode               { color: black; background: #808080 }
+  .Agda a { text-decoration: none; color: inherit }
+  .Agda a[href]:hover { background-color: #B4EEB4 }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <div id="hdr">
+      <span class="title">agda-deps</span>
+      <span class="status" id="status"></span>
+    </div>
+    <div id="search-row">
+      <input type="text" id="search" placeholder="Search modules &amp; definitions… (Ctrl/Cmd+K)" autocomplete="off" spellcheck="false">
+      <button id="search-clear" title="Clear (Esc)">&times;</button>
+    </div>
+    <div id="search-status"></div>
+    <div id="spacing-row">
+      <label for="spacing">Spacing</label>
+      <input type="range" id="spacing" min="0.3" max="3.0" step="0.1" value="1.0">
+      <span class="spacing-val" id="spacing-val">1.0&times;</span>
+    </div>
+    <div id="panes">
+      <div class="pane" id="pane-files" style="flex: 0 0 40%">
+        <h2>Files <span class="count" id="file-count"></span></h2>
+        <div class="scroll tree" id="file-tree"></div>
+      </div>
+      <div id="resizer"></div>
+      <div class="pane" id="pane-modules" style="flex: 1 1 60%">
+        <h2>Modules <span class="count" id="module-count"></span></h2>
+        <div class="scroll tree" id="module-tree"></div>
+      </div>
+    </div>
+    <details id="legend">
+      <summary>Legend</summary>
+      <ul>
+        <li><span class="swatch sw-r" style="background: var(--c-defined)"></span>Defined</li>
+        <li><span class="swatch sw-t"></span>Postulate</li>
+        <li><span class="swatch sw-d"></span>Hole</li>
+        <li><span class="swatch sw-o"></span>Failed module</li>
+        <li><span class="swatch" style="border: 1px solid #888"></span>Loaded module</li>
+        <li><span class="swatch" style="border: 1px dashed #888; opacity: 0.55"></span>Unreached</li>
+      </ul>
+    </details>
+  </div>
+  <div id="cy"></div>
+  <aside id="drawer" aria-hidden="true">
+    <header>
+      <div><span class="title" id="drawer-title"></span><span class="mod" id="drawer-mod"></span></div>
+      <button id="drawer-close" title="Close (Esc)">&times;</button>
+    </header>
+    <div id="drawer-body" class="Agda">
+      <pre id="drawer-gutter" aria-hidden="true"></pre>
+      <pre><code id="drawer-code"></code></pre>
+    </div>
+    <div id="drawer-fallback"></div>
+  </aside>
+  <div id="banner" style="display:none"></div>
+</div>
+<script>
+__DATA_LOADING_PRELUDE__
+</script>
+<script>
+(function () {
+  'use strict';
+
+  // ----- Banner / fetch helpers ----------------------------------------
+  var banner = document.getElementById('banner');
+  function showBanner(msg, err) {
+    banner.innerHTML = msg;
+    banner.className = err ? 'error' : '';
+    banner.style.display = 'block';
+  }
+  function hideBanner() { banner.style.display = 'none'; }
+
+  // fetchJson: prefer DecompressionStream if available, else pako, else plain
+  function fetchJson(url) {
+    if (GZIP_ENABLED) {
+      var gzUrl = url + '.gz';
+      if (typeof DecompressionStream !== 'undefined') {
+        return fetch(gzUrl).then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          var ds = new DecompressionStream('gzip');
+          return new Response(r.body.pipeThrough(ds)).json();
+        }).catch(function () { return fetchPlain(url); });
+      }
+      if (typeof pako !== 'undefined') {
+        return fetch(gzUrl).then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.arrayBuffer();
+        }).then(function (buf) {
+          return JSON.parse(pako.inflate(new Uint8Array(buf), { to: 'string' }));
+        }).catch(function () { return fetchPlain(url); });
+      }
+    }
+    return fetchPlain(url);
+  }
+  function fetchPlain(url) {
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+  }
+
+  // ----- Boot ----------------------------------------------------------
+  if (LAZY) {
+    showBanner('Loading <code>' + GRAPH_URL + '</code>…', false);
+    fetchJson(GRAPH_URL).then(start).catch(function (err) {
+      showBanner('Could not load <code>' + GRAPH_URL + '</code>: ' + err.message
+        + '. Serve this directory over HTTP (e.g. <code>python -m http.server</code>).', true);
+    });
+  } else {
+    start(GRAPH);
+  }
+
+  // ----- Main ----------------------------------------------------------
+  function start(g) {
+    hideBanner();
+
+    // -------- Decode helpers (b64 typed arrays) ----------------------
+    function b64toArr(s, Ctor) {
+      if (!s) return new Ctor(0);
+      var bin = atob(s), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new Ctor(bytes.buffer);
+    }
+
+    // -------- Resolve indexed schema ---------------------------------
+    var modules     = g.modules || [];
+    var files       = g.files || [];
+    var moduleToFile  = b64toArr(g.moduleToFile, Int32Array);
+    var fileToModules = g.fileToModules || [];
+    var moduleStates  = b64toArr(g.moduleStates, Int8Array);
+    var externals     = new Set(Array.from(b64toArr(g.externalModules, Int32Array)));
+    var moduleEdges   = g.moduleEdges || [];
+    var fileTree      = g.fileTree || [];
+    var moduleTree    = g.moduleTree || [];
+    var entryModule   = g.entryModule;
+    var bundleFiles   = g.bundleFiles || {};
+    var moduleFiles   = g.moduleFiles || {};
+    var searchIdx     = g.searchIndex || { names: [], kinds: '', bigrams: {} };
+    var searchKinds   = b64toArr(searchIdx.kinds, Int8Array);
+
+    var moduleIndex   = new Map();
+    for (var i = 0; i < modules.length; i++) moduleIndex.set(modules[i], i);
+    var fileIndex     = new Map();
+    for (var i = 0; i < files.length; i++) fileIndex.set(files[i], i);
+
+    // Inline mode: defs / edges live on g
+    var inlineDefs = null, inlineEdges = null;
+    if (!LAZY && g.defs) {
+      inlineDefs = {
+        names:   g.defs.names,
+        modules: b64toArr(g.defs.modules, Int32Array),
+        states:  b64toArr(g.defs.states, Int8Array),
+        x:       b64toArr(g.defs.x, Float32Array),
+        y:       b64toArr(g.defs.y, Float32Array)
+      };
+      inlineEdges = {
+        outOff:  b64toArr(g.edges.outOffsets, Int32Array),
+        outTgt:  b64toArr(g.edges.outTargets, Int32Array)
+      };
+    }
+
+    // ----- Status banner --------------------------------------------
+    var failedCount = 0;
+    for (var i = 0; i < moduleStates.length; i++) if (moduleStates[i] === 1) failedCount++;
+    document.getElementById('status').textContent =
+      modules.length + ' modules · ' + files.length + ' files' +
+      (failedCount ? ' · ' + failedCount + ' failed' : '');
+    document.getElementById('file-count').textContent = files.length;
+    document.getElementById('module-count').textContent = modules.length;
+
+    // ----- Strip file-tree common ancestor --------------------------
+    // The fileTree is rooted at '/' (e.g. /home/.../test). Skip down
+    // through any folder node that has exactly one folder child and
+    // no file children, until we hit a true branching point.
+    var fileTreeChildren = Array.from({ length: fileTree.length }, function () { return []; });
+    var fileTreeRoots = [];
+    for (var i = 0; i < fileTree.length; i++) {
+      var p = fileTree[i].parent;
+      if (p < 0) fileTreeRoots.push(i);
+      else fileTreeChildren[p].push(i);
+    }
+    function effectiveFileRoots() {
+      var roots = fileTreeRoots.slice();
+      while (roots.length === 1) {
+        var r = roots[0], node = fileTree[r];
+        if (node.fileIndex !== null) break; // it's a file, stop
+        if (fileTreeChildren[r].length !== 1) break; // multiple children, stop
+        roots = fileTreeChildren[r];
+      }
+      return roots;
+    }
+
+    // ----- Module / file → defs maps (lazy detail cache) ------------
+    // For each module: lazy-loaded { names, states, x, y, outEdges, gidBase }
+    var moduleDetailCache = Object.create(null);
+    var moduleDetailPending = Object.create(null);
+
+    // Placeholder detail files — emitted by the producer for modules
+    // that are declared in moduleFiles but have no kept defs (external
+    // stdlib modules, all-filtered modules, or modules in the failed-
+    // typecheck set under --keep-going). Detail JSON carries
+    // { placeholder: true, reason: "external"|"failed"|"filtered",
+    //   module: "<name>", externalPostulates?: [...] }. The legacy
+    // cytoscape view doesn't have a per-module info panel, so the
+    // helpers exist mostly so console-curious users / hover tooltips
+    // can surface why a module is empty; we also stash the detail so
+    // anyone calling resolveTargetLocal etc. doesn't get confused.
+    var placeholderModules = Object.create(null);
+
+    function placeholderReasonText(reason) {
+      switch (reason) {
+        case 'external':
+          return 'External module — outside the project root. It was referenced but not analysed.';
+        case 'failed':
+          return 'This module failed to type-check (--keep-going). Its contents are unknown.';
+        case 'filtered':
+          return 'Every definition in this module was filtered out (private, generated, or module-instantiation copy).';
+        default:
+          return 'This module was not analysed.';
+      }
+    }
+
+    function renderPlaceholderHTML(detail) {
+      var reason     = (detail && detail.reason) || 'unknown';
+      var reasonText = placeholderReasonText(reason);
+      var modName    = (detail && detail.module) || '';
+      var postulates = (detail && detail.externalPostulates) || [];
+      function esc(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      }
+      var extra = '';
+      if (postulates.length) {
+        var shown = postulates.slice(0, 6).map(function (p) {
+          return '<code style="background:#eef;padding:0 3px;border-radius:2px;font-size:10px;">' +
+                  esc(p) + '</code>';
+        }).join(', ');
+        var more = postulates.length > 6 ? ' …' : '';
+        extra = '<div style="margin-top:6px;font-size:11px;color:#506080;">' +
+                  'Postulates: ' + shown + more +
+                '</div>';
+      }
+      return '<div class="module-placeholder" ' +
+                  'style="padding:8px 10px;font-size:12px;color:#5a6f8a;' +
+                         'font-style:italic;line-height:1.45;">' +
+               '<div style="font-style:normal;font-size:10px;text-transform:uppercase;' +
+                           'letter-spacing:0.5px;color:#7a8aa0;margin-bottom:4px;">' +
+                  esc(reason) + (modName ? ' — ' + esc(modName) : '') +
+               '</div>' +
+               reasonText +
+               extra +
+             '</div>';
+    }
+    function loadModuleDetail(modName) {
+      if (moduleDetailCache[modName]) return Promise.resolve(moduleDetailCache[modName]);
+      if (moduleDetailPending[modName]) return moduleDetailPending[modName];
+      if (!LAZY) {
+        // Inline mode: synthesize from g.defs
+        var idxs = [];
+        var mi = moduleIndex.get(modName);
+        if (mi === undefined) {
+          moduleDetailCache[modName] = { names: [], states: new Int8Array(0),
+            x: new Float32Array(0), y: new Float32Array(0), outEdges: [], globalIds: [] };
+          return Promise.resolve(moduleDetailCache[modName]);
+        }
+        for (var i = 0; i < inlineDefs.modules.length; i++) {
+          if (inlineDefs.modules[i] === mi) idxs.push(i);
+        }
+        var names = idxs.map(function (i) { return inlineDefs.names[i]; });
+        var states = new Int8Array(idxs.length);
+        var xs = new Float32Array(idxs.length);
+        var ys = new Float32Array(idxs.length);
+        for (var i = 0; i < idxs.length; i++) {
+          states[i] = inlineDefs.states[idxs[i]];
+          xs[i] = inlineDefs.x[idxs[i]];
+          ys[i] = inlineDefs.y[idxs[i]];
+        }
+        var outE = [];
+        for (var li = 0; li < idxs.length; li++) {
+          var gi = idxs[li];
+          var s = inlineEdges.outOff[gi], e = inlineEdges.outOff[gi + 1];
+          for (var k = s; k < e; k++) {
+            var tgt = inlineEdges.outTgt[k];
+            outE.push([li, tgt, inlineDefs.modules[tgt]]);
+          }
+        }
+        moduleDetailCache[modName] = { names: names, states: states, x: xs, y: ys, outEdges: outE, globalIds: idxs };
+        return Promise.resolve(moduleDetailCache[modName]);
+      }
+      // Lazy mode: fetch detail file
+      var url = moduleFiles[modName];
+      if (!url) {
+        moduleDetailCache[modName] = { names: [], states: new Int8Array(0),
+          x: new Float32Array(0), y: new Float32Array(0), outEdges: [], globalIds: [] };
+        return Promise.resolve(moduleDetailCache[modName]);
+      }
+      var p = fetchJson(url).then(function (j) {
+        // Placeholder detail JSON (external/failed/filtered module).
+        // Stash it for tooltip-style rendering, but still produce an
+        // empty detail object so expandModule / aggregateModuleStates
+        // remain a no-op without special-casing the call sites.
+        if (j && j.placeholder) {
+          placeholderModules[modName] = j;
+          var ph = { names: [], states: new Int8Array(0),
+                     x: new Float32Array(0), y: new Float32Array(0),
+                     outEdges: [], globalIds: [],
+                     placeholder: true, reason: j.reason, module: j.module };
+          moduleDetailCache[modName] = ph;
+          return ph;
+        }
+        var detail = {
+          names: j.defs.names,
+          states: b64toArr(j.defs.states, Int8Array),
+          x: b64toArr(j.defs.x, Float32Array),
+          y: b64toArr(j.defs.y, Float32Array),
+          outEdges: j.outEdges || [],
+          globalIds: null
+        };
+        moduleDetailCache[modName] = detail;
+        return detail;
+      }).catch(function () {
+        var empty = { names: [], states: new Int8Array(0),
+          x: new Float32Array(0), y: new Float32Array(0), outEdges: [], globalIds: [] };
+        moduleDetailCache[modName] = empty;
+        return empty;
+      });
+      moduleDetailPending[modName] = p;
+      return p;
+    }
+
+    // ----- Snippet bundle cache (per module) ------------------------
+    // Bundles are keyed by Haskell hashQName (we can't compute that
+    // from prettyShow). Instead, we parse the first <a id="X"></a>
+    // anchor out of each snippet's source — Agda emits those once per
+    // top-level binding. We match defs.names by their local name
+    // (suffix after the last '.') against that anchor id.
+    var snippetCache = Object.create(null);
+    function loadSnippetBundle(modName) {
+      if (snippetCache[modName]) return Promise.resolve(snippetCache[modName]);
+      var url = bundleFiles[modName];
+      if (!url) return Promise.resolve(null);
+      return fetchJson(url).then(function (b) {
+        var indexed = Object.create(null);
+        // Build localName -> snippet map.
+        Object.keys(b).forEach(function (k) {
+          var entry = b[k];
+          var src = entry.source || '';
+          // First empty <a id="X"></a> in the source = declared name.
+          // Also collect ALL ids so we can fall back for constructors.
+          var allIds = [];
+          var re = /<a id="([^"]+)"><\/a>/g, m;
+          while ((m = re.exec(src)) !== null) {
+            allIds.push(m[1]);
+            if (allIds.length > 64) break;
+          }
+          entry._ids = allIds;
+          // primary key = first anchor (always present in practice).
+          if (allIds.length > 0 && !indexed[allIds[0]]) {
+            indexed[allIds[0]] = entry;
+          }
+          entry._key = k;
+        });
+        // Build secondary index of every id (for constructor fallback).
+        var allMap = Object.create(null);
+        Object.keys(b).forEach(function (k) {
+          (b[k]._ids || []).forEach(function (id) {
+            if (!allMap[id]) allMap[id] = b[k];
+          });
+        });
+        snippetCache[modName] = { primary: indexed, any: allMap, raw: b };
+        return snippetCache[modName];
+      }).catch(function () {
+        snippetCache[modName] = { primary: {}, any: {}, raw: {} };
+        return snippetCache[modName];
+      });
+    }
+    function htmlEscape(s) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function lookupSnippet(bundle, modName, defName) {
+      if (!bundle) return null;
+      // Strip leading "<module>." from the full pretty name.
+      var local = defName;
+      if (modName && defName.indexOf(modName + '.') === 0) {
+        local = defName.substring(modName.length + 1);
+      }
+      var variants = [local, htmlEscape(local)];
+      // Strip "-N" disambiguator suffix (e.g. "Plus-1" -> "Plus").
+      var base = local.replace(/-\d+$/, '');
+      if (base !== local) variants.push(base, htmlEscape(base));
+      for (var i = 0; i < variants.length; i++) {
+        var v = variants[i];
+        if (bundle.primary[v]) return bundle.primary[v];
+        if (bundle.any[v]) return bundle.any[v];
+      }
+      // Try with parent type prefix (e.g. "Exp.Plus" for a constructor).
+      var compoundKeys = Object.keys(bundle.any);
+      for (var i = 0; i < compoundKeys.length; i++) {
+        var ck = compoundKeys[i];
+        for (var j = 0; j < variants.length; j++) {
+          if (ck === variants[j] || ck.endsWith('.' + variants[j])) return bundle.any[ck];
+        }
+      }
+      return null;
+    }
+
+    // ----- Cytoscape init -------------------------------------------
+    var STATE_DEFINED = 0, STATE_POSTULATE = 1, STATE_HOLE = 2, STATE_FAILED = 3;
+    var MODULE_HUES = [200, 30, 130, 280, 60, 330, 170, 0, 230, 100, 310, 50];
+
+    function hashStr(s) {
+      var h = 5381;
+      for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) & 0xffffffff;
+      return Math.abs(h);
+    }
+    function moduleTint(name) {
+      var hue = MODULE_HUES[hashStr(name) % MODULE_HUES.length];
+      return 'hsl(' + hue + ',60%,55%)';
+    }
+
+    var cy = cytoscape({
+      container: document.getElementById('cy'),
+      hideEdgesOnViewport: true,
+      textureOnViewport: true,
+      motionBlur: false,
+      pixelRatio: 1,
+      wheelSensitivity: 0.25,
+      style: [
+        { selector: 'node[kind="def"]', style: {
+            'background-color': 'data(fill)',
+            'shape': 'data(shape)',
+            'border-width': 'data(borderW)',
+            'border-style': 'data(borderS)',
+            'border-color': '#444',
+            'width': 18, 'height': 18,
+            'label': 'data(label)',
+            'font-size': 9, 'text-valign': 'bottom', 'text-margin-y': 2,
+            'text-background-color': '#fff', 'text-background-opacity': 0.6, 'text-background-padding': 1,
+            'text-opacity': 1,
+            'min-zoomed-font-size': 6
+        }},
+        { selector: 'node[kind="def"]:selected', style: {
+            'border-width': 3, 'border-color': '#2469d6', 'text-opacity': 1
+        }},
+        { selector: 'node[kind="module"]', style: {
+            'background-color': 'data(tint)',
+            'background-opacity': 0.08,
+            'border-width': 'data(borderW)',
+            'border-style': 'data(borderS)',
+            'border-color': 'data(borderC)',
+            'shape': 'round-rectangle',
+            'label': 'data(label)',
+            'font-size': 11, 'font-weight': 'bold',
+            'text-valign': 'top', 'text-halign': 'center',
+            'text-margin-y': -2,
+            'color': '#333',
+            'padding': 8,
+            'compound-sizing-wrt-labels': 'include'
+        }},
+        { selector: 'node[kind="module"][isEntry]', style: {
+            'background-opacity': 0.18, 'font-size': 12
+        }},
+        { selector: 'node[kind="module"][isExternal]', style: {
+            'color': '#888', 'background-opacity': 0.04
+        }},
+        { selector: 'node.dim', style: { 'opacity': 0.18 } },
+        { selector: 'node.hidden', style: { 'display': 'none' } },
+        { selector: 'edge[kind="def"]', style: {
+            'curve-style': 'haystack',
+            'haystack-radius': 0.4,
+            'width': 1,
+            'line-color': '#666',
+            'opacity': 0.05,
+            'target-arrow-shape': 'triangle',
+            'target-arrow-color': '#666',
+            'arrow-scale': 0.7
+        }},
+        { selector: 'edge[kind="def"].active', style: { 'opacity': 1 } },
+        { selector: 'edge[kind="def"].dim',    style: { 'opacity': 0.02 } },
+        { selector: 'edge[kind="module"]', style: {
+            'curve-style': 'bezier',
+            'width': 2,
+            'line-color': '#999',
+            'line-style': 'dashed',
+            'opacity': 0.6,
+            'target-arrow-shape': 'triangle',
+            'target-arrow-color': '#999',
+            'arrow-scale': 0.7
+        }},
+        { selector: 'edge[kind="module"].dim', style: { 'opacity': 0.1 } },
+        { selector: 'edge.hidden', style: { 'display': 'none' } }
+      ],
+      elements: buildInitialElements(),
+      layout: { name: 'preset' }
+    });
+
+    function moduleStyleFor(name) {
+      var st = moduleStates[moduleIndex.get(name) || 0] || 0;
+      if (externals.has(moduleIndex.get(name))) {
+        return { borderW: 1, borderS: 'solid', borderC: '#bbb' };
+      }
+      if (st === 1) return { borderW: 3, borderS: 'solid', borderC: 'var(--c-failed)' };
+      return { borderW: 1, borderS: 'solid', borderC: '#888' };
+    }
+
+    function buildInitialElements() {
+      var els = [];
+      for (var i = 0; i < modules.length; i++) {
+        var m = modules[i];
+        var style = moduleStyleFor(m);
+        els.push({ data: {
+          id: 'm:' + i,
+          kind: 'module',
+          label: m,
+          name: m,
+          tint: moduleTint(m),
+          borderW: style.borderW, borderS: style.borderS, borderC: style.borderC,
+          isEntry:    (m === entryModule) ? 1 : 0,
+          isExternal: externals.has(i) ? 1 : 0
+        }});
+      }
+      for (var i = 0; i < moduleEdges.length; i++) {
+        var p = moduleEdges[i];
+        els.push({ data: {
+          id: 'me:' + p[0] + ':' + p[1],
+          kind: 'module',
+          source: 'm:' + p[0],
+          target: 'm:' + p[1]
+        }});
+      }
+      return els;
+    }
+
+    // ----- Def-node creation (on expand) ----------------------------
+    var expandedModules = new Set();
+
+    function defNodeStyle(stByte) {
+      switch (stByte) {
+        case STATE_POSTULATE: return { shape: 'triangle', fill: 'var(--c-postulate)', borderW: 1, borderS: 'solid' };
+        case STATE_HOLE:      return { shape: 'diamond',  fill: 'var(--c-hole)',      borderW: 1, borderS: 'dashed' };
+        case STATE_FAILED:    return { shape: 'octagon',  fill: 'var(--c-failed)',    borderW: 1, borderS: 'solid' };
+        default:              return { shape: 'round-rectangle', fill: 'var(--c-defined)', borderW: 1, borderS: 'solid' };
+      }
+    }
+    function defNodeId(modName, localIdx) {
+      return 'd:' + (moduleIndex.get(modName) || 0) + ':' + localIdx;
+    }
+
+    function expandModule(modName) {
+      if (expandedModules.has(modName)) return Promise.resolve();
+      return loadModuleDetail(modName).then(function (detail) {
+        if (expandedModules.has(modName)) return;
+        expandedModules.add(modName);
+        var parentId = 'm:' + moduleIndex.get(modName);
+        var batch = [];
+        for (var i = 0; i < detail.names.length; i++) {
+          var ds = defNodeStyle(detail.states[i]);
+          var localPretty = stripPrefix(detail.names[i], modName + '.');
+          batch.push({ data: {
+            id: defNodeId(modName, i),
+            kind: 'def',
+            label: localPretty,
+            fullName: detail.names[i],
+            module: modName,
+            parent: parentId,
+            localIdx: i,
+            state: detail.states[i],
+            shape: ds.shape, fill: ds.fill,
+            borderW: ds.borderW, borderS: ds.borderS
+          },
+          position: { x: detail.x[i] * 60, y: detail.y[i] * 60 }
+          });
+        }
+        cy.batch(function () {
+          cy.add(batch);
+          // Add def edges whose targets are in already-expanded modules
+          addDefEdgesFrom(modName, detail);
+          // Re-add def edges going TO this newly-expanded module from already-expanded modules
+          expandedModules.forEach(function (otherMod) {
+            if (otherMod === modName) return;
+            var otherDetail = moduleDetailCache[otherMod];
+            if (otherDetail) addDefEdgesFrom(otherMod, otherDetail);
+          });
+          rebuildModuleEdgeVisibility();
+        });
+      });
+    }
+    function stripPrefix(s, prefix) {
+      return (s.length > prefix.length && s.indexOf(prefix) === 0) ? s.substring(prefix.length) : s;
+    }
+    function collapseModule(modName) {
+      if (!expandedModules.has(modName)) return;
+      expandedModules.delete(modName);
+      cy.batch(function () {
+        var parentId = 'm:' + moduleIndex.get(modName);
+        var leaves = cy.nodes('[parent = "' + parentId + '"]');
+        leaves.connectedEdges().remove();
+        leaves.remove();
+        rebuildModuleEdgeVisibility();
+      });
+    }
+    function collapseAll() {
+      cy.batch(function () {
+        expandedModules.forEach(function (m) {
+          var parentId = 'm:' + moduleIndex.get(m);
+          var leaves = cy.nodes('[parent = "' + parentId + '"]');
+          leaves.connectedEdges().remove();
+          leaves.remove();
+        });
+        expandedModules.clear();
+        rebuildModuleEdgeVisibility();
+      });
+    }
+
+    // For each outEdge [localIdx, globalTgt, tgtModuleIdx]:
+    //   - if tgt module is expanded: add a def-edge to its local node
+    //   - else: skip (module-edge already shown)
+    function addDefEdgesFrom(modName, detail) {
+      var srcMi = moduleIndex.get(modName);
+      if (srcMi === undefined) return;
+      var edges = detail.outEdges || [];
+      var batch = [];
+      for (var i = 0; i < edges.length; i++) {
+        var li = edges[i][0], gTgt = edges[i][1], tMi = edges[i][2];
+        if (tMi < 0) continue;
+        var tgtMod = modules[tMi];
+        if (!expandedModules.has(tgtMod)) continue;
+        var tgtLocal = resolveTargetLocal(tgtMod, gTgt);
+        if (tgtLocal === -1) continue;
+        var eid = 'de:' + srcMi + ':' + li + '>' + tMi + ':' + tgtLocal;
+        if (cy.getElementById(eid).length) continue;
+        batch.push({ data: {
+          id: eid,
+          kind: 'def',
+          source: defNodeId(modName, li),
+          target: defNodeId(tgtMod, tgtLocal)
+        }});
+      }
+      if (batch.length) cy.add(batch);
+    }
+    // In inline mode, the tgt is a GLOBAL def index — must be mapped
+    // to local index within the target module. In lazy per-module
+    // detail, the second column is ALSO a global index. Use the target
+    // module's globalIds (inline) or names lookup (lazy heuristic).
+    function resolveTargetLocal(modName, globalTgt) {
+      var d = moduleDetailCache[modName];
+      if (!d) return -1;
+      if (d.globalIds) {
+        // Inline mode: index lookup.
+        for (var i = 0; i < d.globalIds.length; i++) if (d.globalIds[i] === globalTgt) return i;
+        return -1;
+      }
+      // Lazy mode: the second column points to a different module's
+      // global id. Without a global→local table we use the in-detail
+      // outEdges of the SOURCE module — but we already have srcLocal +
+      // tgt module. The target's per-module detail file does NOT carry
+      // the original global ids back. Instead: in lazy mode the JSON's
+      // own per-module def-list is sorted by global id; the outEdges
+      // column points into that same global ordering, so by storing a
+      // map globalId → localIdx on first load we can resolve. We
+      // approximate by assigning sequential globalIds at detail-load
+      // time.
+      // Fallback: skip lazy-mode cross-module def edges entirely; the
+      // module-level edge already encodes the relationship.
+      return -1;
+    }
+
+    // ----- Module-edge visibility ----------------------------------
+    // Hide module-edges whose endpoint pair is now covered by visible
+    // def-level edges between expanded modules.
+    function rebuildModuleEdgeVisibility() {
+      cy.edges('[kind = "module"]').forEach(function (e) {
+        var s = e.source().data('name'), t = e.target().data('name');
+        if (expandedModules.has(s) && expandedModules.has(t)) {
+          e.addClass('hidden');
+        } else {
+          e.removeClass('hidden');
+        }
+      });
+    }
+
+    // ----- Trees -----------------------------------------------------
+    // Build descendant-state pills.
+    // For files: count modules under file by their states (only loaded/failed known up-front).
+    // For modules: count defs in each module by state (loaded lazily; pills update on expand).
+
+    // (file row) → list of moduleIndices; (module row) → moduleIndex.
+    var fileTreeChildrenMap = fileTreeChildren;
+    var moduleTreeChildrenMap = (function () {
+      var m = Array.from({ length: moduleTree.length }, function () { return []; });
+      for (var i = 0; i < moduleTree.length; i++) {
+        var p = moduleTree[i].parent;
+        if (p >= 0) m[p].push(i);
+      }
+      return m;
+    })();
+
+    // For each file-tree node, list of (recursive) module indices.
+    function modulesInFileTreeNode(idx) {
+      var out = [];
+      function walk(i) {
+        var n = fileTree[i];
+        if (n.fileIndex !== null) {
+          var lst = fileToModules[n.fileIndex] || [];
+          for (var k = 0; k < lst.length; k++) out.push(lst[k]);
+        }
+        fileTreeChildrenMap[i].forEach(walk);
+      }
+      walk(idx);
+      return out;
+    }
+    function modulesInModuleTreeNode(idx) {
+      var out = [];
+      function walk(i) {
+        var n = moduleTree[i];
+        if (n.moduleIndex !== null) out.push(n.moduleIndex);
+        moduleTreeChildrenMap[i].forEach(walk);
+      }
+      walk(idx);
+      return out;
+    }
+
+    // Aggregate state counts. For modules: rely on loaded detail; if
+    // not loaded, just show module count.
+    function aggregateModuleStates(mIdxList) {
+      var pill = { D: 0, P: 0, H: 0, F: 0, M: mIdxList.length };
+      for (var i = 0; i < mIdxList.length; i++) {
+        if (moduleStates[mIdxList[i]] === 1) pill.F++;
+        var modName = modules[mIdxList[i]];
+        var detail = moduleDetailCache[modName];
+        if (detail) {
+          for (var k = 0; k < detail.states.length; k++) {
+            var s = detail.states[k];
+            if (s === STATE_DEFINED) pill.D++;
+            else if (s === STATE_POSTULATE) pill.P++;
+            else if (s === STATE_HOLE) pill.H++;
+            else if (s === STATE_FAILED) pill.F++;
+          }
+        }
+      }
+      return pill;
+    }
+    function renderPill(p) {
+      if (p.D + p.P + p.H + p.F === 0) {
+        return '<span class="pill" title="' + p.M + ' modules">' + p.M + 'M</span>';
+      }
+      var bits = [];
+      if (p.D) bits.push('<span class="p-D">' + p.D + 'D</span>');
+      if (p.P) bits.push('<span class="p-P">' + p.P + 'P</span>');
+      if (p.H) bits.push('<span class="p-H">' + p.H + 'H</span>');
+      if (p.F) bits.push('<span class="p-F">' + p.F + 'F</span>');
+      return '<span class="pill">' + bits.join(' ') + '</span>';
+    }
+
+    // Build file tree DOM.
+    var fileTreeDom = document.getElementById('file-tree');
+    var fileNodeEls = new Map(); // fileTree idx -> DOM row
+    function buildFileTree() {
+      fileTreeDom.innerHTML = '';
+      var roots = effectiveFileRoots();
+      roots.forEach(function (r) { fileTreeDom.appendChild(renderFileNode(r)); });
+    }
+    function renderFileNode(idx) {
+      var node = fileTree[idx];
+      var isLeaf = (node.fileIndex !== null);
+      var children = fileTreeChildrenMap[idx];
+      var mods = modulesInFileTreeNode(idx);
+      var pill = renderPill(aggregateModuleStates(mods));
+
+      if (isLeaf && children.length === 0) {
+        var row = document.createElement('div');
+        row.className = 'row';
+        row.dataset.kind = 'file';
+        row.dataset.fileIndex = node.fileIndex;
+        row.dataset.treeIdx = idx;
+        row.innerHTML = '<span class="leaf-icon">○</span>' +
+          '<span class="name">' + escapeHtml(node.name) + '</span>' + pill;
+        fileNodeEls.set(idx, row);
+        return row;
+      }
+      var det = document.createElement('details');
+      det.dataset.treeIdx = idx;
+      var sum = document.createElement('summary');
+      sum.dataset.kind = 'file';
+      sum.dataset.treeIdx = idx;
+      if (node.fileIndex !== null) sum.dataset.fileIndex = node.fileIndex;
+      sum.innerHTML = '<span class="name">' + escapeHtml(node.name) + '</span>' + pill;
+      det.appendChild(sum);
+      var box = document.createElement('div');
+      box.className = 'children';
+      children.forEach(function (c) { box.appendChild(renderFileNode(c)); });
+      det.appendChild(box);
+      fileNodeEls.set(idx, sum);
+      return det;
+    }
+
+    // Build module tree DOM.
+    var moduleTreeDom = document.getElementById('module-tree');
+    var moduleNodeEls = new Map();   // moduleTree idx -> DOM row
+    var moduleRowByName = new Map(); // module name -> DOM row
+    function buildModuleTree() {
+      moduleTreeDom.innerHTML = '';
+      var roots = [];
+      for (var i = 0; i < moduleTree.length; i++) if (moduleTree[i].parent < 0) roots.push(i);
+      roots.forEach(function (r) { moduleTreeDom.appendChild(renderModuleNode(r)); });
+    }
+    function renderModuleNode(idx) {
+      var node = moduleTree[idx];
+      var children = moduleTreeChildrenMap[idx];
+      var mods = modulesInModuleTreeNode(idx);
+      var pill = renderPill(aggregateModuleStates(mods));
+      var hasMod = node.moduleIndex !== null;
+      var modName = hasMod ? modules[node.moduleIndex] : null;
+      var isEntry = (modName === entryModule);
+      var isExternal = hasMod && externals.has(node.moduleIndex);
+      var nameCls = 'name' + (isEntry ? ' entry' : '') + (isExternal ? ' external' : '');
+
+      if (children.length === 0) {
+        var row = document.createElement('div');
+        row.className = 'row';
+        row.dataset.kind = 'module';
+        if (hasMod) {
+          row.dataset.modName = modName;
+          row.dataset.modIdx = node.moduleIndex;
+          moduleRowByName.set(modName, row);
+        }
+        row.dataset.treeIdx = idx;
+        row.innerHTML = '<span class="leaf-icon">○</span>' +
+          '<span class="' + nameCls + '" title="' + escapeAttr(modName || node.name) + '">' + escapeHtml(node.name) + '</span>' + pill;
+        moduleNodeEls.set(idx, row);
+        return row;
+      }
+      var det = document.createElement('details');
+      det.dataset.treeIdx = idx;
+      var sum = document.createElement('summary');
+      sum.dataset.kind = 'module';
+      if (hasMod) {
+        sum.dataset.modName = modName;
+        sum.dataset.modIdx = node.moduleIndex;
+        moduleRowByName.set(modName, sum);
+      }
+      sum.dataset.treeIdx = idx;
+      sum.innerHTML = '<span class="' + nameCls + '" title="' + escapeAttr(modName || node.name) + '">' + escapeHtml(node.name) + '</span>' + pill;
+      det.appendChild(sum);
+      var box = document.createElement('div');
+      box.className = 'children';
+      children.forEach(function (c) { box.appendChild(renderModuleNode(c)); });
+      det.appendChild(box);
+      moduleNodeEls.set(idx, sum);
+      return det;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    function escapeAttr(s) {
+      return escapeHtml(s).replace(/"/g, '&quot;');
+    }
+
+    buildFileTree();
+    buildModuleTree();
+
+    function refreshTreePills() {
+      // Called when module details load — re-render pills cheaply.
+      // For simplicity rebuild both trees (corpus is small enough).
+      buildFileTree();
+      buildModuleTree();
+      autoExpandEntry();
+    }
+
+    function autoExpandEntry() {
+      if (!entryModule) return;
+      // Walk the module tree to expand ancestors of entry.
+      var entryIdx = -1;
+      for (var i = 0; i < moduleTree.length; i++) {
+        if (moduleTree[i].moduleIndex !== null && modules[moduleTree[i].moduleIndex] === entryModule) { entryIdx = i; break; }
+      }
+      while (entryIdx >= 0) {
+        var p = moduleTree[entryIdx].parent;
+        if (p < 0) break;
+        var pEl = moduleNodeEls.get(p);
+        if (pEl && pEl.parentElement && pEl.parentElement.tagName === 'DETAILS') {
+          pEl.parentElement.open = true;
+        }
+        entryIdx = p;
+      }
+    }
+    autoExpandEntry();
+
+    // ----- Tree click handlers -------------------------------------
+    function focusModule(modName, opts) {
+      opts = opts || {};
+      if (!moduleIndex.has(modName)) return;
+      var mNode = cy.getElementById('m:' + moduleIndex.get(modName));
+      if (mNode.length === 0) return;
+      cy.center(mNode);
+      cy.zoom({ level: Math.max(cy.zoom(), 1.0), renderedPosition: mNode.renderedPosition() });
+      brushLinkedRows(modName);
+      mNode.flashClass && mNode.flashClass('flash', 500);
+      if (opts.expand) expandModule(modName).then(function () { cy.center(mNode); });
+      if (opts.openSource) openSourceForModule(modName);
+      updateUrlHash(modName);
+    }
+    function focusFile(fileIdx, opts) {
+      opts = opts || {};
+      var mods = fileToModules[fileIdx] || [];
+      if (mods.length === 0) return;
+      cy.batch(function () {
+        var sel = mods.map(function (mi) { return 'm:' + mi; }).filter(function (id) { return cy.getElementById(id).length; });
+        if (sel.length === 0) return;
+        var col = cy.collection(sel.map(function (id) { return cy.getElementById(id); }));
+        cy.fit(col, 60);
+      });
+      brushLinkedFile(fileIdx);
+      if (opts.openSource && mods.length > 0) {
+        openSourceForModule(modules[mods[0]]);
+      }
+    }
+
+    function brushLinkedRows(modName) {
+      clearLinked();
+      var row = moduleRowByName.get(modName);
+      if (row) row.classList.add('linked');
+      // Link file row.
+      var mi = moduleIndex.get(modName);
+      if (mi !== undefined) {
+        var fi = moduleToFile[mi];
+        if (fi >= 0 && fileIndex.size > 0) {
+          // Find file row by treeIdx
+          for (var i = 0; i < fileTree.length; i++) {
+            if (fileTree[i].fileIndex === fi) {
+              var fr = fileNodeEls.get(i);
+              if (fr) fr.classList.add('linked');
+              break;
+            }
+          }
+        }
+      }
+    }
+    function brushLinkedFile(fileIdx) {
+      clearLinked();
+      // Highlight file row.
+      for (var i = 0; i < fileTree.length; i++) {
+        if (fileTree[i].fileIndex === fileIdx) {
+          var fr = fileNodeEls.get(i);
+          if (fr) fr.classList.add('linked');
+          break;
+        }
+      }
+      // Highlight module rows.
+      var mods = fileToModules[fileIdx] || [];
+      mods.forEach(function (mi) {
+        var row = moduleRowByName.get(modules[mi]);
+        if (row) row.classList.add('linked');
+      });
+    }
+    function clearLinked() {
+      document.querySelectorAll('#sidebar .linked').forEach(function (el) { el.classList.remove('linked'); });
+    }
+
+    function onTreeClick(e) {
+      var t = e.target.closest('[data-kind]');
+      if (!t) return;
+      var kind = t.dataset.kind;
+      var opt = { openSource: e.metaKey || e.ctrlKey };
+      if (kind === 'module' && t.dataset.modName) {
+        focusModule(t.dataset.modName, opt);
+      } else if (kind === 'file' && t.dataset.fileIndex) {
+        focusFile(parseInt(t.dataset.fileIndex, 10), opt);
+      }
+    }
+    fileTreeDom.addEventListener('click', onTreeClick);
+    moduleTreeDom.addEventListener('click', onTreeClick);
+
+    // ----- Resizer (file/module pane vertical split) ---------------
+    (function setupResizer() {
+      var resizer = document.getElementById('resizer');
+      var paneF = document.getElementById('pane-files');
+      var paneM = document.getElementById('pane-modules');
+      var dragging = false;
+      resizer.addEventListener('mousedown', function () { dragging = true; document.body.style.cursor = 'row-resize'; });
+      document.addEventListener('mousemove', function (e) {
+        if (!dragging) return;
+        var box = paneF.parentElement.getBoundingClientRect();
+        var y = e.clientY - box.top;
+        var pct = Math.max(10, Math.min(90, (y / box.height) * 100));
+        paneF.style.flex = '0 0 ' + pct + '%';
+        paneM.style.flex = '1 1 ' + (100 - pct) + '%';
+      });
+      document.addEventListener('mouseup', function () { dragging = false; document.body.style.cursor = ''; });
+    })();
+
+    // ----- Spacing slider (re-layout) ------------------------------
+    var spacingFactor = 1.0;
+    document.getElementById('spacing').addEventListener('input', function (e) {
+      spacingFactor = parseFloat(e.target.value);
+      document.getElementById('spacing-val').textContent = spacingFactor.toFixed(1) + '×';
+    });
+    document.getElementById('spacing').addEventListener('change', function () {
+      relayoutVisible();
+    });
+    function relayoutVisible() {
+      var visible = cy.elements(':visible');
+      if (visible.length === 0) return;
+      try {
+        visible.layout({
+          name: 'cose',
+          nodeRepulsion: 5000 * spacingFactor,
+          idealEdgeLength: 70 * spacingFactor,
+          numIter: 400, fit: true, padding: 40
+        }).run();
+      } catch (_) {}
+    }
+
+    // ----- LOD on zoom --------------------------------------------
+    var debounceTimer = null;
+    function debounce(fn, ms) {
+      return function () {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(fn, ms);
+      };
+    }
+    cy.on('zoom', debounce(applyLod, 60));
+    function applyLod() {
+      var z = cy.zoom();
+      cy.batch(function () {
+        if (z < 0.3) {
+          cy.nodes('[kind = "def"]').addClass('hidden');
+        } else {
+          cy.nodes('[kind = "def"]').removeClass('hidden');
+        }
+        cy.style().selector('node[kind="def"]').style('text-opacity', z < 0.4 ? 0 : 1).update();
+      });
+    }
+
+    // ----- Click handlers on graph --------------------------------
+    cy.on('tap', 'node[kind = "module"]', function (evt) {
+      var n = evt.target;
+      var name = n.data('name');
+      if (expandedModules.has(name)) {
+        // collapse on second tap
+        collapseModule(name);
+      } else {
+        expandModule(name).then(function () {
+          var children = cy.nodes('[parent = "' + n.id() + '"]');
+          if (children.length > 0) cy.fit(n.union(children), 50);
+          refreshTreePills();
+        });
+      }
+      brushLinkedRows(name);
+      updateUrlHash(name);
+    });
+    cy.on('tap', 'node[kind = "def"]', function (evt) {
+      var n = evt.target;
+      highlightNeighborhood(n);
+      brushLinkedRows(n.data('module'));
+      // Auto-expand any modules holding neighbors with unrevealed deps.
+      var outDetail = moduleDetailCache[n.data('module')];
+      if (outDetail) {
+        var li = n.data('localIdx');
+        var modsToExpand = new Set();
+        outDetail.outEdges.forEach(function (e) {
+          if (e[0] === li && e[2] >= 0) {
+            var tm = modules[e[2]];
+            if (tm && !expandedModules.has(tm)) modsToExpand.add(tm);
+          }
+        });
+        Promise.all(Array.from(modsToExpand).map(expandModule)).then(function () {
+          if (modsToExpand.size > 0) refreshTreePills();
+        });
+      }
+      updateUrlHash(n.data('module') + '.' + stripPrefix(n.data('fullName'), n.data('module') + '.'));
+    });
+    cy.on('dblclick', 'node[kind = "def"]', function (evt) {
+      openSourceForDef(evt.target);
+    });
+    cy.on('tap', function (evt) {
+      if (evt.target === cy) {
+        cy.elements().removeClass('active').removeClass('dim');
+        clearLinked();
+      }
+    });
+
+    function highlightNeighborhood(n) {
+      cy.batch(function () {
+        cy.edges('[kind = "def"]').removeClass('active').addClass('dim');
+        cy.edges('[kind = "def"]').filter(function (e) {
+          return e.source().id() === n.id() || e.target().id() === n.id();
+        }).removeClass('dim').addClass('active');
+      });
+    }
+
+    // ----- Esc handling -------------------------------------------
+    document.addEventListener('keydown', function (evt) {
+      if (evt.key === 'Escape') {
+        if (drawerEl.classList.contains('open')) {
+          closeDrawer();
+        } else if (searchInput.value) {
+          clearSearch();
+        } else {
+          collapseAll();
+          cy.fit(cy.nodes('[kind = "module"]'), 40);
+        }
+      }
+      if ((evt.ctrlKey || evt.metaKey) && evt.key === 'k') {
+        evt.preventDefault();
+        searchInput.focus(); searchInput.select();
+      }
+    });
+
+    // ----- URL state ----------------------------------------------
+    function updateUrlHash(focus) {
+      try {
+        history.replaceState(null, '', '#focus=' + encodeURIComponent(focus));
+      } catch (_) {}
+    }
+    (function rehydrateFromHash() {
+      var m = location.hash.match(/^#focus=(.*)$/);
+      if (!m) return;
+      var target = decodeURIComponent(m[1]);
+      // Module first; if it's <module>.<name>, expand + flash the def.
+      if (moduleIndex.has(target)) {
+        expandModule(target).then(function () {
+          var mn = cy.getElementById('m:' + moduleIndex.get(target));
+          if (mn.length) cy.fit(mn, 50);
+          refreshTreePills();
+          brushLinkedRows(target);
+        });
+        return;
+      }
+      // Find longest module prefix.
+      var bestMod = null;
+      for (var i = 0; i < modules.length; i++) {
+        var m2 = modules[i];
+        if (target.indexOf(m2 + '.') === 0 && (!bestMod || m2.length > bestMod.length)) {
+          bestMod = m2;
+        }
+      }
+      if (bestMod) {
+        expandModule(bestMod).then(function () {
+          refreshTreePills();
+          brushLinkedRows(bestMod);
+          var local = target.substring(bestMod.length + 1);
+          var detail = moduleDetailCache[bestMod];
+          if (!detail) return;
+          for (var i = 0; i < detail.names.length; i++) {
+            if (detail.names[i] === target || detail.names[i].endsWith('.' + local)) {
+              var n = cy.getElementById(defNodeId(bestMod, i));
+              if (n.length) {
+                cy.center(n);
+                highlightNeighborhood(n);
+              }
+              return;
+            }
+          }
+        });
+      }
+    })();
+
+    // ----- Search --------------------------------------------------
+    var searchInput = document.getElementById('search');
+    var searchStatus = document.getElementById('search-status');
+    var searchHits = [];
+    var searchCursor = 0;
+    var prevTreeOpen = null; // snapshot
+
+    function bigramsOf(s) {
+      var out = [];
+      for (var i = 0; i + 1 < s.length; i++) out.push(s.substring(i, i + 2));
+      return out;
+    }
+
+    function runSearch(q) {
+      clearSearchClasses();
+      if (!q) {
+        searchStatus.textContent = '';
+        searchHits = []; searchCursor = 0; restoreTreeOpen();
+        return;
+      }
+      var ql = q.toLowerCase();
+      var bgs = bigramsOf(ql);
+      var candidates = null;
+      if (bgs.length === 0) {
+        // Single char: fall through to substring scan of names.
+        candidates = null;
+      } else {
+        // Intersect posting lists.
+        bgs.forEach(function (bg) {
+          var lst = searchIdx.bigrams[bg];
+          if (!lst) { candidates = []; return; }
+          if (candidates === null) { candidates = new Set(lst); }
+          else {
+            var next = new Set();
+            lst.forEach(function (i) { if (candidates.has(i)) next.add(i); });
+            candidates = next;
+          }
+        });
+        if (candidates instanceof Set) candidates = Array.from(candidates);
+      }
+      // Final substring filter (catches non-contiguous bigrams + 1-char queries).
+      var hits = [];
+      var pool = candidates !== null ? candidates : searchIdx.names.map(function (_, i) { return i; });
+      for (var i = 0; i < pool.length; i++) {
+        var id = pool[i];
+        if (searchIdx.names[id].indexOf(ql) !== -1) hits.push(id);
+      }
+      searchHits = hits;
+      searchCursor = 0;
+      searchStatus.textContent = hits.length + ' match' + (hits.length === 1 ? '' : 'es');
+      if (!prevTreeOpen) snapshotTreeOpen();
+      applySearchHighlights();
+    }
+    function applySearchHighlights() {
+      var modHits = new Set(), defHits = [];
+      var byNameLower = new Map(); // lowercased module name -> moduleName
+      modules.forEach(function (m) { byNameLower.set(m.toLowerCase(), m); });
+      searchHits.forEach(function (i) {
+        if (searchKinds[i] === 0) {
+          modHits.add(byNameLower.get(searchIdx.names[i]));
+        } else {
+          defHits.push(searchIdx.names[i]);
+        }
+      });
+      // Tree highlights.
+      moduleRowByName.forEach(function (row, name) {
+        if (modHits.has(name)) row.classList.add('search-hit');
+      });
+      // Pulse module compounds.
+      cy.batch(function () {
+        modHits.forEach(function (m) {
+          if (moduleIndex.has(m)) {
+            var n = cy.getElementById('m:' + moduleIndex.get(m));
+            if (n.length && n.flashClass) n.flashClass('flash', 600);
+          }
+        });
+      });
+      // Expand tree folders containing matches.
+      expandTreeAncestorsForMatches();
+    }
+    function expandTreeAncestorsForMatches() {
+      moduleRowByName.forEach(function (row, name) {
+        if (!row.classList.contains('search-hit')) return;
+        var el = row;
+        while (el && el !== moduleTreeDom) {
+          if (el.tagName === 'DETAILS') el.open = true;
+          el = el.parentElement;
+        }
+      });
+    }
+    function clearSearchClasses() {
+      document.querySelectorAll('#sidebar .search-hit').forEach(function (e) { e.classList.remove('search-hit'); });
+    }
+    function snapshotTreeOpen() {
+      prevTreeOpen = [];
+      document.querySelectorAll('#sidebar details').forEach(function (d) {
+        prevTreeOpen.push([d, d.open]);
+      });
+    }
+    function restoreTreeOpen() {
+      if (!prevTreeOpen) return;
+      prevTreeOpen.forEach(function (pair) { pair[0].open = pair[1]; });
+      prevTreeOpen = null;
+    }
+    function clearSearch() {
+      searchInput.value = '';
+      runSearch('');
+    }
+
+    searchInput.addEventListener('input', function () { runSearch(searchInput.value.trim()); });
+    document.getElementById('search-clear').addEventListener('click', clearSearch);
+    searchInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        if (searchHits.length === 0) return;
+        var id = searchHits[searchCursor];
+        var name = searchIdx.names[id];
+        if (searchKinds[id] === 0) {
+          // module
+          var origName = null;
+          modules.forEach(function (m) { if (m.toLowerCase() === name) origName = m; });
+          if (origName) focusModule(origName, { expand: true });
+        } else {
+          // def: find its module by suffix match
+          for (var i = 0; i < modules.length; i++) {
+            var mn = modules[i];
+            if (name.indexOf(mn.toLowerCase() + '.') === 0) {
+              focusModule(mn, { expand: true });
+              break;
+            }
+          }
+        }
+      } else if (e.key === 'ArrowDown') {
+        if (searchHits.length) { searchCursor = (searchCursor + 1) % searchHits.length; searchStatus.textContent = (searchCursor + 1) + '/' + searchHits.length; }
+      } else if (e.key === 'ArrowUp') {
+        if (searchHits.length) { searchCursor = (searchCursor - 1 + searchHits.length) % searchHits.length; searchStatus.textContent = (searchCursor + 1) + '/' + searchHits.length; }
+      }
+    });
+
+    // ----- Source drawer ------------------------------------------
+    var drawerEl    = document.getElementById('drawer');
+    var drawerBody  = document.getElementById('drawer-body');
+    var drawerCode  = document.getElementById('drawer-code');
+    var drawerGutter = document.getElementById('drawer-gutter');
+    var drawerFallback = document.getElementById('drawer-fallback');
+    var drawerTitle = document.getElementById('drawer-title');
+    var drawerMod   = document.getElementById('drawer-mod');
+
+    function openDrawer(title, modName) {
+      drawerTitle.textContent = title || '';
+      drawerMod.textContent = modName ? '  ' + modName : '';
+      drawerEl.classList.add('open');
+      drawerEl.setAttribute('aria-hidden', 'false');
+    }
+    function closeDrawer() {
+      drawerEl.classList.remove('open');
+      drawerEl.setAttribute('aria-hidden', 'true');
+    }
+    function showFallback(msg) {
+      drawerBody.style.display = 'none';
+      drawerGutter.textContent = '';
+      drawerCode.textContent = '';
+      drawerFallback.innerHTML = msg;
+      drawerFallback.style.display = 'block';
+    }
+    function renderSnippet(html, startLine) {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      var plain = tmp.textContent || '';
+      var nLines = plain.split('\n').length;
+      if (nLines > 0 && plain.charAt(plain.length - 1) === '\n') nLines--;
+      if (nLines === 0) nLines = 1;
+      var pad = String(startLine + nLines - 1).length;
+      var gutter = [];
+      for (var i = 0; i < nLines; i++) {
+        var num = String(startLine + i);
+        gutter.push(num.length < pad ? new Array(pad - num.length + 1).join(' ') + num : num);
+      }
+      drawerGutter.textContent = gutter.join('\n');
+      drawerFallback.style.display = 'none';
+      drawerBody.style.display = 'grid';
+      drawerCode.innerHTML = html;
+      // Disable anchor nav within snippet (links point to nothing real).
+      drawerCode.querySelectorAll('a[href]').forEach(function (a) {
+        a.addEventListener('click', function (e) { e.preventDefault(); });
+      });
+    }
+
+    function openSourceForDef(n) {
+      if (!WITH_SOURCE) return;
+      var modName = n.data('module');
+      var fullName = n.data('fullName');
+      openDrawer(stripPrefix(fullName, modName + '.'), modName);
+      loadSnippetBundle(modName).then(function (bundle) {
+        var snip = lookupSnippet(bundle, modName, fullName);
+        if (!snip) { showFallback('No source available for this name (synthetic, generated, or not produced by Agda).'); return; }
+        renderSnippet(snip.source, snip.sourceLine || 1);
+      });
+    }
+    function openSourceForModule(modName) {
+      if (!WITH_SOURCE) return;
+      openDrawer(modName, '');
+      loadSnippetBundle(modName).then(function (bundle) {
+        if (!bundle || !bundle.raw || Object.keys(bundle.raw).length === 0) {
+          showFallback('No source bundle for <code>' + escapeHtml(modName) + '</code>.');
+          return;
+        }
+        // Show the FIRST snippet (sorted by sourceLine).
+        var entries = Object.values(bundle.raw).sort(function (a, b) {
+          return (a.sourceLine || 0) - (b.sourceLine || 0);
+        });
+        renderSnippet(entries[0].source, entries[0].sourceLine || 1);
+      });
+    }
+    document.getElementById('drawer-close').addEventListener('click', closeDrawer);
+
+    // ----- Initial layout & focus ---------------------------------
+    cy.fit(cy.nodes('[kind = "module"]'), 40);
+    applyLod();
+
+    // If there's an entry module, soft-focus it.
+    if (entryModule && moduleIndex.has(entryModule)) {
+      var en = cy.getElementById('m:' + moduleIndex.get(entryModule));
+      if (en.length) { cy.center(en); brushLinkedRows(entryModule); }
+    }
+  }
+})();
+</script>
+</body>
+</html>

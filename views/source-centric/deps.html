@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>agda-deps · Source-Centric</title>
+<style>
+  :root {
+    --c-defined:   #4caf50;
+    --c-postulate: #f44336;
+    --c-hole:      #9c27b0;
+    --c-failed:    #ff9800;
+    --bg:          #1e1e2e;
+    --panel:       #252535;
+    --border:      #383858;
+    --text:        #cdd6f4;
+    --muted:       #6c7086;
+    --accent:      #89b4fa;
+    --history-bg:  #1a1a2e;
+    --banner-bg:   #2a2a4e;
+    --font-mono:   'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace;
+    --font-ui:     system-ui, -apple-system, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font-family: var(--font-ui);
+  }
+  body { display: flex; flex-direction: column; }
+
+  /* ── Warning banner (no-source) ── */
+  #no-source-banner {
+    display: none;
+    background: #3a2a00; border-bottom: 1px solid #a07000;
+    padding: 6px 16px; font-size: 12px; color: #ffd080;
+  }
+
+  /* ── Top bar ── */
+  #topbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 14px;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .logo { font-weight: 700; font-size: 14px; color: var(--accent); letter-spacing: .05em; }
+  #search-wrap { position: relative; flex: 1; max-width: 400px; }
+  #search-input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 10px; border-radius: 6px;
+    font-size: 13px; outline: none;
+  }
+  #search-input:focus { border-color: var(--accent); }
+  #search-dd {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    max-height: 240px; overflow-y: auto; z-index: 200;
+    box-shadow: 0 8px 24px #00000066;
+  }
+  .sd-item {
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sd-item:hover { background: var(--bg); }
+  .sd-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .sd-mod { color: var(--muted); font-size: 11px; margin-left: auto; }
+  #ext-toggle {
+    font-size: 12px; color: var(--muted);
+    display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap;
+  }
+  #ext-toggle input { cursor: pointer; }
+
+  /* ── Main ── */
+  #main { flex: 1; display: flex; overflow: hidden; }
+
+  /* ── Left: history ruler ── */
+  #hist-ruler {
+    width: 44px; flex-shrink: 0;
+    background: var(--history-bg); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 12px 0; gap: 6px; overflow-y: auto;
+  }
+  .ruler-label {
+    font-size: 9px; color: var(--muted);
+    writing-mode: vertical-rl; text-orientation: mixed;
+    letter-spacing: .1em; margin-bottom: 8px; transform: rotate(180deg);
+  }
+  .hist-dot {
+    width: 20px; height: 20px; border-radius: 50%;
+    cursor: pointer; border: 2px solid transparent; flex-shrink: 0;
+    transition: transform .15s, border-color .15s; position: relative;
+  }
+  .hist-dot:hover { transform: scale(1.25); border-color: #fff4; }
+  .hist-dot.current { border-color: #fff9; transform: scale(1.1); }
+  .hist-dot::after {
+    content: attr(title); position: absolute; left: 28px; top: 50%;
+    transform: translateY(-50%); background: #000d; color: #fff;
+    font-size: 11px; padding: 3px 8px; border-radius: 4px;
+    white-space: nowrap; z-index: 300; pointer-events: none;
+    display: none;
+  }
+  .hist-dot:hover::after { display: block; }
+
+  /* ── Center: source panel ── */
+  #src-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+  #breadcrumb {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 18px; background: var(--panel);
+    border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
+  }
+  .nav-btn {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 3px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;
+  }
+  .nav-btn:hover:not(:disabled) { background: var(--border); }
+  .nav-btn:disabled { opacity: .35; cursor: default; }
+  .bc-mod { color: var(--muted); font-size: 13px; }
+  .bc-sep { color: var(--muted); }
+  .bc-def { font-weight: 600; font-size: 13px; color: var(--text); }
+  .state-badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    font-weight: 600; letter-spacing: .04em; margin-left: auto;
+  }
+  .badge-0, .badge-Defined   { background: color-mix(in srgb, var(--c-defined)   20%, transparent); color: var(--c-defined);   border: 1px solid color-mix(in srgb, var(--c-defined)   40%, transparent); }
+  .badge-1, .badge-Postulate { background: color-mix(in srgb, var(--c-postulate) 20%, transparent); color: var(--c-postulate); border: 1px solid color-mix(in srgb, var(--c-postulate) 40%, transparent); }
+  .badge-2, .badge-Hole      { background: color-mix(in srgb, var(--c-hole)      20%, transparent); color: var(--c-hole);      border: 1px solid color-mix(in srgb, var(--c-hole)      40%, transparent); }
+  .badge-3, .badge-Failed    { background: color-mix(in srgb, var(--c-failed)    20%, transparent); color: var(--c-failed);    border: 1px solid color-mix(in srgb, var(--c-failed)    40%, transparent); }
+
+  #src-scroll { flex: 1; overflow-y: auto; padding: 28px 36px; }
+
+  /* Source code area — may be plain text or Agda-highlighted HTML */
+  #src-body {
+    font-family: var(--font-mono); font-size: 14px; line-height: 1.8;
+    color: #e2e8f0; white-space: pre-wrap; word-break: break-word; tab-size: 2;
+    transition: opacity .15s;
+  }
+  #src-body.fading { opacity: 0; }
+  #src-body.agda-html { white-space: normal; }  /* Agda HTML manages its own whitespace */
+
+  /* Override Agda's inline CSS for dark theme */
+  #src-body .Agda { font-family: var(--font-mono); font-size: 14px; line-height: 1.8; background: transparent !important; }
+  #src-body pre.Agda { background: transparent !important; margin: 0; padding: 0; }
+  /* Remap Agda's light-mode colours for dark background */
+  #src-body .Function    { color: #89b4fa; }
+  #src-body .Datatype    { color: #cba6f7; }
+  #src-body .Constructor { color: #a6e3a1; }
+  #src-body .Postulate   { color: var(--c-postulate); }
+  #src-body .Hole        { color: var(--c-hole); background: color-mix(in srgb, var(--c-hole) 15%, transparent); border-radius: 2px; }
+  #src-body .Keyword     { color: #f38ba8; }
+  #src-body .Comment     { color: var(--muted); font-style: italic; }
+  #src-body .Symbol      { color: #89dceb; }
+  #src-body .Number      { color: #fab387; }
+  #src-body .Bound       { color: #cdd6f4; }
+  #src-body .Module      { color: #cba6f7; }
+  #src-body .Primitive   { color: #89b4fa; }
+  #src-body .Record      { color: #cba6f7; }
+  #src-body .Field       { color: #89b4fa; }
+  #src-body .InductiveConstructor { color: #a6e3a1; }
+  #src-body .CoinductiveConstructor { color: #94e2d5; }
+  /* Plain-text def links */
+  .def-link {
+    text-decoration: underline; text-underline-offset: 3px;
+    cursor: pointer; border-radius: 2px; padding: 0 1px; transition: background .1s;
+  }
+  .def-link:hover { background: #ffffff15; }
+  .def-link.s0 { color: var(--c-defined);   text-decoration-color: color-mix(in srgb, var(--c-defined)   50%, transparent); }
+  .def-link.s1 { color: var(--c-postulate); text-decoration-color: color-mix(in srgb, var(--c-postulate) 50%, transparent); }
+  .def-link.s2 { color: var(--c-hole);      text-decoration-color: color-mix(in srgb, var(--c-hole)      50%, transparent); }
+  .def-link.s3 { color: var(--c-failed);    text-decoration-color: color-mix(in srgb, var(--c-failed)    50%, transparent); }
+  .def-link.sx { color: #888; text-decoration-color: #88888850; }
+  .def-link.ext-hidden { color: var(--muted); text-decoration: none; cursor: default; pointer-events: none; }
+  /* Agda-HTML anchor links (hijacked) */
+  #src-body a[data-def-idx] {
+    text-decoration: underline; text-underline-offset: 3px;
+    cursor: pointer; border-radius: 2px; padding: 0 1px; transition: background .1s;
+  }
+  #src-body a[data-def-idx]:hover { background: #ffffff15; }
+  /* Unavailable source */
+  .src-unavail { color: var(--muted); font-style: italic; font-size: 13px; padding: 8px 0; font-family: var(--font-ui); }
+
+  /* ── Welcome ── */
+  #welcome {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; height: 100%; gap: 14px; color: var(--muted);
+  }
+  #welcome h2 { color: var(--text); font-size: 18px; }
+  #welcome p  { font-size: 13px; max-width: 420px; text-align: center; line-height: 1.6; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 6px; }
+  .chip {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 20px;
+    padding: 5px 14px; font-size: 12px; cursor: pointer;
+  }
+  .chip:hover { background: var(--border); }
+
+  /* ── Right: minimap ── */
+  #minimap {
+    width: 240px; flex-shrink: 0;
+    background: var(--history-bg); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  #mm-title {
+    padding: 7px 12px; font-size: 10px; color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    letter-spacing: .06em; text-transform: uppercase;
+  }
+  #mm-wrap { flex: 1; overflow: hidden; }
+  #mm-svg  { width: 100%; height: 100%; display: block; }
+  .mm-node { cursor: pointer; }
+  .mm-edge { stroke: #ffffff20; stroke-width: 1; fill: none; marker-end: url(#arr-out); }
+  .mm-edge.in  { stroke: #4caf5040; marker-end: url(#arr-in); }
+  .mm-edge.out { stroke: #89b4fa40; marker-end: url(#arr-out); }
+  #mm-legend {
+    padding: 8px 12px; border-top: 1px solid var(--border);
+    font-size: 10px; color: var(--muted);
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .leg-row { display: flex; align-items: center; gap: 6px; }
+  .leg-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<div id="no-source-banner">
+  This view requires <code style="background:#00000030;padding:1px 4px;border-radius:3px">--with-source</code>
+  for inline source browsing. Navigation still works; source pane will show "(source unavailable)".
+</div>
+
+<div id="topbar">
+  <span class="logo">agda-deps · source-centric</span>
+  <div id="search-wrap">
+    <input id="search-input" type="text" placeholder="Search definitions… (Ctrl+K)">
+    <div id="search-dd"></div>
+  </div>
+  <label id="ext-toggle">
+    <input type="checkbox" id="show-ext" checked> Show external links
+  </label>
+</div>
+
+<div id="main">
+  <!-- Left: history ruler -->
+  <div id="hist-ruler">
+    <span class="ruler-label">HISTORY</span>
+  </div>
+
+  <!-- Center: source panel -->
+  <div id="src-panel">
+    <div id="breadcrumb">
+      <button class="nav-btn" id="btn-back" disabled>&#8592; Back</button>
+      <button class="nav-btn" id="btn-fwd"  disabled>Fwd &#8594;</button>
+      <span id="bc-content" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"></span>
+    </div>
+    <div id="src-scroll">
+      <div id="src-body">
+        <div id="welcome">
+          <h2>Source-Centric Browser</h2>
+          <p>Click a definition to browse its source. Identifiers are hyperlinks — click to navigate. Use Back/Fwd or the history dots on the left.</p>
+          <div class="chips" id="chips"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: minimap -->
+  <div id="minimap">
+    <div id="mm-title">Dependency Minimap</div>
+    <div id="mm-wrap">
+      <svg id="mm-svg">
+        <defs>
+          <marker id="arr-out" viewBox="0 -4 8 8" refX="14" refY="0" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M0,-4L8,0L0,4" fill="#89b4fa60"/>
+          </marker>
+          <marker id="arr-in" viewBox="0 -4 8 8" refX="14" refY="0" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M0,-4L8,0L0,4" fill="#4caf5060"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+    <div id="mm-legend">
+      <div class="leg-row"><div class="leg-dot" style="background:var(--c-defined)"></div> Defined</div>
+      <div class="leg-row"><div class="leg-dot" style="background:var(--c-postulate)"></div> Postulate</div>
+      <div class="leg-row"><div class="leg-dot" style="background:var(--c-hole)"></div> Hole</div>
+      <div class="leg-row"><div class="leg-dot" style="background:#555"></div> External</div>
+    </div>
+  </div>
+</div>
+
+<script>
+var LAZY = false;
+var WITH_SOURCE = true;
+var GZIP_ENABLED = false;
+var AGDA_HTML_BASE = null;
+var GRAPH = {"v":2,"modules":["Agda.Builtin.Nat","Agda.Primitive","Agda.Primitive.Cubical","Bool","Bool.Bool","Coinductive","Coinductive.Stream","DeadPrivate","GoalsTest","Holes","List","List.List","Nat","Nat.Nat","Records","Records.Box","Records.Point","Test","Test.Exp","Where","Where._"],"files":["/home/mceresa/Repositories/Projects/AgdaDependencies/test/Bool.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Coinductive.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/DeadPrivate.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/GoalsTest.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Holes.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/List.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Nat.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Records.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Test.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Where.agda"],"moduleToFile":"////////////////AAAAAAAAAAABAAAAAQAAAP//////////BAAAAAUAAAAFAAAABgAAAAYAAAAHAAAABwAAAAcAAAAIAAAACAAAAAkAAAAJAAAA","fileToModules":[[3,4],[5,6],[],[],[9],[10,11],[12,13],[14,15,16],[17,18],[19,20]],"defs":{"names":["Records.Box.constructor","Bool.Bool","Test._++_","Holes.useMagic","Test.Exp.Plus","List.List.[]","Where._.sq","Test.Exp.Var","Test.eval\u0027","Test.Var-0","Nat.Nat.suc","List.List","Coinductive.Stream.tail","Nat._\u003c_","Where._.go","Test.eval","Records.double","Nat._-_","Where._.bump","Coinductive.Stream.head","Nat.Nat.zero","Holes.magic","Nat.suc-0","Records.Point.y","Records.Box.contents","Records.origin","Test.sum","List._∷_-1","Test.Int-0","Nat._*_","Nat.Nat","Nat._+_","Where.sumSquares","Records.Box","Records.mkPoint","Records.Box.count","Test.Exp.Int","Records.Point.constructor","Coinductive.zeros","Records.Point","Nat._==_","Records.Point.x","Test.Plus-1","Coinductive.Stream.constructor","Test.Exp","Where.weirdSum","Holes.unsolved#meta.3","Holes.incomplete","Test.Plus-0","Bool.Bool.true","List._∷_-0","Bool.Bool.false","Coinductive.mapSuc","Test.map","List.List._∷_","Records.sumCoords","Coinductive.Stream"],"modules":"DwAAAAMAAAARAAAACQAAABIAAAALAAAAFAAAABIAAAARAAAAEQAAAA0AAAAKAAAABgAAAAwAAAAUAAAAEQAAAA4AAAAMAAAAFAAAAAYAAAANAAAACQAAAAwAAAAQAAAADwAAAA4AAAARAAAACgAAABEAAAAMAAAADAAAAAwAAAATAAAADgAAAA4AAAAPAAAAEgAAABAAAAAFAAAADgAAAAwAAAAQAAAAEQAAAAYAAAARAAAAEwAAAAkAAAAJAAAAEQAAAAQAAAAKAAAABAAAAAUAAAARAAAACwAAAA4AAAAFAAAA","states":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAAAAAAAAAAAA","x":"7ny/P3S1DUB8m84+iGPdPwRWRkDVWys/TKaaP/32PUAFowpAz2ZZQBdIAECh80I/AU0YQBrAA0D3dZA/0gAaQL3jvD9pb/g/aW/QP40oDUCdEd0/HHzRP9xGE0BpAK8/bVbFP0p7uz9JLo8/zczMPGRdMEAwTM4/ih/TP1io1T8nMYg/QBOxP9nOrz/8GKs/ejYXQEvIlz+1pgFAqoKhP+Xy/z/4wqQ/mghjQCBjHkDAWyxAokXmP0Ot4T+Ybuo/wFtkQAu1BkAdWuQ9/BgTQNiBB0BxPbo+36YHP166sT+fzRJA","y":"ONucPimuCj4w9RM/BOecPw+cSz+Xizg/X5gcP6s+Dz8F3UY/nim0PtnOXz8EHCo/F7fRP+uQ+z7eAkE/F5pDP2tI7D7QD3M/n82SP0vI3z9hVFI/mbuuP3h6pT+J0pY/k29WPuM2ij98RFQ/n7BcP7hYcT4wEio/UMJMP3+8Zz/b3Bg/6Q6SPpjdoz8J/sc+uw8QP4/kij/IB60/zcyUP8Fu6D65jYY//fZtPynL+D8yrDI/RraLP+QUjT49Csc+FhM7Pwx5xD09LIw/0zBcPuoErD8F3TY/LJpWP1XZdz/c19k/"},"edges":{"outOffsets":"AAAAAAMAAAAFAAAACQAAAAwAAAAQAAAAEgAAABUAAAAYAAAAGwAAABsAAAAeAAAAIAAAACIAAAApAAAAMQAAADgAAAA8AAAAQAAAAEIAAABEAAAARgAAAEcAAABHAAAASgAAAE0AAABTAAAAWgAAAFoAAABaAAAAXwAAAGEAAABlAAAAaAAAAGwAAABxAAAAdAAAAHgAAAB7AAAAgQAAAIYAAACNAAAAkAAAAJAAAACSAAAAlQAAAJgAAACZAAAAmwAAAJsAAACdAAAAnQAAAJ8AAACmAAAAqgAAAK4AAAC0AAAAuQAAAA==","outTargets":"AAAAAB4AAAAhAAAAMQAAADMAAAACAAAABQAAAAsAAAA2AAAAFQAAAB4AAAAfAAAABAAAACoAAAAsAAAAMAAAAAUAAAALAAAACwAAAB0AAAAeAAAABwAAAAkAAAAsAAAAFAAAAB4AAAAsAAAACgAAABYAAAAeAAAABQAAADYAAAArAAAAOAAAAAEAAAAKAAAADQAAABQAAAAeAAAAMQAAADMAAAAFAAAABgAAAAsAAAAOAAAAFAAAAB4AAAAfAAAANgAAAAQAAAAHAAAADwAAAB4AAAAfAAAAJAAAACwAAAAdAAAAHgAAACEAAAAjAAAACgAAABEAAAAUAAAAHgAAAB4AAAAfAAAAKwAAADgAAAAUAAAAHgAAAB4AAAAeAAAAJQAAACcAAAAAAAAAHgAAACEAAAAUAAAAFwAAABkAAAAeAAAAJwAAACkAAAAFAAAACwAAABQAAAAaAAAAHgAAAB8AAAA2AAAACgAAABQAAAAdAAAAHgAAAB8AAAAKAAAAFAAAAAoAAAAUAAAAHgAAAB8AAAALAAAADgAAAB4AAAAAAAAAGAAAAB4AAAAjAAAAFwAAABkAAAAeAAAAJwAAACkAAAAAAAAAHgAAACEAAAAcAAAAHgAAACQAAAAsAAAAHgAAACUAAAAnAAAADAAAABMAAAAUAAAAHgAAACYAAAA4AAAAFwAAABkAAAAeAAAAJQAAACkAAAABAAAACgAAABQAAAAeAAAAKAAAADEAAAAzAAAAHgAAACUAAAAnAAAAKwAAADgAAAAEAAAABwAAACQAAAASAAAAHgAAAB8AAAAeAAAAHgAAAC4AAAABAAAAMQAAAAEAAAAzAAAACgAAAAwAAAATAAAAHgAAACYAAAA0AAAAOAAAAAUAAAALAAAANQAAADYAAAALAAAAGwAAADIAAAA2AAAAFwAAABkAAAAeAAAAHwAAACcAAAApAAAADAAAABMAAAAmAAAAKwAAADgAAAA=","inOffsets":"AAAAAAQAAAAIAAAACQAAAAkAAAAMAAAAEgAAABMAAAAWAAAAFgAAABcAAAAfAAAAJwAAACoAAAArAAAALQAAAC4AAAAuAAAALwAAADAAAAAzAAAAPwAAAEAAAABBAAAARQAAAEYAAABKAAAASwAAAEwAAABNAAAAUAAAAHIAAAB7AAAAewAAAH8AAAB/AAAAgQAAAIQAAACIAAAAiwAAAJEAAACSAAAAlgAAAJcAAACbAAAAoAAAAKAAAAChAAAAoQAAAKIAAACmAAAApwAAAKsAAACsAAAArQAAALMAAACzAAAAuQAAAA==","inTargets":"AAAAABgAAAAhAAAAIwAAAA0AAAAoAAAAMQAAADMAAAACAAAABAAAAA8AAAAsAAAAAgAAAAUAAAALAAAADgAAABoAAAA1AAAADgAAAAcAAAAPAAAALAAAAAcAAAAKAAAADQAAABEAAAAdAAAAHgAAAB8AAAAoAAAANAAAAAIAAAAFAAAABgAAAA4AAAAaAAAAIAAAADUAAAA2AAAAJgAAADQAAAA4AAAADQAAAA4AAAAgAAAADwAAABEAAAAtAAAAJgAAADQAAAA4AAAACAAAAA0AAAAOAAAAEQAAABQAAAAZAAAAGgAAAB0AAAAeAAAAHwAAACYAAAAoAAAAAwAAAAoAAAAZAAAAIgAAACcAAAA3AAAAIQAAABkAAAAiAAAAJwAAADcAAAAaAAAANgAAACQAAAAGAAAAEAAAAB0AAAAAAAAAAwAAAAYAAAAIAAAACgAAAA0AAAAOAAAADwAAABAAAAARAAAAEgAAABQAAAAVAAAAFwAAABgAAAAZAAAAGgAAAB0AAAAfAAAAIAAAACEAAAAiAAAAIwAAACQAAAAlAAAAJgAAACcAAAAoAAAAKQAAAC0AAAAuAAAALwAAADQAAAA3AAAAAwAAAA4AAAAPAAAAEgAAABoAAAAdAAAAHwAAAC0AAAA3AAAAAAAAABAAAAAYAAAAIwAAABAAAAAhAAAADwAAACQAAAAsAAAAFwAAACUAAAAnAAAAKQAAACYAAAA0AAAAOAAAABcAAAAZAAAAIgAAACUAAAApAAAANwAAACgAAAAZAAAAIgAAACcAAAA3AAAABAAAAAwAAAATAAAAKwAAADgAAAAEAAAABwAAAAgAAAAPAAAAJAAAAC8AAAAEAAAAAQAAAA0AAAAoAAAAMQAAADYAAAABAAAADQAAACgAAAAzAAAANAAAADUAAAACAAAACwAAAA4AAAAaAAAANQAAADYAAAAMAAAAEwAAACYAAAArAAAANAAAADgAAAA="},"definitionEdgesProvenance":"AQAAAQEBAQABAQABAQEAAQEAAAEAAQEAAQAAAQEAAQEBAAABAQEAAQEBAgACAQABAQEBAQABAQABAAABAQEBAAABAQABAAAAAQABAQABAQQBAAEBAAEBAAEBAQEBAAEBAQEBAAEAAgABAQEBAQQAAAEBAAABAAEAAAEAAQEBAAEAAQQBAQEAAQEAAQEBAAEAAQABAQECAAEAAAEAAQABAQEBAAQBAAEAAQEAAQEBAQQAAQABAQEEAQE=","transitiveEdges":"sAwAAIsMAACEDAAAowwAAJ4MAABzBAAAZgQAAOQCAADXAgAAywkAAL4JAACUCAAAiggAAK4IAACJCAAAgggAAJwIAACyCwAAzAsAAJ4LAACnCwAAoAsAALoLAADQCQAA8AkAANMJAAAQAQAA6AAAABQBAAAOAQAAIggAADAIAAAoCAAAIAgAALsBAACWAQAAmAEAAHUDAACDAwAAdgMAAFsDAAB7AwAAXgMAAOYBAADcAQAA6AUAAN4FAADVBQAA6QUAAM8FAAAABgAAfQAAAHcAAACoAAAA2AsAANILAAADDAAAzQgAANgIAADGCAAA1AgAAMgIAABICQAAPwkAAEYJAABGBQAAPQUAAEQFAABkCAAAWwgAAGIIAAC5BwAAsAcAALsHAACpBwAAqwcAAGYMAABdDAAAaAwAAFYMAABYDAAAuAUAAK8FAAClBQAAugUAAKgFAACqBQAAdwcAAHEHAAB8BwAAWQcAAHYFAAB5BQAAWAUAAOkHAADsBwAAywcAAB4AAAAhAAAAAAAAAK4DAACxAwAAswMAAJUKAADJAAAAbAAAAGoAAABcCwAAjgsAAOoKAAAaCwAAeAIAAKkCAAAoAQAAIgEAABEMAAA8DAAAOAwAACEMAADCBgAAuAYAAJIEAACIBAAAWAIAAEQCAABQAgAABQcAAPsGAADxBgAA5wMAAN0DAADTAwAAkwYAAIkGAAB/BgAAlAYAAOkIAAAGCQAAGwkAAPwIAAAZCQAA8ggAAOYCAAADAwAAGAMAAPkCAAAWAwAA7wIAAD4HAAArBwAAdAEAADwDAAAyAwAAKQMAAD0DAAAkAwAAIwMAAFQDAAAjCgAAJAoAACAEAAA=","moduleEdges":[[2,1],[3,1],[3,4],[4,3],[5,1],[5,6],[5,12],[5,13],[6,5],[7,0],[8,10],[8,12],[9,1],[9,12],[10,1],[10,11],[11,10],[12,1],[12,3],[12,4],[12,13],[13,12],[14,1],[14,12],[14,13],[14,15],[14,16],[15,12],[15,14],[16,12],[16,14],[17,1],[17,5],[17,9],[17,10],[17,11],[17,12],[17,13],[17,14],[17,18],[17,19],[18,12],[18,17],[19,1],[19,10],[19,12],[19,20],[20,10],[20,11],[20,12],[20,13]],"transitiveModuleEdges":[[3,1],[5,1],[5,12],[5,13],[9,1],[10,1],[12,1],[12,3],[12,4],[14,1],[14,12],[14,13],[14,15],[14,16],[15,12],[16,12],[17,1],[17,5],[17,9],[17,10],[17,11],[17,12],[17,13],[17,14],[17,19],[18,12],[19,1],[19,10],[19,12],[20,10],[20,11],[20,12],[20,13]],"moduleStates":"AAAAAAAAAAAAAAAAAAAAAAAAAAAA","moduleStateCounts":[[0,0,0,0],[0,0,0,0],[0,0,0,0],[1,0,0,0],[2,0,0,0],[3,0,0,0],[3,0,0,0],[0,0,0,0],[0,0,0,0],[1,1,2,0],[3,0,0,0],[2,0,0,0],[7,0,0,0],[2,0,0,0],[6,0,0,0],[3,0,0,0],[3,0,0,0],[10,0,0,0],[3,0,0,0],[2,0,0,0],[3,0,0,0]],"moduleDepth":"/////wEAAAD/////AgAAAAIAAAABAAAAAgAAAP//////////AQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAgAAAAIAAAAAAAAAAQAAAAEAAAACAAAA","modulePodLayout":"AIDewwAABEMAAEhDAABQQgAAV8MAAARDAABIQwAAUEIAgPLEAAAAAAAASEMAAFBCAMDVxAAAAAAAAEhDAABQQgAAucQAAAAAAABIQwAAUEIAQJzEAAAAAAAASEMAAFBCAAB/xAAAAAAAAEhDAABQQgCARcQAAAAAAABIQwAAUEIAAAzEAAAAAAAASEMAAFBCAAClwwAAAAAAAEhDAABQQgAAcEEAAARDAABIQwAAUEIAAMjCAAAAAAAASEMAAFBCAAB1QwAABEMAAEhDAABQQgAAAkMAAAAAAABIQwAAUEIAALRDAAAAAAAASEMAAFBCAIATRAAAAAAAAEhDAABQQgAATUQAAAAAAABIQwAAUEIAQINEAAAAAAAASEMAAFBCAACgRAAAAAAAAEhDAABQQgDAvEQAAAAAAABIQwAAUEIAgNlEAAAAAAAASEMAAFBC","fileTree":[{"name":"home","parent":-1,"fileIndex":null},{"name":"mceresa","parent":0,"fileIndex":null},{"name":"Repositories","parent":1,"fileIndex":null},{"name":"Projects","parent":2,"fileIndex":null},{"name":"AgdaDependencies","parent":3,"fileIndex":null},{"name":"test","parent":4,"fileIndex":null},{"name":"Bool.agda","parent":5,"fileIndex":0},{"name":"Coinductive.agda","parent":5,"fileIndex":1},{"name":"DeadPrivate.agda","parent":5,"fileIndex":2},{"name":"GoalsTest.agda","parent":5,"fileIndex":3},{"name":"Holes.agda","parent":5,"fileIndex":4},{"name":"List.agda","parent":5,"fileIndex":5},{"name":"Nat.agda","parent":5,"fileIndex":6},{"name":"Records.agda","parent":5,"fileIndex":7},{"name":"Test.agda","parent":5,"fileIndex":8},{"name":"Where.agda","parent":5,"fileIndex":9}],"moduleTree":[{"name":"Agda","parent":-1,"moduleIndex":null},{"name":"Builtin","parent":0,"moduleIndex":null},{"name":"Nat","parent":1,"moduleIndex":0},{"name":"Primitive","parent":0,"moduleIndex":1},{"name":"Cubical","parent":3,"moduleIndex":2},{"name":"Bool","parent":-1,"moduleIndex":3},{"name":"Bool","parent":5,"moduleIndex":4},{"name":"Coinductive","parent":-1,"moduleIndex":5},{"name":"Stream","parent":7,"moduleIndex":6},{"name":"DeadPrivate","parent":-1,"moduleIndex":7},{"name":"GoalsTest","parent":-1,"moduleIndex":8},{"name":"Holes","parent":-1,"moduleIndex":9},{"name":"List","parent":-1,"moduleIndex":10},{"name":"List","parent":12,"moduleIndex":11},{"name":"Nat","parent":-1,"moduleIndex":12},{"name":"Nat","parent":14,"moduleIndex":13},{"name":"Records","parent":-1,"moduleIndex":14},{"name":"Box","parent":16,"moduleIndex":15},{"name":"Point","parent":16,"moduleIndex":16},{"name":"Test","parent":-1,"moduleIndex":17},{"name":"Exp","parent":19,"moduleIndex":18},{"name":"Where","parent":-1,"moduleIndex":19},{"name":"_","parent":21,"moduleIndex":20}],"entryModule":"Test","externalModules":"AAAAAAEAAAACAAAA","bundleFiles":{"Bool":"snippets/Bool.json","Bool.Bool":"snippets/Bool.Bool.json","Coinductive":"snippets/Coinductive.json","Coinductive.Stream":"snippets/Coinductive.Stream.json","Holes":"snippets/Holes.json","List":"snippets/List.json","List.List":"snippets/List.List.json","Nat":"snippets/Nat.json","Nat.Nat":"snippets/Nat.Nat.json","Records":"snippets/Records.json","Records.Box":"snippets/Records.Box.json","Records.Point":"snippets/Records.Point.json","Test":"snippets/Test.json","Test.Exp":"snippets/Test.Exp.json","Where":"snippets/Where.json","Where._":"snippets/Where._.json"},"searchIndex":{"names":["agda.builtin.nat","agda.primitive","agda.primitive.cubical","bool","bool.bool","coinductive","coinductive.stream","deadprivate","goalstest","holes","list","list.list","nat","nat.nat","records","records.box","records.point","test","test.exp","where","where._","records.box.constructor","bool.bool","test._++_","holes.usemagic","test.exp.plus","list.list.[]","where._.sq","test.exp.var","test.eval\u0027","test.var-0","nat.nat.suc","list.list","coinductive.stream.tail","nat._\u003c_","where._.go","test.eval","records.double","nat._-_","where._.bump","coinductive.stream.head","nat.nat.zero","holes.magic","nat.suc-0","records.point.y","records.box.contents","records.origin","test.sum","list._∷_-1","test.int-0","nat._*_","nat.nat","nat._+_","where.sumsquares","records.box","records.mkpoint","records.box.count","test.exp.int","records.point.constructor","coinductive.zeros","records.point","nat._==_","records.point.x","test.plus-1","coinductive.stream.constructor","test.exp","where.weirdsum","holes.unsolved#meta.3","holes.incomplete","test.plus-0","bool.bool.true","list._∷_-0","bool.bool.false","coinductive.mapsuc","test.map","list.list._∷_","records.sumcoords","coinductive.stream"],"kinds":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB","bigrams":{"#m":[67],"*_":[50],"++":[23],"+_":[23,52],"-0":[30,43,49,69,71],"-1":[48,63],"-_":[38],".3":[67],".[":[26],"._":[20,23,27,34,35,38,39,48,50,52,61,71,75],".b":[0,4,15,21,22,39,45,54,56,70,72],".c":[2,21,45,56,58,64],".d":[37],".e":[18,25,28,29,36,57,65],".f":[72],".g":[35],".h":[40],".i":[49,57,68],".l":[11,26,32,75],".m":[42,55,73,74],".n":[0,13,31,41,51],".o":[46],".p":[1,2,16,25,44,58,60,62,63,69],".s":[6,27,31,33,40,43,47,53,64,76,77],".t":[33,70],".u":[24,67],".v":[28,30],".w":[66],".x":[62],".y":[44],".z":[41,59],"\u003c_":[34],"==":[61],"=_":[61],"[]":[26],"_*":[50],"_+":[23,52],"_-":[38,48,71],"_.":[27,35,39],"_\u003c":[34],"_=":[61],"_∷":[48,71,75],"a.":[0,1,2,67],"ad":[7,40],"ag":[0,1,2,24,42],"ai":[33],"al":[2,8,29,36,72],"am":[6,33,40,64,77],"ap":[73,74],"ar":[28,30,53],"at":[0,7,12,13,31,34,38,41,43,50,51,52,61],"bi":[2],"bl":[37],"bo":[3,4,15,21,22,45,54,56,70,72],"bu":[0,39],"c-":[43],"ca":[2],"co":[5,6,14,15,16,21,33,37,40,44,45,46,54,55,56,58,59,60,62,64,68,73,76,77],"ct":[5,6,21,33,40,58,59,64,73,77],"cu":[2],"d#":[67],"da":[0,1,2],"de":[7],"do":[37],"dp":[7],"ds":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,66,76],"du":[5,6,33,40,59,64,73,77],"e.":[2,6,20,27,33,35,39,40,53,59,64,66,73,77],"ea":[6,7,33,40,64,77],"ec":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,76],"ed":[67],"ei":[66],"em":[24],"en":[45],"er":[19,20,27,35,39,41,53,59,66],"es":[8,9,17,18,23,24,25,28,29,30,36,42,47,49,53,57,63,65,67,68,69,74],"et":[67,68],"ev":[29,36],"ex":[18,25,28,57,65],"fa":[72],"gd":[0,1,2],"gi":[24,42,46],"go":[8,35],"he":[19,20,27,35,39,40,53,66],"ho":[9,24,42,67,68],"ic":[2,24,42],"ig":[46],"il":[0,33],"im":[1,2],"in":[0,5,6,16,33,40,44,46,49,55,57,58,59,60,62,64,68,73,77],"ir":[66],"is":[10,11,26,32,48,71,75],"it":[1,2],"iv":[1,2,5,6,7,33,40,59,64,73,77],"kp":[55],"l\u0027":[29],"l.":[4,22,70,72],"le":[9,24,37,42,67,68],"li":[10,11,26,32,48,71,75],"ls":[8,72],"lt":[0],"lu":[25,63,69],"lv":[67],"m.":[33,40,64],"ma":[24,42,73,74],"mc":[76],"me":[67],"mi":[1,2],"mk":[55],"mp":[39,68],"ms":[53],"n.":[0],"na":[0,12,13,31,34,38,41,43,50,51,52,61],"nc":[68],"nd":[5,6,33,40,59,64,73,77],"ns":[21,58,64,67],"nt":[16,44,45,49,55,56,57,58,60,62],"oa":[8],"oi":[5,6,16,33,40,44,55,58,59,60,62,64,73,77],"ol":[3,4,9,22,24,42,67,68,70,72],"om":[68],"on":[21,45,58,64],"oo":[3,4,22,70,72,76],"or":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,64,76],"os":[59],"ou":[37,56],"ox":[15,21,45,54,56],"p.":[25,28,57],"pl":[25,63,68,69],"po":[16,44,55,58,60,62],"pr":[1,2,7],"ps":[73],"qu":[53],"r-":[30],"rd":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,66,76],"re":[6,14,15,16,19,20,21,27,33,35,37,39,40,44,45,46,53,54,55,56,58,60,62,64,66,76,77],"ri":[1,2,7,46],"ro":[41,59],"ru":[21,58,64,70],"s-":[63,69],"s.":[15,16,21,24,37,42,44,45,46,54,55,56,58,60,62,67,68,76],"se":[24,72],"so":[67],"sq":[27,53],"st":[6,8,10,11,17,18,21,23,25,26,28,29,30,32,33,36,40,47,48,49,57,58,63,64,65,69,71,74,75,77],"su":[31,43,47,53,66,73,76],"t-":[49],"t.":[11,13,18,23,25,26,28,29,30,31,32,34,36,38,41,43,44,47,48,49,50,51,52,57,58,61,62,63,65,69,71,74,75],"ta":[33,67],"te":[7,8,17,18,23,25,28,29,30,36,45,47,49,57,63,65,68,69,74],"ti":[0,1,2,5,6,33,40,59,64,73,77],"to":[21,58,64],"tr":[6,21,33,40,58,64,70,77],"ts":[45],"ua":[53],"ub":[2,37],"uc":[5,6,21,31,33,40,43,58,59,64,73,77],"ue":[70],"ui":[0],"um":[39,47,53,66,76],"un":[56,67],"us":[24,25,63,69],"va":[7,28,29,30,36],"ve":[1,2,5,6,33,40,59,64,67,73,77],"we":[66],"wh":[19,20,27,35,39,53,66],"x.":[21,45,56],"xp":[18,25,28,57,65],"ze":[41,59],"∷_":[48,71,75]}}};
+var GRAPH_URL = null;
+var SNIPPETS_BASE = null;
+var MODULES_BASE = null;
+</script>
+<script>
+// ── Decoder helpers ────────────────────────────────────────────────────────────
+function b64ToBytes(b64)   { var bin = atob(b64), out = new Uint8Array(bin.length); for (var i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i); return out; }
+function b64ToInt32(b64)   { return new Int32Array(b64ToBytes(b64).buffer); }
+function b64ToInt8(b64)    { return new Int8Array(b64ToBytes(b64).buffer); }
+function b64ToFloat32(b64) { return new Float32Array(b64ToBytes(b64).buffer); }
+
+// ── Fetch helpers ──────────────────────────────────────────────────────────────
+var snippetCache = Object.create(null);
+async function fetchJson(url) {
+  var r = await fetch(url); return await r.json();
+}
+async function loadGraph() {
+  if (LAZY) { return await fetchJson(GRAPH_URL); }
+  return GRAPH;
+}
+async function loadModuleDetail(g, modName) {
+  if (!g.moduleFiles || !g.moduleFiles[modName]) return null;
+  return await fetchJson(g.moduleFiles[modName]);
+}
+
+// Placeholder detail files — emitted by the producer for modules
+// that are declared in moduleFiles but have no kept defs (external
+// stdlib modules, all-filtered modules, or modules in the failed-
+// typecheck set under --keep-going). Detail JSON carries
+// { placeholder: true, reason: "external"|"failed"|"filtered",
+//   module: "<name>", externalPostulates?: [...] }. In this view we
+// keep track of which modules are placeholders so we can render a
+// comment-block-styled message in the source pane when a user
+// navigates / clicks into one.
+var placeholderModules = Object.create(null);  // modName -> detail
+
+function placeholderReasonText(reason) {
+  switch (reason) {
+    case 'external':
+      return 'External module — outside the project root. Not analysed.';
+    case 'failed':
+      return 'This module failed to type-check (--keep-going). Its contents are unknown.';
+    case 'filtered':
+      return 'Every definition in this module was filtered out (private, generated, or module-instantiation copy).';
+    default:
+      return 'This module was not analysed.';
+  }
+}
+
+function renderPlaceholderHTML(detail) {
+  var reason     = (detail && detail.reason) || 'unknown';
+  var modName    = (detail && detail.module) || '';
+  var reasonText = placeholderReasonText(reason);
+  var postulates = (detail && detail.externalPostulates) || [];
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  var lines = [];
+  lines.push('// ' + escHtml(reasonText));
+  if (modName) lines.push('// module: ' + escHtml(modName));
+  if (postulates.length) {
+    var shown = postulates.slice(0, 8).map(escHtml).join(', ');
+    var more  = postulates.length > 8 ? ', …' : '';
+    lines.push('// postulates: ' + shown + more);
+  }
+  return '<div class="src-placeholder" ' +
+              'style="padding:18px 22px;font-family:\'Fira Code\',Consolas,monospace;' +
+                     'font-size:13px;line-height:1.7;color:#6a9955;' +
+                     'background:transparent;white-space:pre;">' +
+           lines.join('\n') +
+         '</div>';
+}
+
+function showPlaceholderModule(modName) {
+  var detail = placeholderModules[modName];
+  if (!detail) return false;
+  var srcEl = document.getElementById('src-body');
+  srcEl.classList.remove('agda-html');
+  srcEl.innerHTML = renderPlaceholderHTML(detail);
+  return true;
+}
+async function loadSnippetBundle(g, modName) {
+  if (snippetCache[modName] !== undefined) return snippetCache[modName];
+  if (!g.bundleFiles || !g.bundleFiles[modName]) { snippetCache[modName] = {}; return {}; }
+  try {
+    var b = await fetchJson(g.bundleFiles[modName]);
+    var indexed = Object.create(null);
+    Object.keys(b).forEach(function(k) {
+      var entry = b[k];
+      var m = (entry.source || '').match(/<a id="([^"]+)"><\/a>/);
+      if (m) indexed[m[1]] = entry;
+      // Also index by the key itself as fallback
+      indexed[k] = entry;
+    });
+    snippetCache[modName] = indexed;
+    return indexed;
+  } catch(e) { snippetCache[modName] = {}; return {}; }
+}
+function lookupSnippet(bundle, modName, defFullName) {
+  if (!bundle) return null;
+  var local = defFullName;
+  if (modName && defFullName.indexOf(modName + '.') === 0)
+    local = defFullName.substring(modName.length + 1);
+  return bundle[local] || bundle[defFullName] || null;
+}
+
+// ── State ──────────────────────────────────────────────────────────────────────
+var g = null;          // raw graph object (after loadGraph())
+var defNames = [];     // string[] — all def pretty names
+var defStates = null;  // Int8Array  — 0=Defined,1=Postulate,2=Hole,3=Failed
+var defMods = null;    // Int32Array — def -> module index
+var outOffsets = null, outTargets = null;  // CSR out-edges
+var inOffsets  = null, inTargets  = null;  // CSR in-edges
+var isExternal = null; // Uint8Array (bool per module)
+
+var histStack = [];   // array of def indices
+var histPos   = -1;
+
+var showExternals = true;
+
+// ── Colour helpers ─────────────────────────────────────────────────────────────
+var STATE_NAMES = ['Defined','Postulate','Hole','Failed'];
+function stateColor(state, ext) {
+  if (ext) return '#555';
+  var style = getComputedStyle(document.documentElement);
+  var map = [
+    style.getPropertyValue('--c-defined').trim()   || '#4caf50',
+    style.getPropertyValue('--c-postulate').trim()  || '#f44336',
+    style.getPropertyValue('--c-hole').trim()       || '#9c27b0',
+    style.getPropertyValue('--c-failed').trim()     || '#888',
+  ];
+  return map[state] || '#888';
+}
+function defIsExternal(idx) {
+  if (!defMods || !isExternal) return false;
+  var mi = defMods[idx];
+  return mi >= 0 && isExternal[mi] === 1;
+}
+
+// ── Graph initialisation ───────────────────────────────────────────────────────
+async function init() {
+  if (!WITH_SOURCE) {
+    document.getElementById('no-source-banner').style.display = 'block';
+  }
+
+  g = await loadGraph();
+
+  // Decode binary arrays from inline graph (inline mode has defs embedded)
+  if (g.defs) {
+    defNames  = g.defs.names || [];
+    defStates = b64ToInt8(g.defs.states);
+    defMods   = b64ToInt32(g.defs.modules);
+  }
+  if (g.edges) {
+    outOffsets = b64ToInt32(g.edges.outOffsets);
+    outTargets = b64ToInt32(g.edges.outTargets);
+    inOffsets  = b64ToInt32(g.edges.inOffsets);
+    inTargets  = b64ToInt32(g.edges.inTargets);
+  }
+
+  // Decode external modules bitset
+  if (g.externalModules) {
+    var extIdx = b64ToInt32(g.externalModules);
+    isExternal = new Uint8Array((g.modules || []).length);
+    for (var i = 0; i < extIdx.length; i++) isExternal[extIdx[i]] = 1;
+  } else {
+    isExternal = new Uint8Array((g.modules || []).length);
+  }
+
+  // In LAZY mode, bulk-load all module details to get def list
+  if (LAZY && g.moduleFiles) {
+    var mods = Object.keys(g.moduleFiles);
+    var details = await Promise.all(mods.map(function(m) { return loadModuleDetail(g, m); }));
+    defNames  = [];
+    var stateArr = [], modArr = [];
+    var outOffsArr = [], outTgtArr = [];
+    var inOffsArr  = [], inTgtArr  = [];
+    // Lazy detail format: {defs:{names,states,x,y}, outEdges:[[localIdx,tgtGlobalIdx,tgtModIdx],...]}
+    // We accumulate a flat def list; edges reference global indices.
+    var globalOffset = 0;
+    var modDefStart = {};  // modName -> global offset of first def
+    details.forEach(function(det, di) {
+      if (!det) return;
+      var modName = mods[di];
+      // Skip placeholder detail JSON (external/failed/filtered modules with
+      // no kept defs); remember it so we can render a comment-block when
+      // the user navigates into the module.
+      if (det.placeholder) {
+        placeholderModules[modName] = det;
+        return;
+      }
+      if (!det.defs) return;
+      modDefStart[modName] = globalOffset;
+      var names  = det.defs.names || [];
+      var states = b64ToInt8(det.defs.states);
+      var modIdx = (g.modules || []).indexOf(modName);
+      names.forEach(function(n, li) {
+        defNames.push(n);
+        stateArr.push(states[li] || 0);
+        modArr.push(modIdx);
+      });
+      globalOffset += names.length;
+    });
+    defStates = new Int8Array(stateArr);
+    defMods   = new Int32Array(modArr);
+    // Build CSR from lazy outEdges — skip for now; minimap uses a fallback
+    // (lazy CSR reconstruction is complex; minimap will degrade gracefully)
+    outOffsets = null; outTargets = null;
+    inOffsets  = null; inTargets  = null;
+  }
+
+  buildSearch();
+  buildWelcomeChips();
+
+  // Navigate to entry module's first def
+  var entryDef = findEntryDef();
+  if (entryDef >= 0) navigateTo(entryDef);
+}
+
+function findEntryDef() {
+  var entry = g.entryModule || '';
+  if (!entry || !defMods || !g.modules) return defNames.length > 0 ? 0 : -1;
+  var mi = (g.modules || []).indexOf(entry);
+  if (mi < 0) return defNames.length > 0 ? 0 : -1;
+  for (var i = 0; i < defMods.length; i++) {
+    if (defMods[i] === mi) return i;
+  }
+  return defNames.length > 0 ? 0 : -1;
+}
+
+// ── CSR edge helpers ───────────────────────────────────────────────────────────
+function outNeighbors(idx) {
+  if (!outOffsets || !outTargets) return [];
+  var s = outOffsets[idx], e = outOffsets[idx+1];
+  var r = [];
+  for (var i = s; i < e; i++) r.push(outTargets[i]);
+  return r;
+}
+function inNeighbors(idx) {
+  if (!inOffsets || !inTargets) return [];
+  var s = inOffsets[idx], e = inOffsets[idx+1];
+  var r = [];
+  for (var i = s; i < e; i++) r.push(inTargets[i]);
+  return r;
+}
+
+// ── Snippet / source loading ───────────────────────────────────────────────────
+async function getSource(defIdx) {
+  if (!WITH_SOURCE) return null;
+  var fullName = defNames[defIdx] || '';
+  var modIdx   = defMods ? defMods[defIdx] : -1;
+  var modName  = (modIdx >= 0 && g.modules) ? g.modules[modIdx] : null;
+  if (!modName) return null;
+
+  var bundle = await loadSnippetBundle(g, modName);
+  var snip   = lookupSnippet(bundle, modName, fullName);
+  return snip ? snip.source : null;
+}
+
+// ── Source rendering ───────────────────────────────────────────────────────────
+// Build a fast name→index map (only names ≥ 3 chars, to avoid noise).
+var nameToIdx = null;  // lower-case name (with dots) → first def index
+function ensureNameMap() {
+  if (nameToIdx) return;
+  nameToIdx = Object.create(null);
+  // We want to map the short local name AND the full dotted name.
+  defNames.forEach(function(fullName, idx) {
+    if (!nameToIdx[fullName]) nameToIdx[fullName] = idx;
+    // Also the last segment
+    var dot = fullName.lastIndexOf('.');
+    var local = dot >= 0 ? fullName.substring(dot+1) : fullName;
+    if (local.length >= 3 && !nameToIdx[local]) nameToIdx[local] = idx;
+  });
+}
+
+// For plain text source: wrap known identifiers with <span class="def-link">
+function renderPlainWithLinks(text) {
+  ensureNameMap();
+  var escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  // Build sorted candidates (longest first) from names present in text
+  var candidates = [];
+  Object.keys(nameToIdx).forEach(function(name) {
+    if (name.length >= 3 && escaped.indexOf(name) >= 0) candidates.push(name);
+  });
+  if (candidates.length === 0) return escaped;
+  candidates.sort(function(a,b) { return b.length - a.length; });
+
+  function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+  var pattern = candidates.map(function(n) {
+    return '(?<![\\w.])' + escRe(n) + '(?![\\w.?])';
+  }).join('|');
+  var re = new RegExp(pattern, 'g');
+
+  var result = '', last = 0, m;
+  while ((m = re.exec(escaped)) !== null) {
+    result += escaped.slice(last, m.index);
+    var matchedName = m[0];
+    var idx = nameToIdx[matchedName];
+    if (idx !== undefined) {
+      var ext = defIsExternal(idx);
+      var st  = defStates ? defStates[idx] : 0;
+      var hidden = ext && !showExternals;
+      var cls = hidden
+        ? 'def-link ext-hidden sx'
+        : ('def-link s' + (ext ? 'x' : st));
+      result += '<span class="' + cls + '" data-def-idx="' + idx + '">' + matchedName + '</span>';
+    } else {
+      result += matchedName;
+    }
+    last = m.index + matchedName.length;
+  }
+  result += escaped.slice(last);
+  return result;
+}
+
+// Build an anchor-id → def-idx map from the bundle for Agda-HTML hijacking
+function buildAnchorMap(bundle, modName) {
+  var map = Object.create(null);
+  if (!bundle) return map;
+  ensureNameMap();
+  Object.keys(bundle).forEach(function(key) {
+    var entry = bundle[key];
+    // anchor id appears as <a id="X"></a> in entry.source
+    var m = (entry.source || '').match(/<a id="([^"]+)"><\/a>/);
+    var anchorId = m ? m[1] : null;
+    // Try to resolve anchor to a def index
+    var fullName = entry.name || key;
+    // Try exact full name first, then module-qualified
+    var idx = nameToIdx[fullName];
+    if (idx === undefined) {
+      var qualified = modName + '.' + fullName;
+      idx = nameToIdx[qualified];
+    }
+    if (idx === undefined) idx = nameToIdx[key];
+    if (idx !== undefined) {
+      if (anchorId) map[anchorId] = idx;
+      map[key] = idx;
+      map[fullName] = idx;
+    }
+  });
+  return map;
+}
+
+// After setting Agda HTML, hijack its <a> links
+function hijackAgdaLinks(container, anchorMap) {
+  container.querySelectorAll('a[href]').forEach(function(el) {
+    var href = el.getAttribute('href') || '';
+    // href looks like "Module.html#AnchorId" or "#AnchorId"
+    var hash = href.indexOf('#') >= 0 ? href.substring(href.indexOf('#')+1) : null;
+    var idx;
+    if (hash && anchorMap[hash] !== undefined) {
+      idx = anchorMap[hash];
+    } else {
+      // Try matching last segment of href path against nameToIdx
+      var base = href.replace(/^.*\//, '').replace(/\.html.*$/, '');
+      idx = nameToIdx[base];
+    }
+    if (idx !== undefined) {
+      el.setAttribute('data-def-idx', idx);
+      el.removeAttribute('href');
+      el.style.cursor = 'pointer';
+    } else {
+      // External or unresolved link — remove href to prevent navigation
+      el.removeAttribute('href');
+    }
+  });
+  container.addEventListener('click', function(e) {
+    var a = e.target.closest('[data-def-idx]');
+    if (a) {
+      e.preventDefault();
+      navigateTo(parseInt(a.getAttribute('data-def-idx'), 10));
+    }
+  });
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────────
+function navigateTo(defIdx, push) {
+  if (defIdx < 0 || defIdx >= defNames.length) return;
+  if (push !== false) {
+    histStack = histStack.slice(0, histPos+1);
+    histStack.push(defIdx);
+    histPos = histStack.length - 1;
+  }
+  renderView();
+}
+
+async function renderView() {
+  var defIdx = histStack[histPos];
+  if (defIdx === undefined) return;
+
+  var fullName = defNames[defIdx] || '(unknown)';
+  var modIdx   = defMods ? defMods[defIdx] : -1;
+  var modName  = (modIdx >= 0 && g.modules) ? g.modules[modIdx] : '';
+  var state    = defStates ? defStates[defIdx] : 0;
+  var ext      = defIsExternal(defIdx);
+
+  // Breadcrumb
+  var bc = document.getElementById('bc-content');
+  bc.innerHTML = '';
+  var dot = document.getElementById('welcome');
+  if (dot) dot.remove();
+
+  var modSpan = document.createElement('span'); modSpan.className = 'bc-mod'; modSpan.textContent = modName;
+  // If this module has a placeholder sibling registered, let users click
+  // the breadcrumb module name to show the placeholder comment block.
+  if (modName && placeholderModules[modName]) {
+    modSpan.style.cursor = 'pointer';
+    modSpan.title = 'Show placeholder info';
+    modSpan.addEventListener('click', function() { showPlaceholderModule(modName); });
+  }
+  var sep     = document.createElement('span'); sep.className = 'bc-sep'; sep.textContent = ' › ';
+  var defSpan = document.createElement('span'); defSpan.className = 'bc-def';
+  // Show local name
+  var localName = (modName && fullName.indexOf(modName + '.') === 0)
+    ? fullName.substring(modName.length + 1) : fullName;
+  defSpan.textContent = localName;
+  var badge = document.createElement('span');
+  badge.className = 'state-badge badge-' + state;
+  badge.textContent = STATE_NAMES[state] || 'Unknown';
+  bc.appendChild(modSpan); bc.appendChild(sep); bc.appendChild(defSpan); bc.appendChild(badge);
+
+  // Nav buttons
+  document.getElementById('btn-back').disabled = histPos <= 0;
+  document.getElementById('btn-fwd').disabled  = histPos >= histStack.length - 1;
+
+  // Source
+  var srcEl = document.getElementById('src-body');
+  srcEl.classList.add('fading');
+
+  var src = await getSource(defIdx);
+
+  // Small async gap — let CSS transition start
+  await new Promise(function(r) { setTimeout(r, 80); });
+
+  srcEl.classList.remove('agda-html');
+  srcEl.innerHTML = '';
+  srcEl.classList.remove('fading');
+
+  if (src === null) {
+    // No source available
+    var ua = document.createElement('div');
+    ua.className = 'src-unavail';
+    ua.textContent = '(source unavailable)';
+    srcEl.appendChild(ua);
+  } else if (/<[a-zA-Z]/.test(src)) {
+    // Agda-generated HTML
+    srcEl.classList.add('agda-html');
+    srcEl.innerHTML = src;
+    ensureNameMap();
+    // Build anchor map from the bundle for this module
+    var bundle = snippetCache[modName] || {};
+    var anchorMap = buildAnchorMap(bundle, modName);
+    hijackAgdaLinks(srcEl, anchorMap);
+  } else {
+    // Plain text — linkify
+    srcEl.innerHTML = renderPlainWithLinks(src);
+    srcEl.querySelectorAll('.def-link[data-def-idx]').forEach(function(el) {
+      el.addEventListener('click', function() {
+        navigateTo(parseInt(el.getAttribute('data-def-idx'), 10));
+      });
+    });
+  }
+
+  renderRuler();
+  renderMinimap(defIdx);
+}
+
+// ── History ruler ──────────────────────────────────────────────────────────────
+function renderRuler() {
+  var ruler = document.getElementById('hist-ruler');
+  ruler.querySelectorAll('.hist-dot').forEach(function(el) { el.remove(); });
+  histStack.forEach(function(idx, i) {
+    var ext   = defIsExternal(idx);
+    var state = defStates ? defStates[idx] : 0;
+    var dot   = document.createElement('div');
+    dot.className = 'hist-dot' + (i === histPos ? ' current' : '');
+    dot.style.background = stateColor(state, ext);
+    var name = defNames[idx] || String(idx);
+    dot.title = name;
+    dot.addEventListener('click', (function(pos) {
+      return function() { histPos = pos; renderView(); };
+    })(i));
+    ruler.appendChild(dot);
+  });
+}
+
+// ── Minimap (pure SVG, no d3) ──────────────────────────────────────────────────
+function renderMinimap(focusIdx) {
+  var svg = document.getElementById('mm-svg');
+  var wrap = document.getElementById('mm-wrap');
+  var W = wrap.clientWidth  || 220;
+  var H = wrap.clientHeight || 300;
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.setAttribute('width',  W);
+  svg.setAttribute('height', H);
+
+  // Clear everything except <defs>
+  var children = Array.from(svg.childNodes);
+  children.forEach(function(c) { if (c.tagName !== 'defs') svg.removeChild(c); });
+
+  var outs = outNeighbors(focusIdx);
+  var ins  = inNeighbors(focusIdx);
+
+  var cx = W/2, cy = H/2;
+  var rArc = Math.min(W, H) * 0.34;
+
+  var positions = {};
+  positions[focusIdx] = {x: cx, y: cy};
+
+  var uniqueOuts = outs.filter(function(id) { return id !== focusIdx; });
+  var uniqueIns  = ins.filter(function(id)  { return id !== focusIdx && uniqueOuts.indexOf(id) < 0; });
+  var both = ins.filter(function(id) { return uniqueOuts.indexOf(id) >= 0; });
+
+  function placeArc(ids, baseAngle, span) {
+    if (!ids.length) return;
+    var step = span / ids.length;
+    ids.forEach(function(id, i) {
+      var angle = baseAngle - span/2 + step * i + step/2;
+      positions[id] = {
+        x: cx + rArc * Math.cos(angle),
+        y: cy + rArc * Math.sin(angle)
+      };
+    });
+  }
+  placeArc(uniqueOuts, 0,           Math.PI * 0.85);
+  placeArc(uniqueIns,  Math.PI,     Math.PI * 0.85);
+  placeArc(both,       -Math.PI/2,  Math.PI * 0.4);
+
+  function makeSvgEl(tag, attrs) {
+    var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    Object.keys(attrs).forEach(function(k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+
+  function drawEdge(srcIdx, tgtIdx, cls) {
+    var s = positions[srcIdx], t = positions[tgtIdx];
+    if (!s || !t) return;
+    var dx = t.x - s.x, dy = t.y - s.y;
+    var mx = (s.x + t.x)/2 - dy * 0.2;
+    var my = (s.y + t.y)/2 + dx * 0.2;
+    var path = makeSvgEl('path', {
+      class: 'mm-edge ' + cls,
+      d: 'M'+s.x+','+s.y+' Q'+mx+','+my+' '+t.x+','+t.y,
+      'marker-end': 'url(#arr-' + (cls==='in' ? 'in' : 'out') + ')'
+    });
+    svg.appendChild(path);
+  }
+
+  outs.forEach(function(id) { drawEdge(focusIdx, id, 'out'); });
+  ins.forEach( function(id) { drawEdge(id, focusIdx, 'in'); });
+
+  var allIds = [focusIdx].concat(uniqueOuts).concat(uniqueIns).concat(both);
+  allIds.forEach(function(idx) {
+    var pos = positions[idx];
+    if (!pos) return;
+    var isFocus = idx === focusIdx;
+    var ext   = defIsExternal(idx);
+    var state = defStates ? defStates[idx] : 0;
+    var color = stateColor(state, ext);
+    var r = isFocus ? 11 : 6;
+    var name = defNames[idx] || String(idx);
+    var local = (function() {
+      var dot = name.lastIndexOf('.');
+      return dot >= 0 ? name.substring(dot+1) : name;
+    })();
+
+    var grp = makeSvgEl('g', { class: 'mm-node', transform: 'translate('+pos.x+','+pos.y+')' });
+    var circ = makeSvgEl('circle', {
+      r: r, fill: color,
+      'fill-opacity': isFocus ? 1 : 0.7,
+      stroke: isFocus ? '#fff' : 'none',
+      'stroke-width': isFocus ? 2 : 0
+    });
+    grp.appendChild(circ);
+
+    var label = makeSvgEl('text', {
+      y: r + (isFocus ? 13 : 11),
+      'text-anchor': 'middle',
+      'font-size': isFocus ? '11' : '9',
+      fill: ext ? '#666' : (isFocus ? '#cdd6f4' : '#9999bb'),
+      'font-family': 'system-ui, sans-serif',
+      'pointer-events': 'none',
+      'user-select': 'none'
+    });
+    label.textContent = local;
+    grp.appendChild(label);
+
+    grp.addEventListener('click', (function(i) {
+      return function() { navigateTo(i); };
+    })(idx));
+    svg.appendChild(grp);
+  });
+}
+
+// ── Search ─────────────────────────────────────────────────────────────────────
+var searchIndex = null;
+function buildSearch() {
+  // Use g.searchIndex if available, else fall back to defNames
+  if (g.searchIndex && g.searchIndex.names) {
+    searchIndex = g.searchIndex;
+  }
+}
+
+var searchInput = document.getElementById('search-input');
+var searchDd    = document.getElementById('search-dd');
+
+searchInput.addEventListener('input', function() {
+  var q = searchInput.value.toLowerCase().trim();
+  searchDd.innerHTML = '';
+  if (!q) { searchDd.style.display = 'none'; return; }
+
+  var matches = [];
+  defNames.forEach(function(name, idx) {
+    if (name.toLowerCase().indexOf(q) >= 0) matches.push(idx);
+  });
+  matches = matches.slice(0, 20);
+
+  if (!matches.length) { searchDd.style.display = 'none'; return; }
+  matches.forEach(function(idx) {
+    var name  = defNames[idx];
+    var state = defStates ? defStates[idx] : 0;
+    var ext   = defIsExternal(idx);
+    var modIdx = defMods ? defMods[idx] : -1;
+    var modName = (modIdx >= 0 && g.modules) ? g.modules[modIdx] : '';
+    var dot = name.lastIndexOf('.');
+    var local = dot >= 0 ? name.substring(dot+1) : name;
+
+    var item = document.createElement('div'); item.className = 'sd-item';
+    var dotEl = document.createElement('div');
+    dotEl.className = 'sd-dot'; dotEl.style.background = stateColor(state, ext);
+    var nameEl = document.createElement('span');
+    nameEl.textContent = local; nameEl.style.fontWeight = '600';
+    var modEl = document.createElement('span'); modEl.className = 'sd-mod'; modEl.textContent = modName;
+    item.appendChild(dotEl); item.appendChild(nameEl); item.appendChild(modEl);
+    item.addEventListener('click', function() {
+      searchInput.value = ''; searchDd.style.display = 'none'; navigateTo(idx);
+    });
+    searchDd.appendChild(item);
+  });
+  searchDd.style.display = 'block';
+});
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('#search-wrap')) searchDd.style.display = 'none';
+});
+document.addEventListener('keydown', function(e) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); searchInput.focus(); searchInput.select(); }
+  if (e.key === 'Escape') searchDd.style.display = 'none';
+});
+
+// ── Welcome chips ──────────────────────────────────────────────────────────────
+function buildWelcomeChips() {
+  var wrap = document.getElementById('chips');
+  if (!wrap) return;
+  // Pick up to 6 interesting defs: entry module first, then ones with holes/postulates, then others
+  var picks = [];
+  var entryModName = g.entryModule || '';
+  var entryMi = entryModName ? (g.modules || []).indexOf(entryModName) : -1;
+  defNames.forEach(function(n, idx) {
+    if (picks.length >= 8) return;
+    var st = defStates ? defStates[idx] : 0;
+    var ext = defIsExternal(idx);
+    if (ext) return;
+    var mi = defMods ? defMods[idx] : -1;
+    if (mi === entryMi || st === 2 || st === 1) picks.push(idx);
+  });
+  if (picks.length < 4) {
+    defNames.forEach(function(n, idx) {
+      if (picks.length >= 6) return;
+      if (!defIsExternal(idx) && picks.indexOf(idx) < 0) picks.push(idx);
+    });
+  }
+  picks.slice(0, 6).forEach(function(idx) {
+    var name  = defNames[idx];
+    var state = defStates ? defStates[idx] : 0;
+    var dot = name.lastIndexOf('.');
+    var local = dot >= 0 ? name.substring(dot+1) : name;
+    var modIdx = defMods ? defMods[idx] : -1;
+    var modName = (modIdx >= 0 && g.modules) ? g.modules[modIdx] : '';
+    var chip = document.createElement('div'); chip.className = 'chip';
+    chip.innerHTML =
+      '<span style="color:' + stateColor(state, false) + ';font-weight:700">' + local + '</span>'
+      + ' <span style="color:var(--muted);font-size:11px">' + modName + '</span>';
+    chip.addEventListener('click', function() { navigateTo(idx); });
+    wrap.appendChild(chip);
+  });
+}
+
+// ── Back / Fwd ─────────────────────────────────────────────────────────────────
+document.getElementById('btn-back').addEventListener('click', function() {
+  if (histPos > 0) { histPos--; renderView(); }
+});
+document.getElementById('btn-fwd').addEventListener('click', function() {
+  if (histPos < histStack.length - 1) { histPos++; renderView(); }
+});
+
+// ── Externals toggle ───────────────────────────────────────────────────────────
+document.getElementById('show-ext').addEventListener('change', function(e) {
+  showExternals = e.target.checked;
+  // Re-render current source (may change link visibility)
+  if (histPos >= 0) renderView();
+});
+
+// ── Resize: re-render minimap ──────────────────────────────────────────────────
+var resizeTimer;
+window.addEventListener('resize', function() {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(function() {
+    if (histPos >= 0) renderMinimap(histStack[histPos]);
+  }, 120);
+});
+
+// ── Boot ───────────────────────────────────────────────────────────────────────
+init().catch(function(e) { console.error('agda-deps source-centric init error:', e); });
+</script>
+</body>
+</html>

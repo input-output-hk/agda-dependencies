@@ -1,0 +1,1437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>agda-deps — Progress KPI Dashboard</title>
+<script>window.__gzipEnabled = false;</script>
+<script>
+  if (window.__gzipEnabled && typeof DecompressionStream === 'undefined') {
+    document.write('<scr'+'ipt src="https://unpkg.com/pako@2.1.0/dist/pako_inflate.min.js"></scr'+'ipt>');
+  }
+</script>
+<style>
+  :root {
+    --c-defined:   #4caf50;
+    --c-postulate: #f44336;
+    --c-hole:      #9c27b0;
+    --c-failed:    #ff9800;
+    --c-external:  #9ca3af;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px;
+    background: #1e1e1e; color: #d4d4d4; overflow: hidden;
+  }
+
+  #banner {
+    background: #007acc; color: #fff; padding: 4px 12px; font-size: 12px; white-space: nowrap;
+    display: flex; align-items: center; gap: 8px;
+  }
+  #banner strong { font-weight: 600; }
+  #banner .sep { color: rgba(255,255,255,0.55); }
+  #banner .stamp { margin-left: auto; opacity: 0.85; }
+  #banner code { background: rgba(0,0,0,0.25); padding: 0 4px; border-radius: 2px; }
+
+  #root {
+    height: calc(100% - 28px); overflow-y: auto; padding: 16px;
+    background: linear-gradient(180deg, #1e1e1e 0%, #1a1a1a 100%);
+  }
+  #root::-webkit-scrollbar { width: 8px; }
+  #root::-webkit-scrollbar-track { background: #1a1a1a; }
+  #root::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+
+  #project-header {
+    display: flex; align-items: center; gap: 16px; margin-bottom: 16px;
+    padding: 14px 16px; background: #252526; border: 1px solid #333;
+    border-radius: 6px;
+  }
+  #project-header .title {
+    font-size: 16px; font-weight: 600; color: #d4d4d4;
+  }
+  #project-header .sub {
+    font-size: 12px; color: #888; margin-top: 2px;
+  }
+  #project-header .controls {
+    margin-left: auto; display: flex; gap: 6px;
+  }
+  .pill {
+    padding: 4px 12px; background: #3c3c3c; border: 1px solid #555;
+    border-radius: 12px; font-size: 11px; color: #d4d4d4; cursor: default;
+    user-select: none;
+  }
+  .pill.active { background: #094771; border-color: #007acc; color: #fff; }
+  .pill.disabled { opacity: 0.45; }
+
+  .grid {
+    display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr);
+    grid-auto-rows: minmax(0, auto);
+  }
+  .card {
+    background: #252526; border: 1px solid #333; border-radius: 6px;
+    padding: 14px 16px; min-width: 0;
+    display: flex; flex-direction: column;
+  }
+  .card:hover { border-color: #404040; }
+  .card-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: #888; font-weight: 600; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .card-title .info {
+    width: 14px; height: 14px; border-radius: 50%; background: #333;
+    color: #888; font-size: 10px; text-align: center; line-height: 14px;
+    cursor: help; user-select: none; flex-shrink: 0;
+  }
+  .card-title .info:hover { background: #094771; color: #fff; }
+
+  [data-tooltip] { position: relative; }
+  [data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute; left: 100%; top: 50%; transform: translate(8px, -50%);
+    background: #1e1e1e; border: 1px solid #007acc; color: #d4d4d4;
+    padding: 8px 10px; border-radius: 4px; font-size: 11.5px;
+    line-height: 1.5; font-weight: normal; letter-spacing: 0;
+    text-transform: none; white-space: normal; width: 260px; z-index: 1000;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+  }
+  [data-tooltip]:hover::before {
+    content: ''; position: absolute; left: 100%; top: 50%;
+    transform: translate(2px, -50%) rotate(45deg);
+    width: 8px; height: 8px; background: #1e1e1e; border-left: 1px solid #007acc;
+    border-bottom: 1px solid #007acc; z-index: 1001;
+  }
+
+  #headline { grid-column: span 5; }
+  #headline .big {
+    font-size: 48px; font-weight: 700; line-height: 1; color: var(--c-defined);
+    font-variant-numeric: tabular-nums;
+  }
+  #headline .big.warning { color: #ffb74d; }
+  #headline .big.danger { color: var(--c-postulate); }
+  #headline .label { font-size: 13px; color: #aaa; margin-top: 6px; }
+  #headline .delta {
+    display: inline-block; margin-left: 12px; padding: 2px 8px;
+    background: #2a2a2a; color: #aaa; border-radius: 10px;
+    font-size: 12px; font-weight: 600; vertical-align: middle;
+  }
+  #headline .progress {
+    margin-top: 14px; height: 8px; background: #333; border-radius: 4px;
+    position: relative; overflow: hidden;
+  }
+  #headline .progress-fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: linear-gradient(90deg, var(--c-defined), #66bb6a);
+    border-radius: 4px; transition: width 0.6s ease;
+  }
+  #headline .progress-segments {
+    margin-top: 8px; height: 10px; display: flex; border-radius: 3px;
+    overflow: hidden; border: 1px solid #333;
+  }
+  #headline .progress-segments .seg { height: 100%; transition: all 0.3s; }
+  #headline .progress-segments .seg:hover { filter: brightness(1.2); }
+  #headline .legend {
+    margin-top: 8px; display: flex; gap: 14px; font-size: 11px; color: #aaa;
+    flex-wrap: wrap;
+  }
+  #headline .legend .swatch {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    margin-right: 5px; vertical-align: middle;
+  }
+
+  #scoreboard { grid-column: span 7; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .kpi-mini { background: #252526; border: 1px solid #333; border-radius: 6px;
+    padding: 14px 16px; display: flex; flex-direction: column;
+  }
+  .kpi-mini .num {
+    font-size: 32px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+    color: #d4d4d4;
+  }
+  .kpi-mini .num.good { color: var(--c-defined); }
+  .kpi-mini .num.warn { color: #ffb74d; }
+  .kpi-mini .num.bad { color: var(--c-postulate); }
+  .kpi-mini .num.hole { color: var(--c-hole); }
+  .kpi-mini .num.post { color: var(--c-postulate); }
+  .kpi-mini .sub { font-size: 11px; color: #777; margin-top: 4px; }
+
+  .sparkcard { grid-column: span 4; }
+  .sparkcard .row {
+    display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px;
+  }
+  .sparkcard .row .v {
+    font-size: 24px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+  }
+  .sparkcard .row .d {
+    font-size: 11px; font-weight: 600;
+    padding: 1px 7px; border-radius: 10px;
+    background: #2a2a2a; color: #888;
+  }
+  .sparkcard.holes .v { color: var(--c-hole); }
+  .sparkcard.posts .v { color: var(--c-postulate); }
+  .sparkcard.defs  .v { color: var(--c-defined); }
+  .sparkcard svg { width: 100%; height: 50px; display: block; }
+  .sparkcard .axis {
+    display: flex; justify-content: space-between; font-size: 10px;
+    color: #555; margin-top: 4px;
+  }
+  .sparkcard .note {
+    font-size: 10px; color: #666; margin-top: 4px; font-style: italic;
+  }
+
+  #donut-card { grid-column: span 4; }
+  #donut-card .donut-wrap {
+    display: flex; align-items: center; gap: 16px; flex: 1;
+  }
+  #donut-svg { width: 130px; height: 130px; flex-shrink: 0; }
+  #donut-svg .ring { fill: none; stroke-width: 18; }
+  #donut-svg .ring:hover { stroke-width: 22; }
+  #donut-svg .center-label {
+    font-size: 16px; font-weight: 700; fill: #d4d4d4; text-anchor: middle;
+    font-variant-numeric: tabular-nums;
+  }
+  #donut-svg .center-sub {
+    font-size: 8px; fill: #888; text-anchor: middle; text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  #donut-card .donut-legend { flex: 1; min-width: 0; }
+  #donut-card .donut-legend .item {
+    display: flex; align-items: center; gap: 8px; padding: 4px 0;
+    font-size: 12px;
+  }
+  #donut-card .donut-legend .item .sw {
+    width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0;
+  }
+  #donut-card .donut-legend .item .lbl { flex: 1; color: #ccc; }
+  #donut-card .donut-legend .item .pct {
+    font-weight: 600; color: #d4d4d4; font-variant-numeric: tabular-nums;
+  }
+  #donut-card .donut-legend .item .cnt {
+    color: #777; font-size: 11px; margin-left: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tbl-card { display: flex; flex-direction: column; }
+  .tbl-card .tbl-scroll { overflow-y: auto; max-height: 280px; }
+  .tbl-card .tbl-scroll::-webkit-scrollbar { width: 6px; }
+  .tbl-card .tbl-scroll::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+  table.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.tbl th {
+    text-align: left; padding: 6px 8px; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.06em; color: #888;
+    background: #2d2d2d; position: sticky; top: 0; z-index: 1;
+    border-bottom: 1px solid #333;
+  }
+  table.tbl th.num, table.tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.tbl td {
+    padding: 6px 8px; border-bottom: 1px solid #2a2a2a; color: #ccc;
+  }
+  table.tbl tr:hover td { background: #2a2d2e; }
+  table.tbl tr:last-child td { border-bottom: none; }
+  table.tbl .mod-name {
+    font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 12px; color: #9cdcfe; word-break: break-all;
+  }
+  table.tbl .def-name {
+    font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 12px; color: var(--c-hole); word-break: break-all;
+  }
+  table.tbl .def-name.post { color: var(--c-postulate); }
+  table.tbl .def-name.fail { color: var(--c-failed); }
+  table.tbl .bar-cell { width: 100px; }
+  table.tbl .mini-bar {
+    height: 6px; background: #333; border-radius: 3px; position: relative;
+    overflow: hidden;
+  }
+  table.tbl .mini-bar .fill {
+    position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px;
+  }
+  table.tbl .mini-bar .fill.hole { background: var(--c-hole); }
+  .tag {
+    display: inline-block; font-size: 10px; padding: 1px 6px;
+    border-radius: 8px; text-transform: uppercase; letter-spacing: 0.05em;
+    font-weight: 600; vertical-align: middle; border: 1px solid;
+  }
+  .tag.hole { background: #2e1b4d; color: var(--c-hole);      border-color: var(--c-hole); }
+  .tag.post { background: #4d1b1b; color: var(--c-postulate); border-color: var(--c-postulate); }
+  .tag.fail { background: #2a2a2a; color: var(--c-failed);    border-color: var(--c-failed); }
+  .tag.def  { background: #1b4d1c; color: var(--c-defined);   border-color: var(--c-defined); }
+
+  #hot-modules    { grid-column: span 6; }
+  #blocking-defs  { grid-column: span 6; }
+
+  #heatmap-card { grid-column: span 8; }
+  #heatmap-grid {
+    display: grid; gap: 3px; padding: 4px 0;
+  }
+  #heatmap-grid .cell {
+    aspect-ratio: 1 / 1; border-radius: 2px; cursor: default;
+    transition: transform 0.1s;
+  }
+  #heatmap-grid .cell:hover { transform: scale(1.4); z-index: 5; outline: 1px solid #fff; }
+  #heatmap-card .scale {
+    display: flex; align-items: center; gap: 6px; font-size: 10px; color: #777;
+    margin-top: 10px; justify-content: flex-end;
+  }
+  #heatmap-card .scale .swatches { display: flex; gap: 2px; }
+  #heatmap-card .scale .sw { width: 14px; height: 14px; border-radius: 2px; }
+  #heatmap-detail {
+    margin-top: 8px; padding: 8px 10px; background: #1e1e1e; border: 1px solid #333;
+    border-radius: 4px; font-size: 12px; min-height: 32px;
+    font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace; color: #888;
+  }
+  #heatmap-detail .hl { color: #9cdcfe; }
+  #heatmap-detail .hl.hole { color: var(--c-hole); }
+  #heatmap-detail .hl.post { color: var(--c-postulate); }
+
+  #activity-card { grid-column: span 4; }
+  #activity-list { overflow-y: auto; max-height: 320px; }
+  .commit {
+    padding: 8px 10px; border-left: 2px solid #444; margin-bottom: 8px;
+    background: #1e1e1e; border-radius: 0 4px 4px 0;
+    font-size: 12px; position: relative;
+  }
+  .commit.info { border-left-color: #007acc; }
+  .commit .hash {
+    font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    color: #888; font-size: 11px;
+  }
+  .commit .msg { color: #ccc; margin: 4px 0; line-height: 1.4; }
+  .commit .detail { color: #888; font-size: 11px; line-height: 1.5; }
+
+  #insights-card { grid-column: span 12; }
+  .insight {
+    display: flex; gap: 12px; padding: 10px 12px;
+    background: #1e1e1e; border-radius: 4px; margin-bottom: 8px;
+    border-left: 3px solid #007acc;
+    align-items: flex-start;
+  }
+  .insight.warn { border-left-color: #ffb74d; }
+  .insight.good { border-left-color: var(--c-defined); }
+  .insight.bad  { border-left-color: var(--c-postulate); }
+  .insight .icn {
+    font-size: 18px; line-height: 1; flex-shrink: 0; width: 24px; text-align: center;
+  }
+  .insight .body { flex: 1; }
+  .insight .head {
+    font-size: 13px; font-weight: 600; color: #d4d4d4; margin-bottom: 2px;
+  }
+  .insight .det { font-size: 11.5px; color: #999; line-height: 1.5; }
+  .insight .det code {
+    font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    background: #2d2d2d; padding: 1px 5px; border-radius: 3px;
+    color: #9cdcfe; font-size: 11px;
+  }
+
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center;
+    justify-content: center; background: #1e1e1e; z-index: 100;
+    font-size: 14px; color: #888;
+  }
+  #err {
+    position: fixed; inset: 0; display: none; align-items: center;
+    justify-content: center; background: #1e1e1e; z-index: 100;
+    padding: 24px; text-align: center;
+  }
+  #err.visible { display: flex; }
+  #err pre {
+    background: #252526; border: 1px solid #333;
+    border-radius: 6px; padding: 12px; font-family: 'Fira Code', monospace;
+    font-size: 12px; color: var(--c-postulate); max-width: 600px;
+    white-space: pre-wrap; text-align: left;
+  }
+
+  @media (max-width: 1200px) {
+    #headline, #scoreboard, .sparkcard, #donut-card,
+    #hot-modules, #blocking-defs, #heatmap-card, #activity-card,
+    #insights-card { grid-column: span 12 !important; }
+    #scoreboard { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<div id="banner">
+  <strong>agda-deps — Progress KPI Dashboard</strong>
+  <span class="sep">|</span>
+  <span>Project-health overview · KPIs computed live from the dependency graph.</span>
+  <span class="stamp" id="banner-stamp"></span>
+</div>
+
+<div id="root" style="display:none">
+
+  <div id="project-header">
+    <div>
+      <div class="title" id="project-title">project</div>
+      <div class="sub" id="project-sub">loading…</div>
+    </div>
+    <div class="controls">
+      <span class="pill disabled" title="History tracking is not yet implemented">7d</span>
+      <span class="pill disabled" title="History tracking is not yet implemented">14d</span>
+      <span class="pill disabled" title="History tracking is not yet implemented">30d</span>
+      <span class="pill active">Snapshot</span>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <div class="card" id="headline">
+      <div class="card-title">
+        Project completeness
+        <span class="info" data-tooltip="Share of definitions in the 'Defined' state — i.e. they have a real body, no axiom, no open meta. The single most honest answer to 'are we done?'.">i</span>
+      </div>
+      <div>
+        <span class="big" id="headline-pct">—</span>
+        <span class="delta" id="headline-delta">snapshot</span>
+      </div>
+      <div class="label" id="headline-label">…</div>
+      <div class="progress"><div class="progress-fill" id="headline-progress-fill" style="width: 0%"></div></div>
+      <div class="progress-segments" id="segments"></div>
+      <div class="legend" id="headline-legend"></div>
+    </div>
+
+    <div id="scoreboard">
+      <div class="kpi-mini">
+        <div class="card-title">
+          Theorems with ≥1 hole upstream
+          <span class="info" data-tooltip="Definitions whose transitive dependency closure still contains at least one Hole or Failed node. Until this reaches zero, downstream proofs can't be trusted.">i</span>
+        </div>
+        <div><span class="num warn" id="kpi-blocked">—</span></div>
+        <div class="sub" id="kpi-blocked-sub">computing…</div>
+      </div>
+      <div class="kpi-mini">
+        <div class="card-title">
+          Avg depth of unproven leaf
+          <span class="info" data-tooltip="Average shortest-path distance from any Hole/Postulate back to a top-level theorem (root with no incoming deps). Low = surface-level; high = buried deep in utility lemmas.">i</span>
+        </div>
+        <div><span class="num" id="kpi-depth">—</span></div>
+        <div class="sub" id="kpi-depth-sub">computing…</div>
+      </div>
+      <div class="kpi-mini">
+        <div class="card-title">
+          Postulate debt ratio
+          <span class="info" data-tooltip="Postulates per non-failed definition (P / (D + P + H)). Postulates are unproven assumptions baked into the kernel — every one is technical debt. Track this trending downward.">i</span>
+        </div>
+        <div><span class="num post" id="kpi-debt">—</span></div>
+        <div class="sub" id="kpi-debt-sub">computing…</div>
+      </div>
+    </div>
+
+    <div class="card sparkcard holes">
+      <div class="card-title">
+        Holes remaining
+        <span class="info" data-tooltip="Open `?` placeholders + synthetic `unsolved#meta.N` postulates produced under --allow-unsolved-metas. agda-deps doesn't track history yet; this card shows a flat line at the current value.">i</span>
+      </div>
+      <div class="row">
+        <span class="v" id="spark-holes-v">—</span>
+        <span class="d">snapshot</span>
+      </div>
+      <svg viewBox="0 0 300 50" preserveAspectRatio="none" id="spark-holes"></svg>
+      <div class="axis"><span>—</span><span>—</span><span>now</span></div>
+      <div class="note">single snapshot · history not tracked</div>
+    </div>
+
+    <div class="card sparkcard posts">
+      <div class="card-title">
+        Postulates
+        <span class="info" data-tooltip="Total axioms in the project (user `postulate` + Agda primitives). agda-deps doesn't track history yet; this card shows a flat line at the current value.">i</span>
+      </div>
+      <div class="row">
+        <span class="v" id="spark-posts-v">—</span>
+        <span class="d">snapshot</span>
+      </div>
+      <svg viewBox="0 0 300 50" preserveAspectRatio="none" id="spark-posts"></svg>
+      <div class="axis"><span>—</span><span>—</span><span>now</span></div>
+      <div class="note">single snapshot · history not tracked</div>
+    </div>
+
+    <div class="card sparkcard defs">
+      <div class="card-title">
+        Definitions
+        <span class="info" data-tooltip="Total compiled definitions across the project — every `Function`, `Datatype`, `Record`, `Constructor`. agda-deps doesn't track history yet; flat line.">i</span>
+      </div>
+      <div class="row">
+        <span class="v" id="spark-defs-v">—</span>
+        <span class="d">snapshot</span>
+      </div>
+      <svg viewBox="0 0 300 50" preserveAspectRatio="none" id="spark-defs"></svg>
+      <div class="axis"><span>—</span><span>—</span><span>now</span></div>
+      <div class="note">single snapshot · history not tracked</div>
+    </div>
+
+    <div class="card" id="donut-card">
+      <div class="card-title">
+        State distribution
+        <span class="info" data-tooltip="The D/P/H/F mix across every classified definition. D=Defined, P=Postulate (axiom), H=Hole (open meta), F=Failed (module-level marker from --keep-going).">i</span>
+      </div>
+      <div class="donut-wrap">
+        <svg id="donut-svg" viewBox="0 0 130 130">
+          <circle class="ring" cx="65" cy="65" r="50" stroke="#2a2a2a" stroke-width="18"/>
+          <g id="donut-arcs"></g>
+          <text class="center-label" x="65" y="63" id="donut-center-label">0</text>
+          <text class="center-sub" x="65" y="78">definitions</text>
+        </svg>
+        <div class="donut-legend" id="donut-legend"></div>
+      </div>
+    </div>
+
+    <div class="card tbl-card" id="hot-modules">
+      <div class="card-title">
+        Hot modules — most holes
+        <span class="info" data-tooltip="Modules ranked by absolute hole count, then by density (holes / total defs). The top of this list is where a focused proof sprint will move the headline number the most.">i</span>
+      </div>
+      <div class="tbl-scroll">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Module</th>
+              <th class="num">Holes</th>
+              <th class="num">Defs</th>
+              <th>Density</th>
+              <th class="num">P</th>
+            </tr>
+          </thead>
+          <tbody id="hot-modules-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card tbl-card" id="blocking-defs">
+      <div class="card-title">
+        <span id="blocking-defs-title">Most-blocking definitions</span>
+        <span class="info" data-tooltip="Holes / postulates / failed defs ranked by transitive forward-reach size (how many other definitions sit downstream of them in the dependency DAG). Closing the top of this list unblocks the most consumers per hour.">i</span>
+      </div>
+      <div class="tbl-scroll">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Definition</th>
+              <th>State</th>
+              <th class="num">↓ reach</th>
+              <th>Module</th>
+            </tr>
+          </thead>
+          <tbody id="blocking-defs-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" id="heatmap-card">
+      <div class="card-title">
+        Module heatmap — hole density
+        <span class="info" data-tooltip="One cell per module. Cell hue maps to the fraction of definitions in Hole or Failed state. Hover for module name + counts. Dark green = clean; bright magenta = work to do. If the project has fewer than 1247 modules, the grid is sized to fit.">i</span>
+      </div>
+      <div id="heatmap-grid"></div>
+      <div class="scale">
+        <span>0%</span>
+        <span class="swatches">
+          <span class="sw" style="background:#1b4d1c"></span>
+          <span class="sw" style="background:#2e3d2f"></span>
+          <span class="sw" style="background:#3d3a4c"></span>
+          <span class="sw" style="background:#5d2b6a"></span>
+          <span class="sw" style="background:#7b1fa2"></span>
+          <span class="sw" style="background:#ce93d8"></span>
+        </span>
+        <span>≥40% holes/failed</span>
+      </div>
+      <div id="heatmap-detail">Hover a cell for module details…</div>
+    </div>
+
+    <div class="card" id="activity-card">
+      <div class="card-title">
+        Recent activity
+        <span class="info" data-tooltip="Per-commit deltas would land here once agda-deps records JSON snapshots across history. Today the dashboard is a single-snapshot view.">i</span>
+      </div>
+      <div id="activity-list">
+        <div class="commit info">
+          <span class="hash">snapshot</span>
+          <div class="msg">History data not available</div>
+          <div class="detail">
+            agda-deps doesn't yet record JSON snapshots over time, so per-commit deltas
+            (holes closed, postulates added, defs landed) can't be drawn. Wiring this up
+            would mean a small companion tool that walks <code>git log</code>, re-runs
+            <code>agda-deps --format=json</code> against each commit, and stores the
+            results in a sidecar directory the dashboard could fetch.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="insights-card">
+      <div class="card-title">
+        Insights
+        <span class="info" data-tooltip="Heuristic alerts derived from the live metrics above. Green = good. Amber/red = something worth a look.">i</span>
+      </div>
+      <div id="insights-body"></div>
+    </div>
+
+  </div>
+</div>
+
+<div id="loading">Loading graph data…</div>
+<div id="err"><div><h2 style="margin-bottom:12px;color:var(--c-postulate)">Error</h2><pre id="err-body"></pre></div></div>
+
+<script>
+var LAZY = false;
+var WITH_SOURCE = true;
+var GZIP_ENABLED = false;
+var AGDA_HTML_BASE = null;
+var GRAPH = {"v":2,"modules":["Agda.Builtin.Nat","Agda.Primitive","Agda.Primitive.Cubical","Bool","Bool.Bool","Coinductive","Coinductive.Stream","DeadPrivate","GoalsTest","Holes","List","List.List","Nat","Nat.Nat","Records","Records.Box","Records.Point","Test","Test.Exp","Where","Where._"],"files":["/home/mceresa/Repositories/Projects/AgdaDependencies/test/Bool.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Coinductive.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/DeadPrivate.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/GoalsTest.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Holes.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/List.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Nat.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Records.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Test.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Where.agda"],"moduleToFile":"////////////////AAAAAAAAAAABAAAAAQAAAP//////////BAAAAAUAAAAFAAAABgAAAAYAAAAHAAAABwAAAAcAAAAIAAAACAAAAAkAAAAJAAAA","fileToModules":[[3,4],[5,6],[],[],[9],[10,11],[12,13],[14,15,16],[17,18],[19,20]],"defs":{"names":["Records.Box.constructor","Bool.Bool","Test._++_","Holes.useMagic","Test.Exp.Plus","List.List.[]","Where._.sq","Test.Exp.Var","Test.eval\u0027","Test.Var-0","Nat.Nat.suc","List.List","Coinductive.Stream.tail","Nat._\u003c_","Where._.go","Test.eval","Records.double","Nat._-_","Where._.bump","Coinductive.Stream.head","Nat.Nat.zero","Holes.magic","Nat.suc-0","Records.Point.y","Records.Box.contents","Records.origin","Test.sum","List._∷_-1","Test.Int-0","Nat._*_","Nat.Nat","Nat._+_","Where.sumSquares","Records.Box","Records.mkPoint","Records.Box.count","Test.Exp.Int","Records.Point.constructor","Coinductive.zeros","Records.Point","Nat._==_","Records.Point.x","Test.Plus-1","Coinductive.Stream.constructor","Test.Exp","Where.weirdSum","Holes.unsolved#meta.3","Holes.incomplete","Test.Plus-0","Bool.Bool.true","List._∷_-0","Bool.Bool.false","Coinductive.mapSuc","Test.map","List.List._∷_","Records.sumCoords","Coinductive.Stream"],"modules":"DwAAAAMAAAARAAAACQAAABIAAAALAAAAFAAAABIAAAARAAAAEQAAAA0AAAAKAAAABgAAAAwAAAAUAAAAEQAAAA4AAAAMAAAAFAAAAAYAAAANAAAACQAAAAwAAAAQAAAADwAAAA4AAAARAAAACgAAABEAAAAMAAAADAAAAAwAAAATAAAADgAAAA4AAAAPAAAAEgAAABAAAAAFAAAADgAAAAwAAAAQAAAAEQAAAAYAAAARAAAAEwAAAAkAAAAJAAAAEQAAAAQAAAAKAAAABAAAAAUAAAARAAAACwAAAA4AAAAFAAAA","states":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAAAAAAAAAAAA","x":"7ny/P3S1DUB8m84+iGPdPwRWRkDVWys/TKaaP/32PUAFowpAz2ZZQBdIAECh80I/AU0YQBrAA0D3dZA/0gAaQL3jvD9pb/g/aW/QP40oDUCdEd0/HHzRP9xGE0BpAK8/bVbFP0p7uz9JLo8/zczMPGRdMEAwTM4/ih/TP1io1T8nMYg/QBOxP9nOrz/8GKs/ejYXQEvIlz+1pgFAqoKhP+Xy/z/4wqQ/mghjQCBjHkDAWyxAokXmP0Ot4T+Ybuo/wFtkQAu1BkAdWuQ9/BgTQNiBB0BxPbo+36YHP166sT+fzRJA","y":"ONucPimuCj4w9RM/BOecPw+cSz+Xizg/X5gcP6s+Dz8F3UY/nim0PtnOXz8EHCo/F7fRP+uQ+z7eAkE/F5pDP2tI7D7QD3M/n82SP0vI3z9hVFI/mbuuP3h6pT+J0pY/k29WPuM2ij98RFQ/n7BcP7hYcT4wEio/UMJMP3+8Zz/b3Bg/6Q6SPpjdoz8J/sc+uw8QP4/kij/IB60/zcyUP8Fu6D65jYY//fZtPynL+D8yrDI/RraLP+QUjT49Csc+FhM7Pwx5xD09LIw/0zBcPuoErD8F3TY/LJpWP1XZdz/c19k/"},"edges":{"outOffsets":"AAAAAAMAAAAFAAAACQAAAAwAAAAQAAAAEgAAABUAAAAYAAAAGwAAABsAAAAeAAAAIAAAACIAAAApAAAAMQAAADgAAAA8AAAAQAAAAEIAAABEAAAARgAAAEcAAABHAAAASgAAAE0AAABTAAAAWgAAAFoAAABaAAAAXwAAAGEAAABlAAAAaAAAAGwAAABxAAAAdAAAAHgAAAB7AAAAgQAAAIYAAACNAAAAkAAAAJAAAACSAAAAlQAAAJgAAACZAAAAmwAAAJsAAACdAAAAnQAAAJ8AAACmAAAAqgAAAK4AAAC0AAAAuQAAAA==","outTargets":"AAAAAB4AAAAhAAAAMQAAADMAAAACAAAABQAAAAsAAAA2AAAAFQAAAB4AAAAfAAAABAAAACoAAAAsAAAAMAAAAAUAAAALAAAACwAAAB0AAAAeAAAABwAAAAkAAAAsAAAAFAAAAB4AAAAsAAAACgAAABYAAAAeAAAABQAAADYAAAArAAAAOAAAAAEAAAAKAAAADQAAABQAAAAeAAAAMQAAADMAAAAFAAAABgAAAAsAAAAOAAAAFAAAAB4AAAAfAAAANgAAAAQAAAAHAAAADwAAAB4AAAAfAAAAJAAAACwAAAAdAAAAHgAAACEAAAAjAAAACgAAABEAAAAUAAAAHgAAAB4AAAAfAAAAKwAAADgAAAAUAAAAHgAAAB4AAAAeAAAAJQAAACcAAAAAAAAAHgAAACEAAAAUAAAAFwAAABkAAAAeAAAAJwAAACkAAAAFAAAACwAAABQAAAAaAAAAHgAAAB8AAAA2AAAACgAAABQAAAAdAAAAHgAAAB8AAAAKAAAAFAAAAAoAAAAUAAAAHgAAAB8AAAALAAAADgAAAB4AAAAAAAAAGAAAAB4AAAAjAAAAFwAAABkAAAAeAAAAJwAAACkAAAAAAAAAHgAAACEAAAAcAAAAHgAAACQAAAAsAAAAHgAAACUAAAAnAAAADAAAABMAAAAUAAAAHgAAACYAAAA4AAAAFwAAABkAAAAeAAAAJQAAACkAAAABAAAACgAAABQAAAAeAAAAKAAAADEAAAAzAAAAHgAAACUAAAAnAAAAKwAAADgAAAAEAAAABwAAACQAAAASAAAAHgAAAB8AAAAeAAAAHgAAAC4AAAABAAAAMQAAAAEAAAAzAAAACgAAAAwAAAATAAAAHgAAACYAAAA0AAAAOAAAAAUAAAALAAAANQAAADYAAAALAAAAGwAAADIAAAA2AAAAFwAAABkAAAAeAAAAHwAAACcAAAApAAAADAAAABMAAAAmAAAAKwAAADgAAAA=","inOffsets":"AAAAAAQAAAAIAAAACQAAAAkAAAAMAAAAEgAAABMAAAAWAAAAFgAAABcAAAAfAAAAJwAAACoAAAArAAAALQAAAC4AAAAuAAAALwAAADAAAAAzAAAAPwAAAEAAAABBAAAARQAAAEYAAABKAAAASwAAAEwAAABNAAAAUAAAAHIAAAB7AAAAewAAAH8AAAB/AAAAgQAAAIQAAACIAAAAiwAAAJEAAACSAAAAlgAAAJcAAACbAAAAoAAAAKAAAAChAAAAoQAAAKIAAACmAAAApwAAAKsAAACsAAAArQAAALMAAACzAAAAuQAAAA==","inTargets":"AAAAABgAAAAhAAAAIwAAAA0AAAAoAAAAMQAAADMAAAACAAAABAAAAA8AAAAsAAAAAgAAAAUAAAALAAAADgAAABoAAAA1AAAADgAAAAcAAAAPAAAALAAAAAcAAAAKAAAADQAAABEAAAAdAAAAHgAAAB8AAAAoAAAANAAAAAIAAAAFAAAABgAAAA4AAAAaAAAAIAAAADUAAAA2AAAAJgAAADQAAAA4AAAADQAAAA4AAAAgAAAADwAAABEAAAAtAAAAJgAAADQAAAA4AAAACAAAAA0AAAAOAAAAEQAAABQAAAAZAAAAGgAAAB0AAAAeAAAAHwAAACYAAAAoAAAAAwAAAAoAAAAZAAAAIgAAACcAAAA3AAAAIQAAABkAAAAiAAAAJwAAADcAAAAaAAAANgAAACQAAAAGAAAAEAAAAB0AAAAAAAAAAwAAAAYAAAAIAAAACgAAAA0AAAAOAAAADwAAABAAAAARAAAAEgAAABQAAAAVAAAAFwAAABgAAAAZAAAAGgAAAB0AAAAfAAAAIAAAACEAAAAiAAAAIwAAACQAAAAlAAAAJgAAACcAAAAoAAAAKQAAAC0AAAAuAAAALwAAADQAAAA3AAAAAwAAAA4AAAAPAAAAEgAAABoAAAAdAAAAHwAAAC0AAAA3AAAAAAAAABAAAAAYAAAAIwAAABAAAAAhAAAADwAAACQAAAAsAAAAFwAAACUAAAAnAAAAKQAAACYAAAA0AAAAOAAAABcAAAAZAAAAIgAAACUAAAApAAAANwAAACgAAAAZAAAAIgAAACcAAAA3AAAABAAAAAwAAAATAAAAKwAAADgAAAAEAAAABwAAAAgAAAAPAAAAJAAAAC8AAAAEAAAAAQAAAA0AAAAoAAAAMQAAADYAAAABAAAADQAAACgAAAAzAAAANAAAADUAAAACAAAACwAAAA4AAAAaAAAANQAAADYAAAAMAAAAEwAAACYAAAArAAAANAAAADgAAAA="},"definitionEdgesProvenance":"AQAAAQEBAQABAQABAQEAAQEAAAEAAQEAAQAAAQEAAQEBAAABAQEAAQEBAgACAQABAQEBAQABAQABAAABAQEBAAABAQABAAAAAQABAQABAQQBAAEBAAEBAAEBAQEBAAEBAQEBAAEAAgABAQEBAQQAAAEBAAABAAEAAAEAAQEBAAEAAQQBAQEAAQEAAQEBAAEAAQABAQECAAEAAAEAAQABAQEBAAQBAAEAAQEAAQEBAQQAAQABAQEEAQE=","transitiveEdges":"sAwAAIsMAACEDAAAowwAAJ4MAABzBAAAZgQAAOQCAADXAgAAywkAAL4JAACUCAAAiggAAK4IAACJCAAAgggAAJwIAACyCwAAzAsAAJ4LAACnCwAAoAsAALoLAADQCQAA8AkAANMJAAAQAQAA6AAAABQBAAAOAQAAIggAADAIAAAoCAAAIAgAALsBAACWAQAAmAEAAHUDAACDAwAAdgMAAFsDAAB7AwAAXgMAAOYBAADcAQAA6AUAAN4FAADVBQAA6QUAAM8FAAAABgAAfQAAAHcAAACoAAAA2AsAANILAAADDAAAzQgAANgIAADGCAAA1AgAAMgIAABICQAAPwkAAEYJAABGBQAAPQUAAEQFAABkCAAAWwgAAGIIAAC5BwAAsAcAALsHAACpBwAAqwcAAGYMAABdDAAAaAwAAFYMAABYDAAAuAUAAK8FAAClBQAAugUAAKgFAACqBQAAdwcAAHEHAAB8BwAAWQcAAHYFAAB5BQAAWAUAAOkHAADsBwAAywcAAB4AAAAhAAAAAAAAAK4DAACxAwAAswMAAJUKAADJAAAAbAAAAGoAAABcCwAAjgsAAOoKAAAaCwAAeAIAAKkCAAAoAQAAIgEAABEMAAA8DAAAOAwAACEMAADCBgAAuAYAAJIEAACIBAAAWAIAAEQCAABQAgAABQcAAPsGAADxBgAA5wMAAN0DAADTAwAAkwYAAIkGAAB/BgAAlAYAAOkIAAAGCQAAGwkAAPwIAAAZCQAA8ggAAOYCAAADAwAAGAMAAPkCAAAWAwAA7wIAAD4HAAArBwAAdAEAADwDAAAyAwAAKQMAAD0DAAAkAwAAIwMAAFQDAAAjCgAAJAoAACAEAAA=","moduleEdges":[[2,1],[3,1],[3,4],[4,3],[5,1],[5,6],[5,12],[5,13],[6,5],[7,0],[8,10],[8,12],[9,1],[9,12],[10,1],[10,11],[11,10],[12,1],[12,3],[12,4],[12,13],[13,12],[14,1],[14,12],[14,13],[14,15],[14,16],[15,12],[15,14],[16,12],[16,14],[17,1],[17,5],[17,9],[17,10],[17,11],[17,12],[17,13],[17,14],[17,18],[17,19],[18,12],[18,17],[19,1],[19,10],[19,12],[19,20],[20,10],[20,11],[20,12],[20,13]],"transitiveModuleEdges":[[3,1],[5,1],[5,12],[5,13],[9,1],[10,1],[12,1],[12,3],[12,4],[14,1],[14,12],[14,13],[14,15],[14,16],[15,12],[16,12],[17,1],[17,5],[17,9],[17,10],[17,11],[17,12],[17,13],[17,14],[17,19],[18,12],[19,1],[19,10],[19,12],[20,10],[20,11],[20,12],[20,13]],"moduleStates":"AAAAAAAAAAAAAAAAAAAAAAAAAAAA","moduleStateCounts":[[0,0,0,0],[0,0,0,0],[0,0,0,0],[1,0,0,0],[2,0,0,0],[3,0,0,0],[3,0,0,0],[0,0,0,0],[0,0,0,0],[1,1,2,0],[3,0,0,0],[2,0,0,0],[7,0,0,0],[2,0,0,0],[6,0,0,0],[3,0,0,0],[3,0,0,0],[10,0,0,0],[3,0,0,0],[2,0,0,0],[3,0,0,0]],"moduleDepth":"/////wEAAAD/////AgAAAAIAAAABAAAAAgAAAP//////////AQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAgAAAAIAAAAAAAAAAQAAAAEAAAACAAAA","modulePodLayout":"AIDewwAABEMAAEhDAABQQgAAV8MAAARDAABIQwAAUEIAgPLEAAAAAAAASEMAAFBCAMDVxAAAAAAAAEhDAABQQgAAucQAAAAAAABIQwAAUEIAQJzEAAAAAAAASEMAAFBCAAB/xAAAAAAAAEhDAABQQgCARcQAAAAAAABIQwAAUEIAAAzEAAAAAAAASEMAAFBCAAClwwAAAAAAAEhDAABQQgAAcEEAAARDAABIQwAAUEIAAMjCAAAAAAAASEMAAFBCAAB1QwAABEMAAEhDAABQQgAAAkMAAAAAAABIQwAAUEIAALRDAAAAAAAASEMAAFBCAIATRAAAAAAAAEhDAABQQgAATUQAAAAAAABIQwAAUEIAQINEAAAAAAAASEMAAFBCAACgRAAAAAAAAEhDAABQQgDAvEQAAAAAAABIQwAAUEIAgNlEAAAAAAAASEMAAFBC","fileTree":[{"name":"home","parent":-1,"fileIndex":null},{"name":"mceresa","parent":0,"fileIndex":null},{"name":"Repositories","parent":1,"fileIndex":null},{"name":"Projects","parent":2,"fileIndex":null},{"name":"AgdaDependencies","parent":3,"fileIndex":null},{"name":"test","parent":4,"fileIndex":null},{"name":"Bool.agda","parent":5,"fileIndex":0},{"name":"Coinductive.agda","parent":5,"fileIndex":1},{"name":"DeadPrivate.agda","parent":5,"fileIndex":2},{"name":"GoalsTest.agda","parent":5,"fileIndex":3},{"name":"Holes.agda","parent":5,"fileIndex":4},{"name":"List.agda","parent":5,"fileIndex":5},{"name":"Nat.agda","parent":5,"fileIndex":6},{"name":"Records.agda","parent":5,"fileIndex":7},{"name":"Test.agda","parent":5,"fileIndex":8},{"name":"Where.agda","parent":5,"fileIndex":9}],"moduleTree":[{"name":"Agda","parent":-1,"moduleIndex":null},{"name":"Builtin","parent":0,"moduleIndex":null},{"name":"Nat","parent":1,"moduleIndex":0},{"name":"Primitive","parent":0,"moduleIndex":1},{"name":"Cubical","parent":3,"moduleIndex":2},{"name":"Bool","parent":-1,"moduleIndex":3},{"name":"Bool","parent":5,"moduleIndex":4},{"name":"Coinductive","parent":-1,"moduleIndex":5},{"name":"Stream","parent":7,"moduleIndex":6},{"name":"DeadPrivate","parent":-1,"moduleIndex":7},{"name":"GoalsTest","parent":-1,"moduleIndex":8},{"name":"Holes","parent":-1,"moduleIndex":9},{"name":"List","parent":-1,"moduleIndex":10},{"name":"List","parent":12,"moduleIndex":11},{"name":"Nat","parent":-1,"moduleIndex":12},{"name":"Nat","parent":14,"moduleIndex":13},{"name":"Records","parent":-1,"moduleIndex":14},{"name":"Box","parent":16,"moduleIndex":15},{"name":"Point","parent":16,"moduleIndex":16},{"name":"Test","parent":-1,"moduleIndex":17},{"name":"Exp","parent":19,"moduleIndex":18},{"name":"Where","parent":-1,"moduleIndex":19},{"name":"_","parent":21,"moduleIndex":20}],"entryModule":"Test","externalModules":"AAAAAAEAAAACAAAA","bundleFiles":{"Bool":"snippets/Bool.json","Bool.Bool":"snippets/Bool.Bool.json","Coinductive":"snippets/Coinductive.json","Coinductive.Stream":"snippets/Coinductive.Stream.json","Holes":"snippets/Holes.json","List":"snippets/List.json","List.List":"snippets/List.List.json","Nat":"snippets/Nat.json","Nat.Nat":"snippets/Nat.Nat.json","Records":"snippets/Records.json","Records.Box":"snippets/Records.Box.json","Records.Point":"snippets/Records.Point.json","Test":"snippets/Test.json","Test.Exp":"snippets/Test.Exp.json","Where":"snippets/Where.json","Where._":"snippets/Where._.json"},"searchIndex":{"names":["agda.builtin.nat","agda.primitive","agda.primitive.cubical","bool","bool.bool","coinductive","coinductive.stream","deadprivate","goalstest","holes","list","list.list","nat","nat.nat","records","records.box","records.point","test","test.exp","where","where._","records.box.constructor","bool.bool","test._++_","holes.usemagic","test.exp.plus","list.list.[]","where._.sq","test.exp.var","test.eval\u0027","test.var-0","nat.nat.suc","list.list","coinductive.stream.tail","nat._\u003c_","where._.go","test.eval","records.double","nat._-_","where._.bump","coinductive.stream.head","nat.nat.zero","holes.magic","nat.suc-0","records.point.y","records.box.contents","records.origin","test.sum","list._∷_-1","test.int-0","nat._*_","nat.nat","nat._+_","where.sumsquares","records.box","records.mkpoint","records.box.count","test.exp.int","records.point.constructor","coinductive.zeros","records.point","nat._==_","records.point.x","test.plus-1","coinductive.stream.constructor","test.exp","where.weirdsum","holes.unsolved#meta.3","holes.incomplete","test.plus-0","bool.bool.true","list._∷_-0","bool.bool.false","coinductive.mapsuc","test.map","list.list._∷_","records.sumcoords","coinductive.stream"],"kinds":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB","bigrams":{"#m":[67],"*_":[50],"++":[23],"+_":[23,52],"-0":[30,43,49,69,71],"-1":[48,63],"-_":[38],".3":[67],".[":[26],"._":[20,23,27,34,35,38,39,48,50,52,61,71,75],".b":[0,4,15,21,22,39,45,54,56,70,72],".c":[2,21,45,56,58,64],".d":[37],".e":[18,25,28,29,36,57,65],".f":[72],".g":[35],".h":[40],".i":[49,57,68],".l":[11,26,32,75],".m":[42,55,73,74],".n":[0,13,31,41,51],".o":[46],".p":[1,2,16,25,44,58,60,62,63,69],".s":[6,27,31,33,40,43,47,53,64,76,77],".t":[33,70],".u":[24,67],".v":[28,30],".w":[66],".x":[62],".y":[44],".z":[41,59],"\u003c_":[34],"==":[61],"=_":[61],"[]":[26],"_*":[50],"_+":[23,52],"_-":[38,48,71],"_.":[27,35,39],"_\u003c":[34],"_=":[61],"_∷":[48,71,75],"a.":[0,1,2,67],"ad":[7,40],"ag":[0,1,2,24,42],"ai":[33],"al":[2,8,29,36,72],"am":[6,33,40,64,77],"ap":[73,74],"ar":[28,30,53],"at":[0,7,12,13,31,34,38,41,43,50,51,52,61],"bi":[2],"bl":[37],"bo":[3,4,15,21,22,45,54,56,70,72],"bu":[0,39],"c-":[43],"ca":[2],"co":[5,6,14,15,16,21,33,37,40,44,45,46,54,55,56,58,59,60,62,64,68,73,76,77],"ct":[5,6,21,33,40,58,59,64,73,77],"cu":[2],"d#":[67],"da":[0,1,2],"de":[7],"do":[37],"dp":[7],"ds":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,66,76],"du":[5,6,33,40,59,64,73,77],"e.":[2,6,20,27,33,35,39,40,53,59,64,66,73,77],"ea":[6,7,33,40,64,77],"ec":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,76],"ed":[67],"ei":[66],"em":[24],"en":[45],"er":[19,20,27,35,39,41,53,59,66],"es":[8,9,17,18,23,24,25,28,29,30,36,42,47,49,53,57,63,65,67,68,69,74],"et":[67,68],"ev":[29,36],"ex":[18,25,28,57,65],"fa":[72],"gd":[0,1,2],"gi":[24,42,46],"go":[8,35],"he":[19,20,27,35,39,40,53,66],"ho":[9,24,42,67,68],"ic":[2,24,42],"ig":[46],"il":[0,33],"im":[1,2],"in":[0,5,6,16,33,40,44,46,49,55,57,58,59,60,62,64,68,73,77],"ir":[66],"is":[10,11,26,32,48,71,75],"it":[1,2],"iv":[1,2,5,6,7,33,40,59,64,73,77],"kp":[55],"l\u0027":[29],"l.":[4,22,70,72],"le":[9,24,37,42,67,68],"li":[10,11,26,32,48,71,75],"ls":[8,72],"lt":[0],"lu":[25,63,69],"lv":[67],"m.":[33,40,64],"ma":[24,42,73,74],"mc":[76],"me":[67],"mi":[1,2],"mk":[55],"mp":[39,68],"ms":[53],"n.":[0],"na":[0,12,13,31,34,38,41,43,50,51,52,61],"nc":[68],"nd":[5,6,33,40,59,64,73,77],"ns":[21,58,64,67],"nt":[16,44,45,49,55,56,57,58,60,62],"oa":[8],"oi":[5,6,16,33,40,44,55,58,59,60,62,64,73,77],"ol":[3,4,9,22,24,42,67,68,70,72],"om":[68],"on":[21,45,58,64],"oo":[3,4,22,70,72,76],"or":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,64,76],"os":[59],"ou":[37,56],"ox":[15,21,45,54,56],"p.":[25,28,57],"pl":[25,63,68,69],"po":[16,44,55,58,60,62],"pr":[1,2,7],"ps":[73],"qu":[53],"r-":[30],"rd":[14,15,16,21,37,44,45,46,54,55,56,58,60,62,66,76],"re":[6,14,15,16,19,20,21,27,33,35,37,39,40,44,45,46,53,54,55,56,58,60,62,64,66,76,77],"ri":[1,2,7,46],"ro":[41,59],"ru":[21,58,64,70],"s-":[63,69],"s.":[15,16,21,24,37,42,44,45,46,54,55,56,58,60,62,67,68,76],"se":[24,72],"so":[67],"sq":[27,53],"st":[6,8,10,11,17,18,21,23,25,26,28,29,30,32,33,36,40,47,48,49,57,58,63,64,65,69,71,74,75,77],"su":[31,43,47,53,66,73,76],"t-":[49],"t.":[11,13,18,23,25,26,28,29,30,31,32,34,36,38,41,43,44,47,48,49,50,51,52,57,58,61,62,63,65,69,71,74,75],"ta":[33,67],"te":[7,8,17,18,23,25,28,29,30,36,45,47,49,57,63,65,68,69,74],"ti":[0,1,2,5,6,33,40,59,64,73,77],"to":[21,58,64],"tr":[6,21,33,40,58,64,70,77],"ts":[45],"ua":[53],"ub":[2,37],"uc":[5,6,21,31,33,40,43,58,59,64,73,77],"ue":[70],"ui":[0],"um":[39,47,53,66,76],"un":[56,67],"us":[24,25,63,69],"va":[7,28,29,30,36],"ve":[1,2,5,6,33,40,59,64,67,73,77],"we":[66],"wh":[19,20,27,35,39,53,66],"x.":[21,45,56],"xp":[18,25,28,57,65],"ze":[41,59],"∷_":[48,71,75]}}};
+var GRAPH_URL = null;
+var SNIPPETS_BASE = null;
+var MODULES_BASE = null;
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// DECODERS (v2 schema)
+// ═══════════════════════════════════════════════════════════════════
+function b64ToBytes(b64) {
+  if (!b64) return new Uint8Array(0);
+  var bin = atob(b64);
+  var out = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64ToInt32(b64) { return new Int32Array(b64ToBytes(b64).buffer); }
+function b64ToInt8 (b64) { return new Int8Array (b64ToBytes(b64).buffer); }
+
+// ═══════════════════════════════════════════════════════════════════
+// FETCH HELPERS (copied verbatim from sigma.html.tmpl)
+// ═══════════════════════════════════════════════════════════════════
+async function fetchJson(url) {
+  if (GZIP_ENABLED && window.pako) {
+    try {
+      var r = await fetch(url + '.gz');
+      if (r.ok) {
+        var ab = await r.arrayBuffer();
+        var txt = pako.inflate(new Uint8Array(ab), {to:'string'});
+        return JSON.parse(txt);
+      }
+    } catch(e) {}
+  }
+  var r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching ' + url);
+  return r.json();
+}
+
+async function loadGraph() {
+  if (LAZY) return fetchJson(GRAPH_URL);
+  return GRAPH;
+}
+
+function showErr(msg) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('err-body').textContent = msg;
+  document.getElementById('err').classList.add('visible');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ESCAPE
+// ═══════════════════════════════════════════════════════════════════
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', '\'':'&#39;' })[c];
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STATE LETTER ↔ NUMBER MAPPING
+// (matches AgdaDeps.Backend.GraphJson: 0=D, 1=P, 2=H, 3=F)
+// ═══════════════════════════════════════════════════════════════════
+var STATE_NAMES = ['Defined', 'Postulate', 'Hole', 'Failed'];
+var STATE_TAGS  = ['D', 'P', 'H', 'F'];
+
+function cssColor(varName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════
+var G = null;
+var STATE_COLORS = null;
+
+async function init() {
+  try {
+    G = await loadGraph();
+  } catch (e) {
+    showErr('Failed to load graph data: ' + e.message +
+            (LAZY ? '\n\nLazy mode uses fetch(); make sure you serve via HTTP (e.g. `python -m http.server`), not file://.' : ''));
+    return;
+  }
+
+  STATE_COLORS = {
+    D: cssColor('--c-defined'),
+    P: cssColor('--c-postulate'),
+    H: cssColor('--c-hole'),
+    F: cssColor('--c-failed'),
+  };
+
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('root').style.display = 'block';
+  document.getElementById('banner-stamp').textContent =
+    'rendered ' + new Date().toLocaleString() +
+    ' · ' + (LAZY ? 'lazy mode' : 'inline mode');
+
+  renderAll();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AGGREGATE PROJECT TOTALS FROM moduleStateCounts
+// (always present in both inline and lazy graph.json)
+// ═══════════════════════════════════════════════════════════════════
+function projectTotals() {
+  var modules = G.modules || [];
+  var counts  = G.moduleStateCounts || [];
+  var D = 0, P = 0, H = 0, F = 0;
+  for (var i = 0; i < counts.length; i++) {
+    var c = counts[i] || [0,0,0,0];
+    D += c[0]; P += c[1]; H += c[2]; F += c[3];
+  }
+  return { D: D, P: P, H: H, F: F, total: D + P + H + F, modules: modules.length };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RENDER ALL
+// ═══════════════════════════════════════════════════════════════════
+function renderAll() {
+  var t = projectTotals();
+
+  // ── Project header ──────────────────────────────────────────
+  var title = G.entryModule || (G.modules && G.modules[0]) || 'project';
+  document.getElementById('project-title').textContent = title;
+  var nEdges = (G.moduleEdges || []).length;
+  var nFailed = (G.failedModules || []).length;
+  document.getElementById('project-sub').textContent =
+    t.modules.toLocaleString() + ' modules · ' +
+    t.total.toLocaleString()   + ' definitions · ' +
+    nEdges.toLocaleString()    + ' module edges' +
+    (nFailed > 0 ? ' · ' + nFailed + ' failed module(s)' : '');
+
+  // ── Headline + segments + legend ────────────────────────────
+  renderHeadline(t);
+
+  // ── Scoreboard mini-KPIs ────────────────────────────────────
+  renderScoreboard(t);
+
+  // ── Sparklines (flat — single snapshot) ─────────────────────
+  renderFlatSpark('spark-holes', t.H, STATE_COLORS.H);
+  renderFlatSpark('spark-posts', t.P, STATE_COLORS.P);
+  renderFlatSpark('spark-defs',  t.D, STATE_COLORS.D);
+  document.getElementById('spark-holes-v').textContent = t.H.toLocaleString();
+  document.getElementById('spark-posts-v').textContent = t.P.toLocaleString();
+  document.getElementById('spark-defs-v' ).textContent = t.D.toLocaleString();
+
+  // ── Donut ───────────────────────────────────────────────────
+  renderDonut(t);
+
+  // ── Tables ──────────────────────────────────────────────────
+  renderHotModules();
+  renderBlockingDefs();
+
+  // ── Heatmap ─────────────────────────────────────────────────
+  renderHeatmap();
+
+  // ── Insights ────────────────────────────────────────────────
+  renderInsights(t);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HEADLINE
+// ═══════════════════════════════════════════════════════════════════
+function renderHeadline(t) {
+  var pctVal = t.total === 0 ? 0 : (100 * t.D / t.total);
+  var pct = pctVal.toFixed(1);
+  var big = document.getElementById('headline-pct');
+  big.innerHTML = pct + '<span style="font-size:24px;color:#888">%</span>';
+  if      (pctVal >= 80) big.className = 'big';
+  else if (pctVal >= 40) big.className = 'big warning';
+  else                   big.className = 'big danger';
+
+  document.getElementById('headline-label').textContent =
+    t.D.toLocaleString() + ' of ' + t.total.toLocaleString() + ' definitions fully elaborated';
+  document.getElementById('headline-progress-fill').style.width = pct + '%';
+
+  // segments (relative bar)
+  var segs = [
+    { label: 'Defined',   v: t.D, color: STATE_COLORS.D },
+    { label: 'Postulate', v: t.P, color: STATE_COLORS.P },
+    { label: 'Hole',      v: t.H, color: STATE_COLORS.H },
+    { label: 'Failed',    v: t.F, color: STATE_COLORS.F },
+  ];
+  var sumFlex = Math.max(1, t.total);
+  document.getElementById('segments').innerHTML = segs.map(function(s) {
+    var pp = (100 * s.v / sumFlex).toFixed(1);
+    return '<div class="seg" style="flex:' + Math.max(s.v, 0.0001) +
+           ';background:' + s.color + '" title="' + s.label + ': ' +
+           s.v + ' (' + pp + '%)"></div>';
+  }).join('');
+
+  document.getElementById('headline-legend').innerHTML = segs.map(function(s) {
+    var pp = t.total === 0 ? '0.0' : (100 * s.v / t.total).toFixed(1);
+    return '<span><span class="swatch" style="background:' + s.color + '"></span>' +
+           s.label + ' ' + pp + '%</span>';
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SCOREBOARD
+// ═══════════════════════════════════════════════════════════════════
+function renderScoreboard(t) {
+  // ─ Theorems with ≥1 hole upstream ─────────────────────────
+  // We compute "defs reachable to a hole/postulate/failed in the
+  // forward dep graph" — for the inline mode where def edges are
+  // available; for lazy mode we fall back to a module-level proxy.
+  var blocked = computeBlockedDefs();
+  var blockedCount = blocked.count;
+  var blockedTotal = blocked.total;
+  document.getElementById('kpi-blocked').textContent = blockedCount.toLocaleString();
+  var pct = blockedTotal === 0 ? '0.0' : (100 * blockedCount / blockedTotal).toFixed(1);
+  document.getElementById('kpi-blocked-sub').textContent =
+    'of ' + blockedTotal.toLocaleString() + ' ' + blocked.unit + ' · ' + pct + '% blocked';
+
+  // ─ Avg depth of unproven leaf ──────────────────────────────
+  var depth = computeAvgUnprovenDepth();
+  document.getElementById('kpi-depth').textContent =
+    depth.avg == null ? 'n/a' : depth.avg.toFixed(1);
+  document.getElementById('kpi-depth-sub').textContent =
+    depth.note;
+
+  // ─ Postulate debt ratio ────────────────────────────────────
+  var denom = t.D + t.P + t.H;
+  var ratio = denom === 0 ? 0 : (t.P / denom);
+  document.getElementById('kpi-debt').textContent = ratio.toFixed(3);
+  document.getElementById('kpi-debt-sub').textContent =
+    t.P.toLocaleString() + ' postulates : ' + t.D.toLocaleString() + ' defined';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BLOCKED DEFS — forward-reachability to any H / P / F def
+// ═══════════════════════════════════════════════════════════════════
+//
+// Inline mode (G.defs + G.edges present): compute over the def-level
+// DAG; a def is "blocked" if its forward closure touches any H/P/F.
+// We invert the CSR: who-points-to-X gives us, by transitive closure
+// from each H/P/F start, the set of defs that depend on it.
+//
+// Lazy mode: def-level data isn't in the skeleton — fall back to
+// modules with ≥1 H/F. We could fetch every module detail, but for
+// most projects this dashboard is opened in inline mode anyway.
+function computeBlockedDefs() {
+  if (G.defs && G.edges && G.defs.states && G.edges.outOffsets && G.edges.outTargets) {
+    var states  = b64ToInt8 (G.defs.states);
+    var offsets = b64ToInt32(G.edges.outOffsets);
+    var targets = b64ToInt32(G.edges.outTargets);
+    var n = states.length;
+
+    // Build inverse adjacency: for each edge u→v, record v→u in `inv`.
+    // Use a flat array of arrays to keep allocation simple (n is at
+    // most ~1M; this is O(E) build + O(E) BFS).
+    var inv = new Array(n);
+    for (var i = 0; i < n; i++) inv[i] = null;
+    for (var u = 0; u < n; u++) {
+      var s = offsets[u], e = offsets[u+1];
+      for (var k = s; k < e; k++) {
+        var v = targets[k];
+        if (inv[v] === null) inv[v] = [];
+        inv[v].push(u);
+      }
+    }
+
+    // BFS backwards from every "bad" state.
+    var visited = new Uint8Array(n);
+    var queue = [];
+    for (var i = 0; i < n; i++) {
+      if (states[i] !== 0 /* not Defined */) { visited[i] = 1; queue.push(i); }
+    }
+    var head = 0;
+    while (head < queue.length) {
+      var node = queue[head++];
+      var preds = inv[node];
+      if (!preds) continue;
+      for (var j = 0; j < preds.length; j++) {
+        if (!visited[preds[j]]) { visited[preds[j]] = 1; queue.push(preds[j]); }
+      }
+    }
+    // "blocked" = visited Defined defs (we don't count H/P/F themselves
+    // as "theorems blocked" — they are the blockers).
+    var count = 0, defined = 0;
+    for (var i = 0; i < n; i++) {
+      if (states[i] === 0) {
+        defined++;
+        if (visited[i]) count++;
+      }
+    }
+    return { count: count, total: defined, unit: 'defined' };
+  }
+
+  // Fallback: module-level proxy via transitive closure on moduleEdges.
+  var modules = G.modules || [];
+  var counts  = G.moduleStateCounts || [];
+  var n = modules.length;
+  var bad = new Uint8Array(n);
+  for (var i = 0; i < n; i++) {
+    var c = counts[i] || [0,0,0,0];
+    if (c[2] > 0 || c[3] > 0 || c[1] > 0) bad[i] = 1;   // P/H/F counts as bad upstream
+  }
+  // BFS backwards: who imports a bad module (transitively)?
+  var preds = new Array(n);
+  for (var i = 0; i < n; i++) preds[i] = null;
+  (G.moduleEdges || []).forEach(function(e) {
+    var u = e[0], v = e[1];
+    if (preds[v] === null) preds[v] = [];
+    preds[v].push(u);
+  });
+  var visited = new Uint8Array(n);
+  var queue = [];
+  for (var i = 0; i < n; i++) if (bad[i]) { visited[i] = 1; queue.push(i); }
+  var head = 0;
+  while (head < queue.length) {
+    var node = queue[head++];
+    var p = preds[node];
+    if (!p) continue;
+    for (var j = 0; j < p.length; j++) {
+      if (!visited[p[j]]) { visited[p[j]] = 1; queue.push(p[j]); }
+    }
+  }
+  var totalNonExt = 0, blocked = 0;
+  var extSet = new Set();
+  if (G.externalModules) {
+    var ext = b64ToInt32(G.externalModules);
+    for (var i = 0; i < ext.length; i++) extSet.add(ext[i]);
+  }
+  for (var i = 0; i < n; i++) {
+    if (extSet.has(i)) continue;
+    totalNonExt++;
+    if (visited[i]) blocked++;
+  }
+  return { count: blocked, total: totalNonExt, unit: 'modules (lazy-mode proxy)' };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AVG DEPTH OF UNPROVEN LEAF
+// For each H/P/F def, take its shortest-path distance from the nearest
+// "root" (a def with no incoming dep edges = a top-level theorem).
+// In lazy mode we fall back to module depth from the entry module.
+// ═══════════════════════════════════════════════════════════════════
+function computeAvgUnprovenDepth() {
+  if (G.defs && G.edges && G.defs.states && G.edges.outOffsets && G.edges.outTargets) {
+    var states  = b64ToInt8 (G.defs.states);
+    var offsets = b64ToInt32(G.edges.outOffsets);
+    var targets = b64ToInt32(G.edges.outTargets);
+    var n = states.length;
+
+    // Identify roots (no incoming = nothing depends on them).
+    var indeg = new Int32Array(n);
+    for (var u = 0; u < n; u++) {
+      var s = offsets[u], e = offsets[u+1];
+      for (var k = s; k < e; k++) indeg[targets[k]]++;
+    }
+    var roots = [];
+    for (var i = 0; i < n; i++) if (indeg[i] === 0) roots.push(i);
+    if (roots.length === 0) return { avg: null, note: 'no roots found' };
+
+    // BFS from every root simultaneously over the forward edges
+    // (root → dep). Record the depth at which each node is first
+    // reached. This is "depth in the dependency DAG from any top-level
+    // theorem" — the answer to "how deep does the user have to drill
+    // to find this lemma?".
+    var depth = new Int32Array(n);
+    for (var i = 0; i < n; i++) depth[i] = -1;
+    var queue = [];
+    for (var i = 0; i < roots.length; i++) { depth[roots[i]] = 0; queue.push(roots[i]); }
+    var head = 0;
+    while (head < queue.length) {
+      var u = queue[head++];
+      var s = offsets[u], e = offsets[u+1];
+      for (var k = s; k < e; k++) {
+        var v = targets[k];
+        if (depth[v] === -1) { depth[v] = depth[u] + 1; queue.push(v); }
+      }
+    }
+
+    var sum = 0, ct = 0, within3 = 0;
+    for (var i = 0; i < n; i++) {
+      if (states[i] === 0) continue;           // skip Defined
+      if (depth[i] < 0)    continue;           // unreachable from roots
+      sum += depth[i]; ct++;
+      if (depth[i] <= 3) within3++;
+    }
+    if (ct === 0) return { avg: null, note: 'no unproven leaves with a root' };
+    var pct = (100 * within3 / ct).toFixed(0);
+    return { avg: sum / ct, note: 'edges · ' + pct + '% within depth 3' };
+  }
+
+  // Lazy fallback: average module-depth of modules that contain H/F.
+  var counts = G.moduleStateCounts || [];
+  // moduleDepth isn't part of the standard schema; try it but fall
+  // back to "n/a" if absent.
+  if (!G.moduleDepth) {
+    return { avg: null, note: 'def-level data not available in lazy mode' };
+  }
+  var d = b64ToInt32(G.moduleDepth);
+  var sum = 0, ct = 0;
+  for (var i = 0; i < counts.length; i++) {
+    var c = counts[i] || [0,0,0,0];
+    if (c[2] > 0 || c[3] > 0) {
+      if (d[i] >= 0) { sum += d[i]; ct++; }
+    }
+  }
+  if (ct === 0) return { avg: null, note: 'no unproven modules reachable from entry' };
+  return { avg: sum / ct, note: 'module-depth proxy from entry' };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// FLAT SPARKLINE (single snapshot)
+// ═══════════════════════════════════════════════════════════════════
+function renderFlatSpark(svgId, val, color) {
+  var svg = document.getElementById(svgId);
+  if (!svg) return;
+  var w = 300, h = 50, mid = h / 2;
+  // Draw a flat dashed line at the midpoint with a dot on the right.
+  svg.innerHTML =
+    '<line x1="2" y1="' + mid + '" x2="' + (w-2) + '" y2="' + mid + '" ' +
+    'stroke="' + color + '" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.55"/>' +
+    '<circle cx="' + (w-3) + '" cy="' + mid + '" r="3" fill="' + color + '"/>';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DONUT
+// ═══════════════════════════════════════════════════════════════════
+function renderDonut(t) {
+  var slices = [
+    { lbl: 'Defined',   v: t.D, c: STATE_COLORS.D, tag: 'D' },
+    { lbl: 'Postulate', v: t.P, c: STATE_COLORS.P, tag: 'P' },
+    { lbl: 'Hole',      v: t.H, c: STATE_COLORS.H, tag: 'H' },
+    { lbl: 'Failed',    v: t.F, c: STATE_COLORS.F, tag: 'F' },
+  ];
+  var tot = Math.max(1, t.total);
+  var cx = 65, cy = 65, r = 50;
+  var circ = 2 * Math.PI * r;
+  var offset = 0;
+  var arcs = '';
+  slices.forEach(function(s) {
+    if (s.v === 0) return;
+    var frac = s.v / tot;
+    var dash = circ * frac;
+    arcs += '<circle class="ring" cx="' + cx + '" cy="' + cy + '" r="' + r +
+            '" stroke="' + s.c + '"' +
+            ' stroke-dasharray="' + dash + ' ' + (circ - dash) + '"' +
+            ' stroke-dashoffset="' + (-offset) + '"' +
+            ' transform="rotate(-90 ' + cx + ' ' + cy + ')">' +
+            '<title>' + s.lbl + ': ' + s.v.toLocaleString() +
+            ' (' + (100*frac).toFixed(1) + '%)</title></circle>';
+    offset += dash;
+  });
+  document.getElementById('donut-arcs').innerHTML = arcs;
+  document.getElementById('donut-center-label').textContent = t.total.toLocaleString();
+  document.getElementById('donut-legend').innerHTML = slices.map(function(s) {
+    var pp = t.total === 0 ? '0.0' : (100 * s.v / t.total).toFixed(1);
+    return '<div class="item">' +
+           '<span class="sw" style="background:' + s.c + '"></span>' +
+           '<span class="lbl">' + s.lbl + '</span>' +
+           '<span class="pct">' + pp + '%</span>' +
+           '<span class="cnt">' + s.v.toLocaleString() + '</span>' +
+           '</div>';
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HOT MODULES
+// ═══════════════════════════════════════════════════════════════════
+function renderHotModules() {
+  var modules = G.modules || [];
+  var counts  = G.moduleStateCounts || [];
+  var rows = [];
+  for (var i = 0; i < modules.length; i++) {
+    var c = counts[i] || [0,0,0,0];
+    var defs = c[0] + c[1] + c[2] + c[3];
+    if (defs === 0) continue;
+    if (c[2] === 0 && c[3] === 0 && c[1] === 0) continue;
+    rows.push({
+      i: i, name: modules[i],
+      d: c[0], p: c[1], h: c[2], f: c[3],
+      defs: defs,
+      density: defs === 0 ? 0 : (c[2] + c[3]) / defs,
+    });
+  }
+  // Rank: holes desc, then density desc, then name asc.
+  rows.sort(function(a, b) {
+    if (b.h !== a.h) return b.h - a.h;
+    if (b.density !== a.density) return b.density - a.density;
+    return a.name < b.name ? -1 : 1;
+  });
+
+  if (rows.length === 0) {
+    document.getElementById('hot-modules-tbody').innerHTML =
+      '<tr><td colspan="5" style="text-align:center;color:#666;font-style:italic">No holes, postulates, or failures — your project is clean.</td></tr>';
+    return;
+  }
+
+  var maxHoles = Math.max.apply(null, rows.map(function(r) { return r.h || 0.0001; }));
+  var top = rows.slice(0, 50);
+  var html = top.map(function(m) {
+    var densityPct = (100 * m.density).toFixed(0);
+    var barW = (100 * m.h / maxHoles).toFixed(1);
+    return '<tr>' +
+      '<td class="mod-name" title="' + esc(m.name) + '">' + esc(m.name) + '</td>' +
+      '<td class="num" style="color:' + STATE_COLORS.H + ';font-weight:600">' + m.h + '</td>' +
+      '<td class="num" style="color:#888">' + m.defs + '</td>' +
+      '<td class="bar-cell">' +
+        '<div class="mini-bar"><div class="fill hole" style="width:' + barW + '%"></div></div>' +
+        '<div style="font-size:10px;color:#666;margin-top:2px;text-align:right">' + densityPct + '%</div>' +
+      '</td>' +
+      '<td class="num" style="color:' + STATE_COLORS.P + '">' + m.p + '</td>' +
+      '</tr>';
+  }).join('');
+  document.getElementById('hot-modules-tbody').innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BLOCKING DEFS (inline mode) / BLOCKING MODULES (lazy mode)
+// ═══════════════════════════════════════════════════════════════════
+function renderBlockingDefs() {
+  var titleEl = document.getElementById('blocking-defs-title');
+  var tbody = document.getElementById('blocking-defs-tbody');
+
+  if (G.defs && G.edges && G.defs.names && G.defs.states &&
+      G.edges.outOffsets && G.edges.outTargets) {
+    titleEl.textContent = 'Most-blocking definitions';
+    var names   = G.defs.names || [];
+    var defMods = b64ToInt32(G.defs.modules);
+    var states  = b64ToInt8 (G.defs.states);
+    var offsets = b64ToInt32(G.edges.outOffsets);
+    var targets = b64ToInt32(G.edges.outTargets);
+    var n = states.length;
+    var modules = G.modules || [];
+
+    // For each non-Defined def, count its reverse-reach: how many
+    // defs transitively *depend on* it.
+    // We can compute this efficiently as one backward BFS per blocker,
+    // but that's O(n * E). Instead, for the toy corpus and projects
+    // up to ~1k defs we do the naive approach; above that we sample
+    // by giving every blocker a coarse upper bound = its in-degree
+    // along the reverse graph (a 1-hop proxy). Honest, fast, and
+    // labelled accordingly in the column header.
+    var blockers = [];
+    for (var i = 0; i < n; i++) {
+      if (states[i] !== 0) blockers.push(i);
+    }
+    if (blockers.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#666;font-style:italic">No holes, postulates, or failures.</td></tr>';
+      return;
+    }
+
+    // Build inverse adjacency (v → u for every u→v).
+    var inv = new Array(n);
+    for (var i = 0; i < n; i++) inv[i] = null;
+    for (var u = 0; u < n; u++) {
+      var s = offsets[u], e = offsets[u+1];
+      for (var k = s; k < e; k++) {
+        var v = targets[k];
+        if (inv[v] === null) inv[v] = [];
+        inv[v].push(u);
+      }
+    }
+
+    var USE_FULL_REACH = (n <= 20000);
+    var reach = new Int32Array(blockers.length);
+
+    if (USE_FULL_REACH) {
+      // Full per-blocker reverse-BFS.
+      var visited = new Uint8Array(n);
+      for (var b = 0; b < blockers.length; b++) {
+        for (var i = 0; i < n; i++) visited[i] = 0;
+        var start = blockers[b];
+        visited[start] = 1;
+        var q = [start];
+        var head = 0;
+        while (head < q.length) {
+          var node = q[head++];
+          var preds = inv[node];
+          if (!preds) continue;
+          for (var j = 0; j < preds.length; j++) {
+            if (!visited[preds[j]]) { visited[preds[j]] = 1; q.push(preds[j]); }
+          }
+        }
+        // count visited excluding the blocker itself
+        var ct = 0;
+        for (var i = 0; i < n; i++) if (visited[i]) ct++;
+        reach[b] = ct - 1;
+      }
+    } else {
+      // 1-hop in-degree proxy (label the column to flag this).
+      for (var b = 0; b < blockers.length; b++) {
+        var preds = inv[blockers[b]];
+        reach[b] = preds ? preds.length : 0;
+      }
+      titleEl.textContent = 'Most-blocking definitions (1-hop)';
+    }
+
+    // Decorate + rank.
+    var rows = blockers.map(function(i, idx) {
+      return {
+        i: i,
+        name: names[i] || ('def#' + i),
+        state: STATE_TAGS[states[i]],
+        reach: reach[idx],
+        module: modules[defMods[i]] || '',
+      };
+    });
+    rows.sort(function(a, b) { return b.reach - a.reach; });
+    var top = rows.slice(0, 50);
+
+    tbody.innerHTML = top.map(function(d) {
+      var tagClass = d.state === 'H' ? 'hole'
+                   : d.state === 'P' ? 'post'
+                   : d.state === 'F' ? 'fail' : 'def';
+      var tagLabel = d.state === 'H' ? 'Hole'
+                   : d.state === 'P' ? 'Postulate'
+                   : d.state === 'F' ? 'Failed' : 'Defined';
+      var nameClass = 'def-name';
+      if (d.state === 'P') nameClass += ' post';
+      if (d.state === 'F') nameClass += ' fail';
+      return '<tr>' +
+        '<td class="' + nameClass + '" title="' + esc(d.name) + '">' + esc(shortQname(d.name)) + '</td>' +
+        '<td><span class="tag ' + tagClass + '">' + tagLabel + '</span></td>' +
+        '<td class="num" style="color:#d4d4d4;font-weight:600">' + d.reach.toLocaleString() + '</td>' +
+        '<td class="mod-name" title="' + esc(d.module) + '">' + esc(shortMod(d.module)) + '</td>' +
+        '</tr>';
+    }).join('');
+    return;
+  }
+
+  // Lazy fallback: module-level "blocking modules" (transitive
+  // reverse reach over moduleEdges, restricted to modules with H/F).
+  titleEl.textContent = 'Most-blocking modules (lazy mode)';
+  var modules = G.modules || [];
+  var counts  = G.moduleStateCounts || [];
+  var n = modules.length;
+  var preds = new Array(n);
+  for (var i = 0; i < n; i++) preds[i] = null;
+  (G.moduleEdges || []).forEach(function(e) {
+    var u = e[0], v = e[1];
+    if (preds[v] === null) preds[v] = [];
+    preds[v].push(u);
+  });
+
+  var blockers = [];
+  for (var i = 0; i < n; i++) {
+    var c = counts[i] || [0,0,0,0];
+    if (c[2] > 0 || c[3] > 0 || c[1] > 0) blockers.push(i);
+  }
+  if (blockers.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#666;font-style:italic">No holes, postulates, or failures.</td></tr>';
+    return;
+  }
+  var rows = blockers.map(function(i) {
+    var visited = new Uint8Array(n);
+    visited[i] = 1;
+    var q = [i], head = 0;
+    while (head < q.length) {
+      var node = q[head++];
+      var p = preds[node];
+      if (!p) continue;
+      for (var j = 0; j < p.length; j++) {
+        if (!visited[p[j]]) { visited[p[j]] = 1; q.push(p[j]); }
+      }
+    }
+    var ct = 0;
+    for (var k = 0; k < n; k++) if (visited[k]) ct++;
+    var c = counts[i] || [0,0,0,0];
+    var dominantState = c[3] > 0 ? 'F' : c[2] > 0 ? 'H' : 'P';
+    return { i: i, name: modules[i], state: dominantState, reach: ct - 1, module: modules[i] };
+  });
+  rows.sort(function(a, b) { return b.reach - a.reach; });
+  var top = rows.slice(0, 50);
+  tbody.innerHTML = top.map(function(d) {
+    var tagClass = d.state === 'H' ? 'hole' : d.state === 'P' ? 'post' : 'fail';
+    var tagLabel = d.state === 'H' ? 'Hole' : d.state === 'P' ? 'Postulate' : 'Failed';
+    return '<tr>' +
+      '<td class="mod-name" title="' + esc(d.name) + '">' + esc(shortMod(d.name)) + '</td>' +
+      '<td><span class="tag ' + tagClass + '">' + tagLabel + '</span></td>' +
+      '<td class="num" style="color:#d4d4d4;font-weight:600">' + d.reach.toLocaleString() + '</td>' +
+      '<td class="mod-name" style="color:#666">module-level</td>' +
+      '</tr>';
+  }).join('');
+}
+
+// Trim Agda qualified names so the table doesn't overflow.
+function shortQname(s) {
+  if (s.length <= 70) return s;
+  return '…' + s.slice(-67);
+}
+function shortMod(s) {
+  if (s.length <= 40) return s;
+  return '…' + s.slice(-37);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HEATMAP
+// ═══════════════════════════════════════════════════════════════════
+function densityColor(d) {
+  if (d < 0.01) return '#1b4d1c';
+  if (d < 0.05) return '#2e3d2f';
+  if (d < 0.10) return '#3d3a4c';
+  if (d < 0.20) return '#5d2b6a';
+  if (d < 0.30) return '#7b1fa2';
+  if (d < 0.40) return '#ab47bc';
+  return '#ce93d8';
+}
+function renderHeatmap() {
+  var modules = G.modules || [];
+  var counts  = G.moduleStateCounts || [];
+  var grid = document.getElementById('heatmap-grid');
+  var detail = document.getElementById('heatmap-detail');
+
+  var cells = modules.map(function(name, i) {
+    var c = counts[i] || [0,0,0,0];
+    var defs = c[0] + c[1] + c[2] + c[3];
+    var bad = c[2] + c[3];
+    var density = defs === 0 ? 0 : (bad / defs);
+    return { i: i, name: name, defs: defs, h: c[2], f: c[3], p: c[1], density: density };
+  });
+
+  // Pick a column count that scales with module count, capped at 36
+  // (the mockup). Aim for a roughly square-ish grid.
+  var nCells = cells.length;
+  var cols;
+  if (nCells <= 36)         cols = Math.max(4, Math.ceil(Math.sqrt(nCells)));
+  else if (nCells <= 144)   cols = 12;
+  else if (nCells <= 576)   cols = 24;
+  else                      cols = 36;
+  grid.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+
+  // If we have very few cells, give each one a minimum size so the
+  // grid doesn't render as 4 pixels.
+  if (nCells < 36) {
+    grid.style.gridAutoRows = '28px';
+  } else {
+    grid.style.gridAutoRows = '';
+  }
+
+  grid.innerHTML = cells.map(function(c) {
+    return '<div class="cell" data-i="' + c.i +
+           '" style="background:' + densityColor(c.density) + '"' +
+           ' title="' + esc(c.name) + ' — ' + c.h + ' holes / ' + c.defs +
+           ' defs (' + (100*c.density).toFixed(0) + '%)"></div>';
+  }).join('');
+
+  grid.addEventListener('mouseover', function(e) {
+    var cell = e.target.closest('.cell');
+    if (!cell) return;
+    var c = cells[+cell.dataset.i];
+    if (!c) return;
+    detail.innerHTML =
+      '<span class="hl">' + esc(c.name) + '</span> · ' +
+      c.defs + ' defs · ' +
+      '<span class="hl hole">' + c.h + ' holes</span> · ' +
+      '<span class="hl post">' + c.p + ' postulates</span> · ' +
+      '<span style="color:#aaa">' + (100*c.density).toFixed(0) + '% density</span>';
+  });
+  grid.addEventListener('mouseleave', function() {
+    detail.innerHTML = 'Hover a cell for module details…';
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INSIGHTS — pure heuristics over the current snapshot
+// ═══════════════════════════════════════════════════════════════════
+function renderInsights(t) {
+  var out = [];
+
+  if (t.total === 0) {
+    out.push({
+      cls: '', icn: 'i', head: 'No definitions found',
+      det: 'The graph has no classified definitions yet — either the project is empty, or every module was excluded. Try removing <code>--exclude</code>/<code>--no-source-for</code> filters and rerunning.'
+    });
+  }
+
+  // ─ Completeness band ──────────────────────────────────────
+  var pct = t.total === 0 ? 0 : (100 * t.D / t.total);
+  if (t.total > 0) {
+    if (pct >= 95) {
+      out.push({
+        cls: 'good', icn: '✓',
+        head: 'Project is near-complete (' + pct.toFixed(1) + '%)',
+        det: 'Only ' + (t.total - t.D).toLocaleString() + ' definitions are not in the <code>Defined</code> state. Polishing pass territory.'
+      });
+    } else if (pct >= 70) {
+      out.push({
+        cls: 'good', icn: '✓',
+        head: 'Healthy completeness (' + pct.toFixed(1) + '%)',
+        det: 'A majority of definitions are fully elaborated. Hot-modules table shows where the remaining ' + (t.H + t.P + t.F).toLocaleString() + ' open items cluster.'
+      });
+    } else if (pct >= 40) {
+      out.push({
+        cls: 'warn', icn: '!',
+        head: 'Mid-build: ' + pct.toFixed(1) + '% complete',
+        det: 'About half the project is elaborated. The blocking-defs table shows which holes/postulates have the most downstream consumers.'
+      });
+    } else {
+      out.push({
+        cls: 'bad', icn: '✗',
+        head: 'Early stage: only ' + pct.toFixed(1) + '% defined',
+        det: 'Most definitions still depend on open metas or postulates. Expect the headline number to climb rapidly once core lemmas land.'
+      });
+    }
+  }
+
+  // ─ Postulate-heavy warning ────────────────────────────────
+  if (t.D + t.P > 0) {
+    var debt = t.P / (t.D + t.P + t.H);
+    if (debt > 0.25) {
+      out.push({
+        cls: 'warn', icn: '!',
+        head: 'High postulate debt (' + (100*debt).toFixed(1) + '%)',
+        det: 'Postulates account for over a quarter of all classified definitions. Each one is an unproven assumption — they\'re fine as scaffolding, but the longer they sit, the harder they are to discharge.'
+      });
+    }
+  }
+
+  // ─ Failed modules ─────────────────────────────────────────
+  var failed = (G.failedModules || []);
+  if (failed.length > 0) {
+    out.push({
+      cls: 'bad', icn: '✗',
+      head: failed.length + ' module(s) failed to type-check',
+      det: 'Captured under <code>--keep-going</code>: ' +
+           failed.slice(0, 5).map(function(m) { return '<code>' + esc(m) + '</code>'; }).join(', ') +
+           (failed.length > 5 ? ', …' : '') +
+           '. Their contents are not in the graph — only the marker.'
+    });
+  }
+
+  // ─ Externals share ────────────────────────────────────────
+  if (G.externalModules) {
+    var ext = b64ToInt32(G.externalModules).length;
+    var modN = (G.modules || []).length;
+    if (modN > 0 && ext / modN > 0.5) {
+      out.push({
+        cls: '', icn: 'i',
+        head: ext + ' of ' + modN + ' modules are external',
+        det: 'Most of the graph is stdlib / external dependencies. KPIs above are computed across <em>all</em> modules; if you want a project-only view, re-run with <code>--no-externals</code>.'
+      });
+    }
+  }
+
+  // ─ History-not-tracked footer ────────────────────────────
+  out.push({
+    cls: '', icn: 'i',
+    head: 'Single-snapshot dashboard',
+    det: 'agda-deps doesn\'t yet record JSON snapshots over time. Sparklines and per-commit deltas would appear here once a companion tool walks <code>git log</code> and rebuilds <code>graph.json</code> per commit.'
+  });
+
+  document.getElementById('insights-body').innerHTML = out.map(function(o) {
+    return '<div class="insight ' + (o.cls || '') + '">' +
+      '<span class="icn">' + o.icn + '</span>' +
+      '<div class="body">' +
+        '<div class="head">' + o.head + '</div>' +
+        '<div class="det">' + o.det + '</div>' +
+      '</div></div>';
+  }).join('');
+}
+
+init();
+</script>
+</body>
+</html>

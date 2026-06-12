@@ -1,0 +1,115 @@
+# CI smoke test for agda-deps.
+#
+# Notes:
+# - The Agda source-repository-package pin in cabal.project means the
+#   first build on a fresh runner has to fetch and build Agda from
+#   source. That can take 10+ minutes — there's no quick way around it
+#   while 2.9 isn't on Hackage. We cache `~/.cabal/store` and
+#   `dist-newstyle` aggressively so subsequent runs are fast.
+# - Cache key includes the cabal.project hash (so an Agda commit bump
+#   invalidates the cache) and the cabal file (dep changes too).
+# - Agda's repo pulls std-lib + cubical as git submodules (its test
+#   corpus). They're not needed to build Agda as a library, and std-lib's
+#   `experimental`-branch pin rots upstream, so the "Skip Agda's
+#   test-corpus submodules" step below tells git to skip them.
+#
+# If maintenance of the Agda fetch path becomes painful, drop the
+# `Run agda-deps on the test corpus` step and keep just the `cabal
+# build` smoke test below it.
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out the repository
+      uses: actions/checkout@v4
+
+    - name: Set up Haskell (GHC 9.14.1 + cabal 3.16)
+      uses: haskell-actions/setup@v2
+      with:
+        ghc-version: '9.14.1'
+        cabal-version: '3.16'
+
+    - name: Cache cabal store
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cabal/store
+          ~/.cabal/packages
+          dist-newstyle
+        # cabal.project pins the Agda commit; agda-deps.cabal pins deps.
+        # GHC version is part of the key so a future GHC bump invalidates
+        # without manual nudging.
+        key: ${{ runner.os }}-ghc9.14.1-${{ hashFiles('cabal.project', 'agda-deps.cabal') }}
+        restore-keys: |
+          ${{ runner.os }}-ghc9.14.1-
+
+    - name: Skip Agda's test-corpus submodules
+      # Agda's git repo carries std-lib + cubical as submodules (its own
+      # test corpus). cabal recurses into them when it fetches/syncs the
+      # source-repository-package, but std-lib tracks agda-stdlib's
+      # `experimental` branch, which is regularly rebased — so the pinned
+      # submodule commit gets garbage-collected upstream and the recursive
+      # fetch fails ("not our ref …"). These submodules aren't needed to
+      # build Agda as a library, so tell git to skip them globally.
+      #
+      # Two independent git operations recurse into submodules, and they're
+      # governed by different config knobs — both must be disabled:
+      #   * `cabal build` runs `git submodule update --init --force
+      #     --recursive`; `submodule.<name>.update = none` makes that a
+      #     clean no-op.
+      #   * `cabal update` runs `git fetch` on the cached source-repo, and
+      #     git's default `fetch.recurseSubmodules = on-demand` then tries
+      #     to fetch the (now-dead) pinned std-lib commit. `update = none`
+      #     does NOT stop fetch-time recursion — disable it explicitly.
+      run: |
+        git config --global submodule.std-lib.update none
+        git config --global submodule.cubical.update none
+        git config --global fetch.recurseSubmodules false
+
+    - name: Update Hackage index
+      run: cabal update
+
+    - name: Dependency drift check
+      # Catches dependency-resolution failures early, before we burn
+      # time on the actual build.
+      run: cabal build --enable-tests --enable-benchmarks --dry-run
+
+    - name: Build agda-deps
+      # First time through this is slow (Agda 2.9 from source).
+      # Subsequent runs hit the cache and finish quickly.
+      run: cabal build
+
+    - name: Run agda-deps on the bundled test corpus (all four formats)
+      run: |
+        mkdir -p ci-out
+        cabal run agda-deps -- --format=dot  -i test/ -o ci-out/ test/Test.agda
+        cabal run agda-deps -- --format=html -i test/ -o ci-out/ test/Test.agda
+        cabal run agda-deps -- --format=html --lazy -i test/ -o ci-out/ test/Test.agda
+        cabal run agda-deps -- --format=json -i test/ -o ci-out/ test/Test.agda
+        # Expanded JSON, exercising the optional --with-* fields, for schema validation.
+        cabal run agda-deps -- --format=json --json-mode=expanded --with-signatures \
+          --with-term-hashes -i test/ -o ci-out/expanded test/Test.agda
+        ls -la ci-out/
+
+    - name: Validate expanded JSON against the wire schema
+      # Guards the producer/consumer contract: agda-deps' freshly-generated
+      # expanded output must match schema/graph-v2-expanded.schema.json.
+      run: |
+        pipx run check-jsonschema --schemafile schema/graph-v2-expanded.schema.json \
+          ci-out/expanded/deps.json
+
+    - name: Upload generated artefacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: agda-deps-ci-out
+        path: ci-out/
+        if-no-files-found: warn

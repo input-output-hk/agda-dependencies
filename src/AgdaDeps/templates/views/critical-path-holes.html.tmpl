@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- agda-deps · critical-path-holes view: kanban board of holes / postulates / failed defs ranked by how much depends on them. -->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>agda-deps — Critical-Path Holes</title>
+<script>window.__gzipEnabled = __GZIP_ENABLED__;</script>
+<script>
+  if (window.__gzipEnabled && typeof DecompressionStream === 'undefined') {
+    document.write('<scr'+'ipt src="https://unpkg.com/pako@2.1.0/dist/pako_inflate.min.js"></scr'+'ipt>');
+  }
+</script>
+<style>
+:root {
+  --c-defined:   __COLOR_DEFINED__;
+  --c-postulate: __COLOR_POSTULATE__;
+  --c-hole:      __COLOR_HOLE__;
+  --c-failed:    __COLOR_FAILED__;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; font-size: 13px;
+  background: #0f1115; color: #d4d4d4; overflow: hidden;
+}
+body { display: flex; flex-direction: column; }
+
+/* ── BANNER ──────────────────────────────────────────────────── */
+#banner {
+  background: linear-gradient(90deg, #1a1d24 0%, #131620 100%);
+  border-bottom: 1px solid #262a33;
+  padding: 8px 14px; display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+}
+#banner .title { font-weight: 700; color: #fff; letter-spacing: .02em; font-size: 13px; }
+#banner .subtitle { color: #888; font-size: 11.5px; }
+#banner .goal-pill {
+  margin-left: auto;
+  background: #1a2330; border: 1px solid #2d4a6b;
+  padding: 3px 10px; border-radius: 12px; font-size: 11px; color: #79b8ff;
+  display: flex; align-items: center; gap: 6px;
+  max-width: 60%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#banner .goal-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: #79b8ff; flex-shrink: 0; }
+#banner .goal-pill b { color: #cde2ff; font-family: 'JetBrains Mono', monospace; }
+
+/* ── TOP STRIP ──────────────────────────────────────────────── */
+#topstrip {
+  background: #131620; border-bottom: 1px solid #262a33;
+  padding: 10px 14px;
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr; gap: 10px;
+  flex-shrink: 0;
+}
+.stat-card {
+  background: #181b25; border: 1px solid #262a33; border-radius: 6px;
+  padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;
+  min-height: 64px;
+}
+.stat-card .label {
+  font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  color: #6e7681; font-weight: 600;
+}
+.stat-card .value {
+  font-size: 22px; font-weight: 700; color: #e6e9ef; margin-top: 2px;
+  display: flex; align-items: baseline; gap: 6px;
+}
+.stat-card .delta { font-size: 11px; font-weight: 600; }
+.delta-down { color: #4caf50; }
+.delta-up { color: #f06070; }
+.delta-flat { color: #888; }
+.stat-card .footnote { font-size: 10px; color: #6e7681; margin-top: 1px; }
+
+#burndown-wrap {
+  background: #181b25; border: 1px solid #262a33; border-radius: 6px;
+  padding: 8px 10px; display: flex; flex-direction: column;
+  grid-column: 1 / 2; min-height: 64px;
+}
+#burndown-header {
+  display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px;
+}
+#burndown-header .label {
+  font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  color: #6e7681; font-weight: 600;
+}
+#burndown-header .legend {
+  font-size: 10px; color: #6e7681; display: flex; gap: 10px;
+}
+#burndown-header .legend span { display: flex; align-items: center; gap: 4px; }
+#burndown-header .legend .swatch { width: 8px; height: 2px; }
+#burndown-svg { flex: 1; width: 100%; }
+#burndown-note {
+  font-size: 10px; color: #6e7681; font-style: italic; padding: 6px 4px 0;
+}
+
+/* ── FILTER BAR ─────────────────────────────────────────────── */
+#filterbar {
+  background: #131620; border-bottom: 1px solid #262a33;
+  padding: 6px 14px;
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap;
+}
+.filter-group { display: flex; align-items: center; gap: 6px; }
+.filter-group .label {
+  font-size: 10.5px; color: #6e7681; letter-spacing: .04em;
+  text-transform: uppercase; font-weight: 600;
+}
+#search-box, #module-filter, #affects-filter {
+  background: #0f1115; border: 1px solid #2d3138; border-radius: 4px;
+  color: #d4d4d4; padding: 4px 8px; font-size: 12px; outline: none;
+  font-family: inherit; min-width: 140px;
+}
+#search-box:focus, #module-filter:focus, #affects-filter:focus { border-color: #4a86c5; }
+.sev-pill {
+  background: #1a1d24; border: 1px solid #2d3138; border-radius: 12px;
+  padding: 3px 9px; font-size: 11px; color: #aaa; cursor: pointer;
+  user-select: none; transition: all 0.12s;
+}
+.sev-pill:hover { border-color: #4a86c5; color: #fff; }
+.sev-pill.active { background: #1a2330; border-color: #4a86c5; color: #79b8ff; }
+.sev-pill .count { color: #6e7681; margin-left: 4px; font-size: 10.5px; }
+.sev-pill.active .count { color: #4a86c5; }
+.spacer { flex: 1; }
+#affects-mode {
+  display: flex; align-items: center; gap: 6px;
+  background: #1a2330; border: 1px solid #2d4a6b; border-radius: 4px;
+  padding: 4px 8px; font-size: 11px; color: #79b8ff; cursor: default;
+}
+#affects-mode.off { background: transparent; border-color: #2d3138; color: #888; }
+
+/* ── BOARD ──────────────────────────────────────────────────── */
+#board {
+  flex: 1; display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 10px; padding: 10px 14px; overflow: hidden;
+}
+.lane {
+  background: #131620; border: 1px solid #262a33; border-radius: 8px;
+  display: flex; flex-direction: column; overflow: hidden; min-height: 0;
+}
+.lane-header {
+  padding: 10px 12px 8px; border-bottom: 1px solid #262a33; flex-shrink: 0;
+  display: flex; align-items: center; gap: 8px;
+}
+.lane-header .lane-icon {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+.lane-header .lane-title {
+  font-size: 12.5px; font-weight: 700; letter-spacing: .01em; flex: 1;
+}
+.lane-header .lane-count {
+  background: #1a1d24; border: 1px solid #2d3138; padding: 1px 8px;
+  border-radius: 10px; font-size: 11px; color: #aaa; font-weight: 600;
+}
+.lane-subtitle {
+  padding: 0 12px 8px; font-size: 10.5px; color: #6e7681;
+  border-bottom: 1px solid #262a33; flex-shrink: 0;
+}
+
+.lane-body {
+  flex: 1; overflow-y: auto; padding: 8px;
+  display: flex; flex-direction: column; gap: 6px; min-height: 0;
+}
+.lane-body::-webkit-scrollbar { width: 6px; }
+.lane-body::-webkit-scrollbar-track { background: transparent; }
+.lane-body::-webkit-scrollbar-thumb { background: #2d3138; border-radius: 3px; }
+
+.lane.blocking   .lane-icon  { background: #f06070; box-shadow: 0 0 8px #f0607080; }
+.lane.indirect   .lane-icon  { background: #f9a825; box-shadow: 0 0 6px #f9a82580; }
+.lane.postulates .lane-icon  { background: #b977d8; }
+.lane.done       .lane-icon  { background: #4caf50; }
+.lane.blocking   .lane-title { color: #ff8b95; }
+.lane.indirect   .lane-title { color: #ffcb6b; }
+.lane.postulates .lane-title { color: #d6a8ee; }
+.lane.done       .lane-title { color: #82d695; }
+
+/* ── CARDS ──────────────────────────────────────────────────── */
+.card {
+  background: #181b25; border: 1px solid #262a33; border-left: 3px solid transparent;
+  border-radius: 5px; padding: 9px 10px;
+  cursor: pointer; transition: all 0.12s;
+  position: relative;
+}
+.card:hover { background: #1d212c; border-color: #4a86c5; }
+.card.dimmed { opacity: 0.22; }
+.card.affects-highlight { border-color: #79b8ff; background: #1a2330; }
+.card .card-top {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+}
+.card .kind-badge {
+  font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
+  letter-spacing: .04em; text-transform: uppercase; flex-shrink: 0;
+}
+.kind-hole      { background: #2e1b4d; color: #ce93d8; border: 1px solid #6a3aa0; }
+.kind-postulate { background: #4d1b1b; color: #ef9a9a; border: 1px solid #a04040; }
+.kind-done      { background: #1b4d1c; color: #a5d6a7; border: 1px solid #408040; }
+.card .card-name {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px; font-weight: 600; color: #e6e9ef;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+.card .card-module {
+  font-size: 10.5px; color: #79b8ff; margin-bottom: 5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.card .card-meta {
+  display: flex; align-items: center; gap: 8px; font-size: 10.5px;
+  color: #888; margin-bottom: 6px;
+}
+.card .meta-item { display: flex; align-items: center; gap: 3px; }
+.card .meta-item .meta-icon { font-size: 10px; color: #6e7681; }
+.card .meta-item.severe { color: #ff8b95; font-weight: 600; }
+.card .meta-item.medium { color: #ffcb6b; }
+
+.card .file-line {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 10px; color: #6e7681;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.card.sev-high { border-left-color: #f06070; }
+.card.sev-med  { border-left-color: #f9a825; }
+.card.sev-low  { border-left-color: #4a86c5; }
+.card.sev-done { border-left-color: #4caf50; }
+
+.chain {
+  display: flex; align-items: center; gap: 3px; flex-wrap: wrap;
+  background: #0f1115; border: 1px solid #262a33; border-radius: 3px;
+  padding: 4px 6px; margin-top: 4px;
+  font-size: 10px;
+}
+.chain .chain-node {
+  background: #1a1d24; border: 1px solid #2d3138; padding: 1px 5px;
+  border-radius: 3px; color: #aaa; font-family: 'JetBrains Mono', monospace;
+  max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chain .chain-node.target { background: #1a2330; border-color: #4a86c5; color: #79b8ff; font-weight: 600; }
+.chain .chain-node.source { background: #2a1818; border-color: #6a3030; color: #ff8b95; }
+.chain .chain-arrow { color: #555; font-size: 10px; }
+.chain-label {
+  font-size: 9px; color: #6e7681; letter-spacing: .04em;
+  text-transform: uppercase; margin-right: 3px;
+}
+
+.unblock-list {
+  margin-top: 5px; padding-top: 5px; border-top: 1px dashed #262a33;
+  font-size: 10.5px; color: #888; line-height: 1.5;
+}
+.unblock-list .head {
+  font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase;
+  color: #6e7681; font-weight: 600; margin-bottom: 2px;
+}
+.unblock-list .un-item {
+  font-family: 'JetBrains Mono', monospace; color: #b8c1d1; font-size: 10px;
+  margin-right: 4px; display: inline-block;
+}
+.unblock-list .un-item.more { color: #6e7681; }
+
+/* ── DETAIL PANEL ───────────────────────────────────────────── */
+#detail-panel {
+  position: fixed; top: 0; right: -480px; width: 480px; height: 100%;
+  background: #131620; border-left: 1px solid #262a33;
+  box-shadow: -8px 0 20px rgba(0,0,0,0.4);
+  transition: right 0.22s ease-out;
+  display: flex; flex-direction: column; z-index: 50;
+  overflow: hidden;
+}
+#detail-panel.open { right: 0; }
+#detail-head {
+  padding: 14px 16px 10px; border-bottom: 1px solid #262a33;
+  position: relative;
+}
+#detail-head .name {
+  font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; color: #e6e9ef;
+  margin-bottom: 4px; word-break: break-all; padding-right: 60px;
+}
+#detail-head .module-path { font-size: 11px; color: #79b8ff; margin-bottom: 6px; word-break: break-all; }
+#detail-head .meta-row {
+  display: flex; gap: 14px; margin-top: 8px; font-size: 11px; color: #888;
+  flex-wrap: wrap;
+}
+#detail-head .meta-row b { color: #d4d4d4; font-weight: 600; }
+#detail-body {
+  flex: 1; overflow-y: auto; padding: 12px 16px;
+}
+#detail-body::-webkit-scrollbar { width: 6px; }
+#detail-body::-webkit-scrollbar-thumb { background: #2d3138; border-radius: 3px; }
+.section { margin-bottom: 14px; }
+.section h3 {
+  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: #6e7681; font-weight: 600; margin-bottom: 6px;
+}
+.section .code-block {
+  background: #0f1115; border: 1px solid #262a33; border-radius: 4px;
+  padding: 8px 10px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px;
+  color: #ce9178; white-space: pre-wrap; overflow-x: auto;
+}
+.section .dep-chain-detail {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.section .dep-chain-detail .step {
+  display: flex; align-items: center; gap: 6px;
+  background: #181b25; border: 1px solid #262a33; padding: 5px 8px; border-radius: 4px;
+  font-size: 11px;
+}
+.section .dep-chain-detail .step-idx {
+  font-size: 9px; background: #2d3138; color: #aaa; width: 18px; height: 18px;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; font-weight: 700;
+}
+.section .dep-chain-detail .step-name {
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #e6e9ef;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.section .dep-chain-detail .step-state {
+  margin-left: auto; font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 700;
+}
+.section .blocks-grid {
+  display: grid; grid-template-columns: 1fr; gap: 4px;
+}
+.section .blocks-grid .blk {
+  background: #181b25; border-left: 2px solid #4a86c5; padding: 4px 8px;
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #b8c1d1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#close-detail {
+  position: absolute; top: 10px; right: 12px;
+  background: #2d3138; color: #aaa; border: none; padding: 3px 8px;
+  border-radius: 3px; cursor: pointer; font-size: 11px;
+}
+#close-detail:hover { background: #4a86c5; color: #fff; }
+
+.empty-lane {
+  text-align: center; padding: 18px 8px; color: #4a4f5a; font-size: 11px;
+  font-style: italic;
+}
+
+#loading, #err {
+  position: fixed; inset: 0; display: flex; align-items: center;
+  justify-content: center; background: #0f1115; z-index: 100;
+  font-size: 14px; color: #888;
+}
+#err { display: none; padding: 24px; text-align: center; }
+#err.visible { display: flex; }
+#err pre {
+  background: #181b25; border: 1px solid #262a33;
+  border-radius: 6px; padding: 12px; font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; color: #f06070; max-width: 600px;
+  white-space: pre-wrap; text-align: left;
+}
+</style>
+</head>
+<body>
+
+<div id="banner">
+  <span class="title">agda-deps · Critical-Path Tracker</span>
+  <span class="subtitle">Frontier of holes &amp; postulates blocking the main goal.</span>
+  <span class="goal-pill" id="goal-pill">
+    <span class="dot"></span>
+    GOAL: <b id="goal-label">loading…</b>
+  </span>
+</div>
+
+<div id="topstrip">
+  <div id="burndown-wrap">
+    <div id="burndown-header">
+      <span class="label">Burndown — history</span>
+      <div class="legend">
+        <span><span class="swatch" style="background:#b977d8"></span>holes</span>
+        <span><span class="swatch" style="background:#f06070"></span>postulates</span>
+      </div>
+    </div>
+    <svg id="burndown-svg" viewBox="0 0 400 38" preserveAspectRatio="none"></svg>
+    <div id="burndown-note">agda-deps doesn't yet track per-commit history — showing current snapshot only.</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Open holes</div>
+    <div class="value" id="stat-holes">·</div>
+    <div class="footnote">state H</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Active postulates</div>
+    <div class="value" id="stat-postulates">·</div>
+    <div class="footnote">state P</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Blocking the goal</div>
+    <div class="value" id="stat-blocking">·</div>
+    <div class="footnote">transitive upstream</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Failed modules</div>
+    <div class="value" id="stat-failed">·</div>
+    <div class="footnote">state F</div>
+  </div>
+</div>
+
+<div id="filterbar">
+  <div class="filter-group">
+    <span class="label">Filter</span>
+    <input id="search-box" type="text" placeholder="Search holes / postulates…">
+  </div>
+  <div class="filter-group">
+    <span class="label">Module</span>
+    <select id="module-filter">
+      <option value="">All modules</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <span class="label">Severity</span>
+    <span class="sev-pill active" data-sev="all">All <span class="count" id="count-sev-all">0</span></span>
+    <span class="sev-pill" data-sev="high">High <span class="count" id="count-sev-high">0</span></span>
+    <span class="sev-pill" data-sev="med">Med <span class="count" id="count-sev-med">0</span></span>
+    <span class="sev-pill" data-sev="low">Low <span class="count" id="count-sev-low">0</span></span>
+  </div>
+  <span class="spacer"></span>
+  <div class="filter-group">
+    <span class="label">Affects module</span>
+    <select id="affects-filter">
+      <option value="">— off —</option>
+    </select>
+  </div>
+  <div id="affects-mode" class="off">Affects-mode: <b id="affects-mode-state">off</b></div>
+</div>
+
+<div id="board">
+  <div class="lane blocking">
+    <div class="lane-header">
+      <span class="lane-icon"></span>
+      <span class="lane-title">Blocking the goal</span>
+      <span class="lane-count" id="count-blocking">0</span>
+    </div>
+    <div class="lane-subtitle">Transitive upstream of the entry module's defs</div>
+    <div class="lane-body" id="lane-blocking"></div>
+  </div>
+  <div class="lane indirect">
+    <div class="lane-header">
+      <span class="lane-icon"></span>
+      <span class="lane-title">Indirectly blocking</span>
+      <span class="lane-count" id="count-indirect">0</span>
+    </div>
+    <div class="lane-subtitle">Holes &amp; postulates not reached from the goal</div>
+    <div class="lane-body" id="lane-indirect"></div>
+  </div>
+  <div class="lane postulates">
+    <div class="lane-header">
+      <span class="lane-icon"></span>
+      <span class="lane-title">Postulates on the goal</span>
+      <span class="lane-count" id="count-postulates">0</span>
+    </div>
+    <div class="lane-subtitle">Axioms upstream of the goal — discharge to reduce trust surface</div>
+    <div class="lane-body" id="lane-postulates"></div>
+  </div>
+  <div class="lane done">
+    <div class="lane-header">
+      <span class="lane-icon"></span>
+      <span class="lane-title">Recently discharged</span>
+      <span class="lane-count" id="count-done">0</span>
+    </div>
+    <div class="lane-subtitle">No history available — agda-deps doesn't yet track this</div>
+    <div class="lane-body" id="lane-done"></div>
+  </div>
+</div>
+
+<div id="detail-panel">
+  <div id="detail-head">
+    <button id="close-detail">✕ Close</button>
+    <div class="name" id="detail-name"></div>
+    <div class="module-path" id="detail-module"></div>
+    <div class="meta-row" id="detail-meta"></div>
+  </div>
+  <div id="detail-body"></div>
+</div>
+
+<div id="loading">Loading graph data…</div>
+<div id="err"><div><h2 style="margin-bottom:12px;color:#f06070">Error</h2><pre id="err-body"></pre></div></div>
+
+<script>
+// ─── DATA LOADING PRELUDE ──────────────────────────────────────────────────
+__DATA_LOADING_PRELUDE__
+</script>
+<script>
+// ─── BASE64 DECODERS (v2 schema) ───────────────────────────────────────────
+function b64ToBytes(b64) {
+  if (!b64) return new Uint8Array(0);
+  var bin = atob(b64), out = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64ToInt32(b64) { return new Int32Array(b64ToBytes(b64).buffer); }
+function b64ToInt8(b64)  { return new Int8Array (b64ToBytes(b64).buffer); }
+
+// ─── FETCH HELPERS ─────────────────────────────────────────────────────────
+async function fetchJson(url) {
+  if (GZIP_ENABLED && window.pako) {
+    try {
+      var r = await fetch(url + '.gz');
+      if (r.ok) {
+        var ab = await r.arrayBuffer();
+        var txt = pako.inflate(new Uint8Array(ab), {to:'string'});
+        return JSON.parse(txt);
+      }
+    } catch(e) {}
+  }
+  var r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching ' + url);
+  return r.json();
+}
+
+async function loadGraph() {
+  if (LAZY) return fetchJson(GRAPH_URL);
+  return GRAPH;
+}
+
+function showErr(msg) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('err-body').textContent = msg;
+  document.getElementById('err').classList.add('visible');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' })[c];
+  });
+}
+
+// ─── APP STATE ─────────────────────────────────────────────────────────────
+// Loaded once during init, then read-only.
+var G = null;
+var MODULES = [];            // string[]
+var ENTRY_MODULE = null;
+var FAILED_MODULES = new Set();
+var EXTERNAL_MOD_IDXS = new Set();
+
+// Defs: arrays parallel by def index. Inline mode populates these directly
+// from g.defs; lazy mode hydrates them by fetching every entry in
+// g.moduleFiles up front (necessary because we need *all* holes/postulates
+// to render the kanban). For huge corpora that's expensive but the view's
+// utility is bounded by what fits on a kanban anyway.
+var DEF_NAMES   = [];        // qname (string) per def
+var DEF_MODULES = [];        // module index per def
+var DEF_STATES  = [];        // 0=D 1=P 2=H 3=F
+var DEF_FILES   = [];        // moduleFile path per def (or null)
+var DEF_LOCAL   = [];        // local name (last dotted segment)
+
+// Forward adjacency: for each def, list of def-indices it depends on.
+// Built from CSR in inline mode; for lazy mode we fall back to module-level
+// adjacency (we don't have a per-def CSR across detail files).
+var OUT_DEFS   = null;       // Int32Array[] or null
+var HAS_DEF_EDGES = false;   // true when we have leaf-level edges
+
+// Module-level adjacency (built from g.moduleEdges).
+var OUT_MODS = new Map();    // src idx → tgt idx[]
+var IN_MODS  = new Map();    // tgt idx → src idx[]
+
+// ITEMS: one entry per hole/postulate def.
+//   { id, name, qname, module, kind ('H'|'P'), file, line,
+//     defIdx, lane, sev, downstreamCount, etaDepth, chain (qnames), unblocks (qnames) }
+var ITEMS = [];
+
+var currentSearch   = '';
+var currentModule   = '';
+var currentSeverity = 'all';
+var currentAffects  = '';
+
+// ─── INIT ──────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    G = await loadGraph();
+  } catch (e) {
+    showErr('Failed to load graph data: ' + e.message +
+            (LAZY ? '\n\nLazy mode uses fetch(); serve over HTTP (e.g. `python -m http.server`), not file://.' : ''));
+    return;
+  }
+
+  if (!G || !G.modules) {
+    showErr('Graph data is missing the "modules" field.');
+    return;
+  }
+
+  MODULES = G.modules || [];
+  ENTRY_MODULE = G.entryModule || null;
+  (G.failedModules || []).forEach(function(m) { FAILED_MODULES.add(m); });
+  if (G.externalModules) {
+    var extArr = b64ToInt32(G.externalModules);
+    for (var i = 0; i < extArr.length; i++) EXTERNAL_MOD_IDXS.add(extArr[i]);
+  }
+
+  // Module-level adjacency.
+  (G.moduleEdges || []).forEach(function(e) {
+    var s = e[0], t = e[1];
+    if (!OUT_MODS.has(s)) OUT_MODS.set(s, []);
+    if (!IN_MODS.has(t))  IN_MODS.set(t,  []);
+    OUT_MODS.get(s).push(t);
+    IN_MODS.get(t).push(s);
+  });
+
+  // Inline: defs + CSR are already in G.
+  // Lazy:   we need to fetch every module-detail file to gather holes/postulates.
+  if (LAZY) {
+    await hydrateLazyDefs();
+  } else {
+    hydrateInlineDefs();
+  }
+
+  buildItems();
+  document.getElementById('loading').style.display = 'none';
+
+  // Banner goal.
+  document.getElementById('goal-label').textContent =
+    ENTRY_MODULE ? ENTRY_MODULE : '(no entry module detected)';
+
+  buildModuleOptions();
+  renderStats();
+  renderBurndown();
+  renderBoard();
+  wireUi();
+}
+
+function hydrateInlineDefs() {
+  if (!G.defs) return;
+  DEF_NAMES   = G.defs.names || [];
+  var modsBuf = G.defs.modules ? b64ToInt32(G.defs.modules) : null;
+  var stsBuf  = G.defs.states  ? b64ToInt8 (G.defs.states)  : null;
+  for (var i = 0; i < DEF_NAMES.length; i++) {
+    DEF_MODULES.push(modsBuf ? modsBuf[i] : -1);
+    DEF_STATES.push(stsBuf ? stsBuf[i] : 0);
+    DEF_LOCAL.push(localNameOf(DEF_NAMES[i], modsBuf ? MODULES[modsBuf[i]] : null));
+    DEF_FILES.push(null);    // inline mode has no per-def file paths
+  }
+  if (G.edges) {
+    var outOff = b64ToInt32(G.edges.outOffsets);
+    var outTgt = b64ToInt32(G.edges.outTargets);
+    OUT_DEFS = new Array(DEF_NAMES.length);
+    for (var di = 0; di < DEF_NAMES.length; di++) {
+      var s = outOff[di], e = outOff[di + 1];
+      OUT_DEFS[di] = outTgt.subarray(s, e);
+    }
+    HAS_DEF_EDGES = true;
+  }
+}
+
+async function hydrateLazyDefs() {
+  // Walk g.moduleFiles in parallel. Each file gives us that module's defs
+  // (names, b64 states; no `modules` array because they all share a module).
+  // We don't get a cross-module CSR in lazy mode, so def-level edges are
+  // unavailable; the view falls back to module-level reachability.
+  if (!G.moduleFiles) return;
+  var entries = Object.entries(G.moduleFiles);
+  var modIdxByName = Object.create(null);
+  for (var i = 0; i < MODULES.length; i++) modIdxByName[MODULES[i]] = i;
+
+  await Promise.all(entries.map(async function(pair) {
+    var modName = pair[0], file = pair[1];
+    var mi = modIdxByName[modName];
+    if (mi === undefined) return;
+    try {
+      var detail = await fetchJson(file);
+      if (!detail || !detail.defs) return;
+      var names = detail.defs.names || [];
+      var stsBuf = detail.defs.states ? b64ToInt8(detail.defs.states) : null;
+      for (var k = 0; k < names.length; k++) {
+        var localName = names[k];
+        var qname = modName + '.' + localName;
+        DEF_NAMES.push(qname);
+        DEF_MODULES.push(mi);
+        DEF_STATES.push(stsBuf ? stsBuf[k] : 0);
+        DEF_FILES.push(file);
+        DEF_LOCAL.push(localName);
+      }
+    } catch (e) {
+      // best-effort: keep going if one module fails
+    }
+  }));
+}
+
+function localNameOf(qname, modName) {
+  if (modName && qname.indexOf(modName + '.') === 0) {
+    return qname.slice(modName.length + 1);
+  }
+  var dot = qname.lastIndexOf('.');
+  return dot >= 0 ? qname.slice(dot + 1) : qname;
+}
+
+// ─── BUILD ITEMS ───────────────────────────────────────────────────────────
+// "Reached from entry" = forward reachability set from any def in the
+// entry module. In inline mode we walk OUT_DEFS; in lazy mode we walk
+// OUT_MODS (module-level) and mark every def in those modules.
+function reachableFromEntry() {
+  var reachedDefs = new Set();
+  if (!ENTRY_MODULE) return reachedDefs;
+  var entryIdx = MODULES.indexOf(ENTRY_MODULE);
+
+  if (HAS_DEF_EDGES) {
+    // Seed with every def in the entry module, BFS forward via OUT_DEFS.
+    var seeds = [];
+    for (var di = 0; di < DEF_NAMES.length; di++) {
+      if (DEF_MODULES[di] === entryIdx) seeds.push(di);
+    }
+    var queue = seeds.slice();
+    var visited = new Set(seeds);
+    while (queue.length > 0) {
+      var d = queue.shift();
+      reachedDefs.add(d);
+      var outs = OUT_DEFS[d];
+      if (!outs) continue;
+      for (var j = 0; j < outs.length; j++) {
+        var t = outs[j];
+        if (!visited.has(t)) {
+          visited.add(t);
+          queue.push(t);
+        }
+      }
+    }
+    return reachedDefs;
+  }
+
+  // Module-level fallback (lazy mode).
+  if (entryIdx < 0) return reachedDefs;
+  var reachedMods = new Set([entryIdx]);
+  var queue = [entryIdx];
+  while (queue.length > 0) {
+    var m = queue.shift();
+    var outs = OUT_MODS.get(m) || [];
+    for (var k = 0; k < outs.length; k++) {
+      if (!reachedMods.has(outs[k])) {
+        reachedMods.add(outs[k]);
+        queue.push(outs[k]);
+      }
+    }
+  }
+  for (var di = 0; di < DEF_MODULES.length; di++) {
+    if (reachedMods.has(DEF_MODULES[di])) reachedDefs.add(di);
+  }
+  return reachedDefs;
+}
+
+// Forward reachable from a single def — used for "downstream count".
+function forwardReachableFrom(defIdx) {
+  if (HAS_DEF_EDGES) {
+    var visited = new Set([defIdx]);
+    var queue = [defIdx];
+    while (queue.length > 0) {
+      var d = queue.shift();
+      var outs = OUT_DEFS[d];
+      if (!outs) continue;
+      for (var j = 0; j < outs.length; j++) {
+        if (!visited.has(outs[j])) {
+          visited.add(outs[j]);
+          queue.push(outs[j]);
+        }
+      }
+    }
+    visited.delete(defIdx);
+    return visited.size;
+  }
+  // module-level fallback: count defs in modules reachable from this def's module.
+  var mi = DEF_MODULES[defIdx];
+  if (mi < 0) return 0;
+  var reachedMods = new Set([mi]);
+  var queue = [mi];
+  while (queue.length > 0) {
+    var m = queue.shift();
+    var outs = OUT_MODS.get(m) || [];
+    for (var k = 0; k < outs.length; k++) {
+      if (!reachedMods.has(outs[k])) {
+        reachedMods.add(outs[k]);
+        queue.push(outs[k]);
+      }
+    }
+  }
+  var count = 0;
+  for (var di = 0; di < DEF_MODULES.length; di++) {
+    if (reachedMods.has(DEF_MODULES[di]) && di !== defIdx) count++;
+  }
+  return count;
+}
+
+// Module-level BFS distance from entry to module mi. -1 if unreachable.
+function moduleDistanceFromEntry(mi) {
+  if (!ENTRY_MODULE) return -1;
+  var entryIdx = MODULES.indexOf(ENTRY_MODULE);
+  if (entryIdx < 0) return -1;
+  if (mi === entryIdx) return 0;
+  var visited = new Set([entryIdx]);
+  var queue = [[entryIdx, 0]];
+  while (queue.length > 0) {
+    var pair = queue.shift();
+    var m = pair[0], d = pair[1];
+    var outs = OUT_MODS.get(m) || [];
+    for (var k = 0; k < outs.length; k++) {
+      var t = outs[k];
+      if (t === mi) return d + 1;
+      if (!visited.has(t)) {
+        visited.add(t);
+        queue.push([t, d + 1]);
+      }
+    }
+  }
+  return -1;
+}
+
+// Shortest path of def-indices from any entry-module def to `defIdx`.
+// Returns [] when unreachable. Uses OUT_DEFS if available, else a
+// module-level path projection.
+function chainToDef(defIdx) {
+  if (!ENTRY_MODULE) return [];
+  var entryIdx = MODULES.indexOf(ENTRY_MODULE);
+  if (entryIdx < 0) return [];
+
+  if (HAS_DEF_EDGES) {
+    // BFS from each entry-module def, looking for defIdx.
+    var seeds = [];
+    for (var di = 0; di < DEF_NAMES.length; di++) {
+      if (DEF_MODULES[di] === entryIdx) seeds.push(di);
+    }
+    var parents = new Map();
+    var visited = new Set();
+    seeds.forEach(function(s) { visited.add(s); parents.set(s, -1); });
+    var queue = seeds.slice();
+    while (queue.length > 0) {
+      var d = queue.shift();
+      if (d === defIdx) break;
+      var outs = OUT_DEFS[d];
+      if (!outs) continue;
+      for (var j = 0; j < outs.length; j++) {
+        var t = outs[j];
+        if (!visited.has(t)) {
+          visited.add(t);
+          parents.set(t, d);
+          queue.push(t);
+        }
+      }
+    }
+    if (!parents.has(defIdx)) return [];
+    var path = [];
+    var cur = defIdx;
+    while (cur !== -1 && cur !== undefined) {
+      path.unshift(cur);
+      cur = parents.get(cur);
+    }
+    return path.map(function(d) { return DEF_NAMES[d]; });
+  }
+
+  // Module-level chain: BFS modules from entry to def's module, then
+  // synthesize qname-ish labels — but we use module names for non-terminal
+  // steps since we don't have a leaf-level chain.
+  var targetMi = DEF_MODULES[defIdx];
+  if (targetMi < 0) return [];
+  var visited = new Set([entryIdx]);
+  var parents = new Map();
+  parents.set(entryIdx, -1);
+  var queue = [entryIdx];
+  while (queue.length > 0) {
+    var m = queue.shift();
+    if (m === targetMi) break;
+    var outs = OUT_MODS.get(m) || [];
+    for (var k = 0; k < outs.length; k++) {
+      var t = outs[k];
+      if (!visited.has(t)) {
+        visited.add(t);
+        parents.set(t, m);
+        queue.push(t);
+      }
+    }
+  }
+  if (!parents.has(targetMi)) return [];
+  var modPath = [];
+  var cur = targetMi;
+  while (cur !== -1 && cur !== undefined) {
+    modPath.unshift(cur);
+    cur = parents.get(cur);
+  }
+  var chain = modPath.map(function(mi) { return MODULES[mi]; });
+  // Append the def itself at the tip when it's not already the module name.
+  if (chain[chain.length - 1] !== DEF_NAMES[defIdx]) {
+    chain.push(DEF_NAMES[defIdx]);
+  }
+  return chain;
+}
+
+function severityBucket(downstreamCount) {
+  // Three tiers chosen so toy corpora still produce a non-trivial split.
+  // Big projects naturally float their critical-mass items into 'high'.
+  if (downstreamCount >= 50) return 'high';
+  if (downstreamCount >= 5)  return 'med';
+  return 'low';
+}
+
+function buildItems() {
+  var reached = reachableFromEntry();
+
+  for (var di = 0; di < DEF_NAMES.length; di++) {
+    var st = DEF_STATES[di];
+    if (st !== 1 && st !== 2) continue;  // only P and H end up as cards
+    var mi = DEF_MODULES[di];
+    var modName = (mi >= 0 && mi < MODULES.length) ? MODULES[mi] : '<?>';
+    var isReached = reached.has(di);
+    var downstream = forwardReachableFrom(di);
+    var sev = severityBucket(downstream);
+    var modDist = moduleDistanceFromEntry(mi);
+    var etaDepth = (modDist >= 0) ? Math.max(1, modDist) : null;
+
+    var lane;
+    if (st === 1) {
+      // Postulate
+      lane = isReached ? 'postulates' : 'indirect';
+    } else {
+      // Hole
+      if (isReached) {
+        lane = (etaDepth !== null && etaDepth <= 1) ? 'blocking' : 'indirect';
+      } else {
+        lane = 'indirect';
+      }
+    }
+
+    ITEMS.push({
+      id: 'def-' + di,
+      defIdx: di,
+      qname: DEF_NAMES[di],
+      name: DEF_LOCAL[di] || DEF_NAMES[di],
+      module: modName,
+      kind: st === 1 ? 'P' : 'H',
+      file: null,
+      line: null,
+      sev: sev,
+      lane: lane,
+      etaDepth: etaDepth,
+      downstreamCount: downstream,
+      isReached: isReached
+    });
+  }
+}
+
+// ─── RENDER STATS ─────────────────────────────────────────────────────────
+function renderStats() {
+  var holes = 0, postulates = 0, failed = 0, blocking = 0;
+  for (var di = 0; di < DEF_STATES.length; di++) {
+    if (DEF_STATES[di] === 1) postulates++;
+    if (DEF_STATES[di] === 2) holes++;
+    if (DEF_STATES[di] === 3) failed++;
+  }
+  // count failed modules from the failedModules list too
+  failed += FAILED_MODULES.size;
+  ITEMS.forEach(function(it) { if (it.isReached) blocking++; });
+
+  document.getElementById('stat-holes').innerHTML       = holes + ' <span class="delta delta-flat">·</span>';
+  document.getElementById('stat-postulates').innerHTML  = postulates + ' <span class="delta delta-flat">·</span>';
+  document.getElementById('stat-blocking').innerHTML    = blocking + ' <span class="delta delta-flat">·</span>';
+  document.getElementById('stat-failed').innerHTML      = failed + ' <span class="delta delta-flat">·</span>';
+
+  // severity-pill counts
+  var sevAll = 0, sevHi = 0, sevMd = 0, sevLo = 0;
+  ITEMS.forEach(function(it) {
+    sevAll++;
+    if (it.sev === 'high') sevHi++;
+    else if (it.sev === 'med') sevMd++;
+    else sevLo++;
+  });
+  document.getElementById('count-sev-all').textContent  = sevAll;
+  document.getElementById('count-sev-high').textContent = sevHi;
+  document.getElementById('count-sev-med').textContent  = sevMd;
+  document.getElementById('count-sev-low').textContent  = sevLo;
+}
+
+// ─── RENDER BURNDOWN ──────────────────────────────────────────────────────
+// We don't have per-commit history yet, so render a single flat marker
+// at the current totals. The placeholder explains why.
+function renderBurndown() {
+  var svg = document.getElementById('burndown-svg');
+  var W = 400, H = 38, PAD = 2;
+  var holes = 0, postulates = 0;
+  for (var di = 0; di < DEF_STATES.length; di++) {
+    if (DEF_STATES[di] === 1) postulates++;
+    if (DEF_STATES[di] === 2) holes++;
+  }
+  var maxV = Math.max(1, holes + postulates);
+  var y0 = H - PAD - ((postulates / maxV) * (H - 2*PAD));
+  var y1 = H - PAD - (((holes + postulates) / maxV) * (H - 2*PAD));
+  var x0 = PAD, x1 = W - PAD;
+  svg.innerHTML =
+    '<line x1="' + x0 + '" y1="' + y0.toFixed(1) + '" x2="' + x1 + '" y2="' + y0.toFixed(1) + '" stroke="#f06070" stroke-width="1.4" stroke-dasharray="2 3"/>' +
+    '<line x1="' + x0 + '" y1="' + y1.toFixed(1) + '" x2="' + x1 + '" y2="' + y1.toFixed(1) + '" stroke="#b977d8" stroke-width="1.4" stroke-dasharray="2 3"/>' +
+    '<circle cx="' + x1 + '" cy="' + y0.toFixed(1) + '" r="2.5" fill="#f06070"/>' +
+    '<circle cx="' + x1 + '" cy="' + y1.toFixed(1) + '" r="2.5" fill="#b977d8"/>' +
+    '<text x="' + (x0 + 4) + '" y="' + (H/2) + '" font-size="9" fill="#6e7681">n/a — no history</text>';
+}
+
+// ─── RENDER FILTERS / OPTIONS ─────────────────────────────────────────────
+function buildModuleOptions() {
+  var sel = document.getElementById('module-filter');
+  var seen = {};
+  ITEMS.forEach(function(it) { seen[it.module] = true; });
+  Object.keys(seen).sort().forEach(function(m) {
+    var o = document.createElement('option');
+    o.value = m; o.textContent = m;
+    sel.appendChild(o);
+  });
+
+  var aSel = document.getElementById('affects-filter');
+  MODULES.slice().sort().forEach(function(m) {
+    var o = document.createElement('option');
+    o.value = m; o.textContent = m;
+    aSel.appendChild(o);
+  });
+}
+
+// ─── RENDER CARDS ─────────────────────────────────────────────────────────
+function kindBadge(k) {
+  if (k === 'H') return '<span class="kind-badge kind-hole">hole</span>';
+  if (k === 'P') return '<span class="kind-badge kind-postulate">postulate</span>';
+  return '<span class="kind-badge kind-done">closed</span>';
+}
+
+function renderCardHTML(it) {
+  var sevClass = 'sev-' + (it.sev === 'done' ? 'done' : it.sev);
+  var moduleShort = it.module.split('.').slice(-3).join('.');
+  var chain = chainToDef(it.defIdx);
+  var chainHTML = chain.map(function(c, i) {
+    var last = i === chain.length - 1;
+    var first = i === 0;
+    var short = c.split('.').pop();
+    var klass = first ? 'target' : (last ? 'source' : '');
+    var arrow = i < chain.length - 1 ? '<span class="chain-arrow">→</span>' : '';
+    return '<span class="chain-node ' + klass + '" title="' + escapeHtml(c) + '">' + escapeHtml(short) + '</span>' + arrow;
+  }).join('');
+  if (chain.length === 0) {
+    chainHTML = '<span class="chain-node" style="color:#6e7681">(unreachable from goal)</span>';
+  }
+
+  var initial = it.module.split('.').pop().slice(0,2).toUpperCase();
+  var sevLabel = it.sev === 'high' ? 'HI' : (it.sev === 'med' ? 'MD' : 'LO');
+  var sevClassMeta = it.sev === 'high' ? 'severe' : (it.sev === 'med' ? 'medium' : '');
+  var etaLabel = (it.etaDepth === null || it.etaDepth === undefined) ? '—' : 'd' + it.etaDepth;
+
+  return '' +
+    '<div class="card ' + sevClass + '" data-id="' + escapeHtml(it.id) + '" data-module="' + escapeHtml(it.module) + '" data-sev="' + it.sev + '">' +
+      '<div class="card-top">' +
+        kindBadge(it.kind) +
+        '<span class="card-name" title="' + escapeHtml(it.qname) + '">' + escapeHtml(it.name) + '</span>' +
+      '</div>' +
+      '<div class="card-module" title="' + escapeHtml(it.module) + '">' + escapeHtml(moduleShort) + '</div>' +
+      '<div class="card-meta">' +
+        '<span class="meta-item ' + sevClassMeta + '" title="severity ' + sevLabel + '">' +
+          '<span class="meta-icon">·</span>' + it.downstreamCount + ' deps' +
+        '</span>' +
+        '<span class="meta-item" title="ETA depth — module hops from entry">' +
+          '<span class="meta-icon">↓</span>' + etaLabel +
+        '</span>' +
+      '</div>' +
+      '<div class="chain">' +
+        '<span class="chain-label">chain</span>' + chainHTML +
+      '</div>' +
+    '</div>';
+}
+
+function passesFilters(it) {
+  if (currentSearch) {
+    var s = currentSearch.toLowerCase();
+    if (!(it.name.toLowerCase().indexOf(s) >= 0 ||
+          it.module.toLowerCase().indexOf(s) >= 0 ||
+          it.qname.toLowerCase().indexOf(s) >= 0)) return false;
+  }
+  if (currentModule && it.module !== currentModule) return false;
+  if (currentSeverity !== 'all' && it.sev !== currentSeverity) return false;
+  return true;
+}
+
+function affectsModule(it, mod) {
+  if (it.module === mod) return true;
+  var chain = chainToDef(it.defIdx);
+  for (var i = 0; i < chain.length; i++) {
+    if (chain[i] === mod || chain[i].indexOf(mod + '.') === 0) return true;
+  }
+  return false;
+}
+
+function renderBoard() {
+  var lanes = { blocking: [], indirect: [], postulates: [], done: [] };
+  ITEMS.forEach(function(it) { lanes[it.lane].push(it); });
+
+  // Sort each lane by downstream count desc (highest impact first).
+  ['blocking', 'indirect', 'postulates'].forEach(function(k) {
+    lanes[k].sort(function(a, b) { return b.downstreamCount - a.downstreamCount; });
+  });
+
+  Object.entries(lanes).forEach(function(pair) {
+    var key = pair[0], list = pair[1];
+    var el = document.getElementById('lane-' + key);
+    var filtered = list.filter(passesFilters);
+    document.getElementById('count-' + key).textContent = filtered.length;
+    if (filtered.length === 0) {
+      if (key === 'done') {
+        el.innerHTML = '<div class="empty-lane">— no history available —</div>';
+      } else {
+        el.innerHTML = '<div class="empty-lane">— nothing here —</div>';
+      }
+      return;
+    }
+    el.innerHTML = filtered.map(renderCardHTML).join('');
+  });
+
+  // affects-mode dim
+  document.querySelectorAll('.card').forEach(function(card) {
+    card.classList.remove('dimmed', 'affects-highlight');
+    if (currentAffects) {
+      var id = card.dataset.id;
+      var it = ITEMS.find(function(x) { return x.id === id; });
+      if (!it) return;
+      if (affectsModule(it, currentAffects)) {
+        card.classList.add('affects-highlight');
+      } else {
+        card.classList.add('dimmed');
+      }
+    }
+  });
+
+  // wire card clicks
+  document.querySelectorAll('.card').forEach(function(card) {
+    card.addEventListener('click', function() {
+      var id = card.dataset.id;
+      var it = ITEMS.find(function(x) { return x.id === id; });
+      if (it) showDetail(it);
+    });
+  });
+}
+
+// ─── DETAIL PANEL ─────────────────────────────────────────────────────────
+function showDetail(it) {
+  var panel = document.getElementById('detail-panel');
+  panel.classList.add('open');
+  document.getElementById('detail-name').textContent = it.name;
+  document.getElementById('detail-module').textContent = it.module;
+
+  // file:line from moduleFiles if we have it (lazy mode), else just module path.
+  var fileLine = '';
+  if (G.moduleFiles && G.moduleFiles[it.module]) {
+    fileLine = G.moduleFiles[it.module];
+  }
+
+  var sevLabel = it.sev.toUpperCase();
+  var etaLabel = (it.etaDepth === null || it.etaDepth === undefined) ? '—' : 'd' + it.etaDepth;
+  document.getElementById('detail-meta').innerHTML =
+    '<span>' + kindBadge(it.kind) + '</span>' +
+    '<span>severity <b>' + sevLabel + '</b></span>' +
+    '<span>downstream <b>' + it.downstreamCount + '</b></span>' +
+    '<span>ETA depth <b>' + etaLabel + '</b></span>' +
+    (fileLine ? '<span title="' + escapeHtml(fileLine) + '">' + escapeHtml(fileLine) + '</span>' : '');
+
+  var chain = chainToDef(it.defIdx);
+  var chainHTML;
+  if (chain.length === 0) {
+    chainHTML = '<div style="font-size:11px;color:#6e7681;font-style:italic">' +
+                'No path from the entry module — this item is dead code or unreachable.</div>';
+  } else {
+    chainHTML = chain.map(function(step, i) {
+      var last = i === chain.length - 1;
+      var first = i === 0;
+      var stClass = first ? 'background:#1a2330;color:#79b8ff' :
+                    last ? 'background:#2a1818;color:#ff8b95' :
+                    'background:#2d3138;color:#aaa';
+      var stLabel = first ? 'GOAL' : (last ? (it.kind === 'H' ? 'HOLE' : 'POST') : '·');
+      return '<div class="step">' +
+        '<div class="step-idx">' + (i+1) + '</div>' +
+        '<div class="step-name" title="' + escapeHtml(step) + '">' + escapeHtml(step) + '</div>' +
+        '<span class="step-state" style="' + stClass + '">' + stLabel + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
+  // Forward dependents — list a handful of direct dependents (defs that
+  // immediately depend on this one). Only available when HAS_DEF_EDGES.
+  var dependents = [];
+  if (HAS_DEF_EDGES && OUT_DEFS) {
+    for (var di = 0; di < OUT_DEFS.length; di++) {
+      var outs = OUT_DEFS[di];
+      if (!outs) continue;
+      for (var j = 0; j < outs.length; j++) {
+        if (outs[j] === it.defIdx) {
+          dependents.push(DEF_NAMES[di]);
+          break;
+        }
+      }
+      if (dependents.length >= 24) break;
+    }
+  }
+  var dependentsHTML = '';
+  if (dependents.length > 0) {
+    dependentsHTML = dependents.map(function(d) {
+      return '<div class="blk" title="' + escapeHtml(d) + '">' + escapeHtml(d) + '</div>';
+    }).join('');
+  } else if (HAS_DEF_EDGES) {
+    dependentsHTML = '<div style="font-size:11px;color:#6e7681;font-style:italic">No direct dependents found.</div>';
+  } else {
+    dependentsHTML = '<div style="font-size:11px;color:#6e7681;font-style:italic">Leaf-level edges unavailable in lazy mode — switch to inline (`--no-lazy`) to see direct dependents.</div>';
+  }
+
+  var nextAction = it.kind === 'H'
+    ? 'Attempt a proof for this hole. ETA depth ' +
+      (it.etaDepth ? '<b>d' + it.etaDepth + '</b>' : '<b>—</b>') +
+      ' means discharging it is ' +
+      (it.etaDepth === 1 ? '<b>directly</b>' : '<b>indirectly</b>') +
+      ' a step toward the goal.'
+    : 'Replace this postulate with a proof, or move it to a clearly-labelled assumptions module. ' +
+      '<b>' + it.downstreamCount + '</b> defs transitively depend on it.';
+
+  document.getElementById('detail-body').innerHTML =
+    '<div class="section">' +
+      '<h3>Full qname</h3>' +
+      '<div class="code-block">' + escapeHtml(it.qname) + '</div>' +
+    '</div>' +
+    '<div class="section">' +
+      '<h3>Dependency chain — goal → here</h3>' +
+      '<div class="dep-chain-detail">' + chainHTML + '</div>' +
+    '</div>' +
+    '<div class="section">' +
+      '<h3>Direct dependents (' + dependents.length + (dependents.length >= 24 ? '+' : '') + ')</h3>' +
+      '<div class="blocks-grid">' + dependentsHTML + '</div>' +
+    '</div>' +
+    '<div class="section">' +
+      '<h3>Recommended next action</h3>' +
+      '<div style="font-size:11.5px;color:#b8c1d1;line-height:1.5">' + nextAction + '</div>' +
+    '</div>';
+}
+
+// ─── WIRING ───────────────────────────────────────────────────────────────
+function wireUi() {
+  document.getElementById('search-box').addEventListener('input', function(e) {
+    currentSearch = e.target.value;
+    renderBoard();
+  });
+  document.getElementById('module-filter').addEventListener('change', function(e) {
+    currentModule = e.target.value;
+    renderBoard();
+  });
+  document.querySelectorAll('.sev-pill').forEach(function(p) {
+    p.addEventListener('click', function() {
+      document.querySelectorAll('.sev-pill').forEach(function(x) { x.classList.remove('active'); });
+      p.classList.add('active');
+      currentSeverity = p.dataset.sev;
+      renderBoard();
+    });
+  });
+  document.getElementById('affects-filter').addEventListener('change', function(e) {
+    currentAffects = e.target.value;
+    var mode = document.getElementById('affects-mode');
+    var state = document.getElementById('affects-mode-state');
+    if (currentAffects) {
+      mode.classList.remove('off');
+      state.textContent = currentAffects;
+    } else {
+      mode.classList.add('off');
+      state.textContent = 'off';
+    }
+    renderBoard();
+  });
+  document.getElementById('close-detail').addEventListener('click', function() {
+    document.getElementById('detail-panel').classList.remove('open');
+  });
+}
+
+init();
+</script>
+</body>
+</html>

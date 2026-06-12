@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Documentation · agda-deps</title>
+<link rel="stylesheet" href="assets/pico.min.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="topbar"><div class="bar"><a class="brand" href="index.html">agda-deps</a><nav><a href="index.html" class="active">Home</a><a href="guide.html">Guide</a><a href="examples.html">Examples</a><a href="views/index.html">Views ↗</a><a href="changelog.html">Changelog</a><a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a></nav></div></header>
+<main><div class="layout wide">
+<section class="hero">
+  <div class="wrap">
+    <h1>agda-deps</h1>
+    <p class="tag">An Agda compiler backend that maps your proof's dependency graph.</p>
+    <p class="lede">A backend for the Agda compiler. It runs inside the
+      type-checker and emits a graph of how every definition, postulate, and
+      unfinished lemma depends on the others &mdash; as Graphviz DOT, an
+      interactive HTML view, or stable JSON for downstream tooling.</p>
+    <div class="cta">
+      <a class="btn primary" href="guide.html">Read the guide</a>
+      <a class="btn" href="views/index.html">Browse the views ↗</a>
+      <a class="btn" href="examples.html">Examples</a>
+    </div>
+    <pre class="hero-cmd"><code>cabal run agda-deps -- --format=html --view=module-dag-pods \
+  --with-source -i test/ -o out/ test/Test.agda</code></pre>
+    <div class="legend"><strong>Node state:</strong><span><i class="dot" style="background:var(--d)"></i>Defined</span><span><i class="dot" style="background:var(--p)"></i>Postulate</span><span><i class="dot" style="background:var(--h)"></i>Hole</span><span><i class="dot" style="background:var(--f)"></i>Failed</span></div>
+  </div>
+</section>
+
+<section class="strip"><div class="wrap stats"><div class="stat"><div class="num">3</div><div class="lbl">output formats</div></div><div class="stat"><div class="num">14</div><div class="lbl">HTML views</div></div><div class="stat"><div class="num">4</div><div class="lbl">node states</div></div></div></section>
+
+<section class="block"><div class="wrap">
+  <h2>Four states, one colour each</h2>
+  <p class="block-lede">Every node in the graph is one of four states. The
+    whole tool is built around making the unfinished ones (holes, postulates,
+    failed modules) easy to find and reason about.</p>
+  <div class="state-grid"><div class="state-card" style="--c:var(--d)"><div class="badge">D</div><div><strong>Defined</strong><p>Function, datatype, record — elaborated normally.</p></div></div><div class="state-card" style="--c:var(--p)"><div class="badge">P</div><div><strong>Postulate</strong><p>An axiom / postulate. A type-level promise, no body.</p></div></div><div class="state-card" style="--c:var(--h)"><div class="badge">H</div><div><strong>Hole</strong><p>Contains an unsolved meta (a <code>?</code> in source).</p></div></div><div class="state-card" style="--c:var(--f)"><div class="badge">F</div><div><strong>Failed</strong><p>Module whose type-check failed under <code>--keep-going</code>.</p></div></div></div>
+</div></section>
+
+<section class="block alt"><div class="wrap">
+  <h2>Three output formats</h2>
+  <div class="cards three"><div class="card"><div class="card-tag">Graphviz</div><h3>DOT</h3><p>A <code>.dot</code> graph you can pipe into Graphviz (<code>dot -Tsvg</code>) or any DOT-aware tool. The default format.</p></div><div class="card"><div class="card-tag">Interactive</div><h3>HTML</h3><p>A self-contained page in one of 14 views — from module DAGs to source-linked reading order. <code>--lazy</code> splits files for very large corpora.</p></div><div class="card"><div class="card-tag">v2 graph.json</div><h3>JSON</h3><p>A stable artifact for downstream tooling: <code>packed</code> (base64 CSR) or <code>expanded</code> (arrays of records) &mdash; a versioned wire contract consumers can pin to.</p></div></div>
+</div></section>
+
+<section class="block"><div class="wrap">
+  <h2>Modes &amp; flags worth knowing</h2>
+  <div class="modes"><div class="mode"><code>--keep-going</code><span>Survive type-check errors; the failing module is tagged <code>F</code>.</span></div><div class="mode"><code>--skip-agda</code><span>Module-level graph straight from a source scan — no elaboration, milliseconds at any scale.</span></div><div class="mode"><code>--with-source</code><span>Attach the source snippet to every definition; powers the reading / IDE views.</span></div><div class="mode"><code>--lazy</code><span>Split HTML across files so 100k-node projects stay responsive (needs an HTTP server).</span></div><div class="mode"><code>--no-externals</code><span>Drop everything outside the project root — stdlib and all — from the graph.</span></div><div class="mode"><code>--resolve-deps</code><span>Pin Agda's search path to the <code>.agda-lib</code> <code>depend:</code> closure.</span></div><div class="mode"><code>--with-term-hashes</code><span>Emit a canonicalised <code>Word64</code> fingerprint per definition subterm into the JSON.</span></div><div class="mode"><code>--theme / --config</code><span>Colour presets and a kebab-case YAML mirror of every CLI flag.</span></div></div>
+  <p class="more"><a href="guide.html#backend-flags">Full flag reference in the guide →</a></p>
+</div></section>
+
+<section class="block alt"><div class="wrap">
+  <h2>The views</h2>
+  <p class="block-lede">14 HTML views, each answering a different question.
+    Below is a live slice &mdash; click any to open it, or see the
+    <a href="views/index.html">full gallery</a>.</p>
+  <div class="view-grid"><a class="view-card" href="views/module-dag-pods/deps.html"><span class="vframe"><iframe src="views/module-dag-pods/deps.html" loading="lazy" scrolling="no" title="Module DAG pods"></iframe><span class="open">Open ↗</span></span><span class="vmeta"><strong>Module DAG pods</strong><code>--view=module-dag-pods</code><em>Default. Expandable module pods, dagre layout.</em></span></a><a class="view-card" href="views/cytoscape/deps.html"><span class="vframe"><iframe src="views/cytoscape/deps.html" loading="lazy" scrolling="no" title="Cytoscape compound"></iframe><span class="open">Open ↗</span></span><span class="vmeta"><strong>Cytoscape compound</strong><code>--view=cytoscape</code><em>Force-directed modules-as-boxes with a rich sidebar.</em></span></a><a class="view-card" href="views/sigma/deps.html"><span class="vframe"><iframe src="views/sigma/deps.html" loading="lazy" scrolling="no" title="Sigma (WebGL)"></iframe><span class="open">Open ↗</span></span><span class="vmeta"><strong>Sigma (WebGL)</strong><code>--view=sigma</code><em>WebGL renderer that scales to ~1M nodes.</em></span></a><a class="view-card" href="views/progress-dashboard/deps.html"><span class="vframe"><iframe src="views/progress-dashboard/deps.html" loading="lazy" scrolling="no" title="Progress dashboard"></iframe><span class="open">Open ↗</span></span><span class="vmeta"><strong>Progress dashboard</strong><code>--view=progress-dashboard</code><em>KPI board: completeness %, hole debt, hot modules.</em></span></a><a class="view-card" href="views/critical-path-holes/deps.html"><span class="vframe"><iframe src="views/critical-path-holes/deps.html" loading="lazy" scrolling="no" title="Critical-path holes"></iframe><span class="open">Open ↗</span></span><span class="vmeta"><strong>Critical-path holes</strong><code>--view=critical-path-holes</code><em>Kanban of proof obligations upstream of the goal.</em></span></a><a class="view-card" href="views/sunburst-hierarchy/deps.html"><span class="vframe"><iframe src="views/sunburst-hierarchy/deps.html" loading="lazy" scrolling="no" title="Sunburst hierarchy"></iframe><span class="open">Open ↗</span></span><span class="vmeta"><strong>Sunburst hierarchy</strong><code>--view=sunburst-hierarchy</code><em>D3 sunburst over the dotted-module tree.</em></span></a><a class="view-card" href="views/source-centric/deps.html"><span class="vframe"><iframe src="views/source-centric/deps.html" loading="lazy" scrolling="no" title="Source-centric"></iframe><span class="open">Open ↗</span></span><span class="vmeta"><strong>Source-centric</strong><code>--view=source-centric</code><em>Code-first reading view with a minimap.</em></span></a><a class="view-card" href="views/cartographic-atlas/deps.html"><span class="vframe"><iframe src="views/cartographic-atlas/deps.html" loading="lazy" scrolling="no" title="Cartographic atlas"></iframe><span class="open">Open ↗</span></span><span class="vmeta"><strong>Cartographic atlas</strong><code>--view=cartographic-atlas</code><em>A topographic map of the whole project.</em></span></a></div>
+</div></section>
+
+<section class="block"><div class="wrap">
+  <h2>Documentation</h2>
+  <div class="doc-grid"><a class="doc-card" href="guide.html"><strong>Guide</strong><span>Install, flags, views, YAML config, and the v2 JSON schema.</span></a><a class="doc-card" href="examples.html"><strong>Examples</strong><span>One runnable command per feature, with empirical defaults.</span></a><a class="doc-card" href="changelog.html"><strong>Changelog</strong><span>Everything shipped, newest first.</span></a><a class="doc-card" href="roadmap.html"><strong>Roadmap</strong><span>Forward-looking work that's actively planned.</span></a><a class="doc-card" href="backlog.html"><strong>Backlog</strong><span>Ideas parked for later, plus approaches consciously set aside.</span></a></div>
+</div></section>
+</div></main>
+<footer class="site-footer"><div class="wrap"><div><a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div><div class="muted">Built from the repository’s Markdown by <code>docs/build.py</code>. <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div></div></footer>
+</body>
+</html>
