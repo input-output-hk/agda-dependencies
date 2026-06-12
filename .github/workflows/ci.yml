@@ -107,6 +107,32 @@ jobs:
         pipx run check-jsonschema --schemafile schema/graph-v2-expanded.schema.json \
           ci-out/expanded/deps.json
 
+    - name: Check the committed schema still matches the Haskell source of truth
+      # The expanded wire shape is described once in AgdaDeps.Backend.Wire;
+      # `--emit-schema` regenerates the JSON Schema from it. This guards
+      # against *silent* schema drift (a new producer field that plain
+      # JSON-Schema validation would accept because additionalProperties is
+      # open): if the generated schema diverges from the committed oracle,
+      # the wire shape changed and schema/graph-v2-expanded.schema.json must
+      # be updated deliberately in the same change.
+      run: |
+        cabal run -v0 agda-deps -- --emit-schema > ci-out/generated.schema.json
+        python3 schema/check_schema.py ci-out/generated.schema.json \
+          schema/graph-v2-expanded.schema.json
+
+    - name: Check expanded output against the golden snapshot
+      # Content regression guard (beyond shape/schema): node states, kinds,
+      # edges, provenance, reexports, subterm hashes must match the
+      # committed golden. Normalises away build- / environment-volatile
+      # fields (producer, layout x/y, absolute file paths) first. Reuses
+      # the --with-signatures --with-term-hashes output generated above.
+      # If a change is intended, regenerate:
+      #   agda-deps --json-mode=expanded --with-signatures --with-term-hashes … |
+      #     python3 schema/golden_check.py emit /dev/stdin > test/golden/expanded.golden.json
+      run: |
+        python3 schema/golden_check.py check ci-out/expanded/deps.json \
+          test/golden/expanded.golden.json
+
     - name: Upload generated artefacts
       uses: actions/upload-artifact@v4
       with:

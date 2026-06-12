@@ -43,6 +43,14 @@ positional is the Agda module). Backend flags are documented in
 `commandLineFlags` in `src/AgdaDeps/Backend.hs` and listed in
 [README.md](README.md).
 
+For a stable on-`PATH` binary (so callers don't hunt under
+`dist-newstyle/`): `cabal install exe:agda-deps
+--overwrite-policy=always`. `agda-deps --version` reports the full
+build fingerprint (version + git rev + date + GHC) — the same string
+stamped into `graph.json` as `"producer"` — so "which build is this?"
+needs no mtime/`git log` forensics. `--numeric-version` stays the bare
+number for parsing.
+
 No test suite, no lint config. Exercise the backend against `test/` —
 entry point `test/Test.agda`. CI (`.github/workflows/ci.yml`) builds
 and runs the binary across `dot` / `html` / `html --lazy` / `json`
@@ -129,8 +137,20 @@ src/AgdaDeps/
   Util.hs                         isWithFun, jsString, dedupOrd,
                                   hex-colour parsing, argv inspection.
   Backend/
-    GraphJson.hs                  v2 graph.json schema. Single source
-                                  of truth for the wire shape.
+    Wire.hs                       Single source of truth for the v2
+                                  *expanded* wire shape: field tables
+                                  (wire name + SchemaDoc + byte encoder)
+                                  + SchemaDoc ADT. Generates the JSON
+                                  Schema (`--emit-schema`, CI-diffed vs
+                                  the committed schema/ oracle by
+                                  schema/check_schema.py) AND encodes the
+                                  output (`encodeExpanded`). Owns the
+                                  expanded wire tags (wireState/Kind/…).
+    GraphJson.hs                  v2 graph.json emitter. Packed + --lazy
+                                  are hand-rolled here; expanded's
+                                  buildExpandedJson builds an ExpandedGraph
+                                  and defers encoding to Wire.encodeExpanded,
+                                  so its field set IS Wire's by construction.
     Html.hs                       renderHtml / renderLazyHtml +
                                   renderHtmlFromInput (used by
                                   SkipAgda). templateRawFor.
@@ -177,6 +197,25 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges (topsort DP)
   produced for `Record` / `Datatype` / `Constructor` / `Projection`
   too — not just `Function` (`funInline`). Without the top-level
   `defCopy` short-circuit, ghost defs surface in the importing module.
+
+- **`ignoreDef`'s `funInline` drop is deliberate — don't remove it
+  (round-8 don't-revert).** It looks redundant with the `defCopy` guard
+  (the old "from instantiated modules" comment was wrong: module copies
+  are `defCopy`, caught earlier). Its real effect is dropping user
+  `{-# INLINE #-}` functions, and that is *correct*: Agda inlines every
+  call to an INLINE function into the caller's body during
+  type-checking, upstream of `compileDefAD`, so by the time the Backend
+  sees the elaborated `Defn` the INLINE function has **zero incoming
+  edges** (callers reference its body, e.g. `_+_`, not the function).
+  Keeping it as a node therefore adds a permanent zero-caller orphan
+  that a downstream dead-code pass flags as a false `dead`. The lost
+  call edges are *not* a contraction artefact and are unrecoverable from
+  post-elaboration syntax — verified by `test/InlineGap.agda`
+  (`twice` + `useInline`/`aliasTwice`): dropping the pragma makes all
+  three `⇝ twice` edges reappear; disabling the `funInline` rule keeps
+  `twice` as a node but the callers still point at `_+_`. Producer-side
+  recovery would need pre-inline abstract syntax; the consumer-side
+  source scan is the right fix. See [Backlog.md](Backlog.md) (#3).
 
 - **Scope captured per-module, not per-definition** —
   `getCurrentScope` runs in `moduleSetup`, not in each
@@ -399,17 +438,43 @@ the v2 `graph.json` consumed by HTML → letter `"D"` / `"P"` / `"H"` /
 All HTML views consume the v2 schema; `--format=json` emits it
 directly. The **expanded** form has a machine-readable JSON Schema at
 [`schema/graph-v2-expanded.schema.json`](schema/graph-v2-expanded.schema.json)
-(draft 2020-12). `buildExpandedJson` remains the source of truth — the
-schema is generated to match it and CI validates freshly-generated
-expanded output against it (`check-jsonschema`). `required`
-covers the fields emitted since v2 inception; additive fields
-(`nodeKeyVersion`, `producer`, `definitionEdgesProvenance`,
-`definitionSubterm*`, `externals_summary`, per-def `line`/`access`/`type`)
-are optional, and `additionalProperties` is open, so it validates older
-and forward-compatible output too. The `packed` form and `--lazy`
-layout are not (yet) schematised. When you change `buildExpandedJson`,
-update the schema and re-run the validation. Three conventions for
-downstream consumers:
+(draft 2020-12). `required` covers the fields emitted since v2
+inception; additive fields (`nodeKeyVersion`, `producer`,
+`definitionEdgesProvenance`, `definitionSubterm*`, `externals_summary`,
+per-def `line`/`access`/`type`) are optional, and `additionalProperties`
+is open, so it validates older and forward-compatible output too. The
+`packed` form and `--lazy` layout are not (yet) schematised.
+
+**Schema single-source-of-truth + drift check (do not hand-edit the
+committed schema casually).** The expanded wire shape is described once
+in `AgdaDeps.Backend.Wire` (field tables + a small `SchemaDoc` ADT).
+`agda-deps --emit-schema` regenerates the JSON Schema from it, and CI
+(`schema/check_schema.py`) fails if that regenerated schema diverges
+*structurally* (ignoring `description`/`$id`/`$schema`/`title`, sorting
+`required`/`enum`) from the committed
+`schema/graph-v2-expanded.schema.json`. So the committed file is a
+frozen **oracle**: to change the wire shape you change `Wire.hs`, the
+check fails, and you update the committed schema deliberately in the
+same change — no silent schema drift. CI still also runs
+`check-jsonschema` of freshly-generated expanded output against the
+committed schema (conformance). **Emission goes through the same field
+tables:** `buildExpandedJson` builds an `ExpandedGraph` and calls
+`encodeExpanded` (= `encodeObject expandedFields`), which emits *only*
+fields present in the tables. So a field cannot be emitted without being
+in `Wire.hs` (hence in the generated schema), and the generated schema
+cannot diverge from the committed oracle without CI failing:
+emitted-bytes ≡ `Wire.hs` ≡ committed, by construction. `Wire.hs` is
+also the single source of the expanded wire tags (`wireState` /
+`wireKind` / `wireAccess`; `GraphJson` no longer carries its own
+`stateLetter`/`kindTag`/etc.). The `packed` form and `--lazy` layout are
+still hand-rolled in `GraphJson` and not covered. Two further guards:
+`Wire.validateExpanded` (run by `buildExpandedJson`, which `error`s on
+violation) asserts the cross-array length + edge-endpoint invariants the
+schema can't express; and a committed golden
+(`test/golden/expanded.golden.json` + `schema/golden_check.py`, CI-diffed)
+catches *content* regressions (states/kinds/edges/…) after normalising
+out build/layout/path-volatile fields. Three conventions for downstream
+consumers:
 
 - **Schema version.** Every payload starts with `"v": 2`. Expanded
   form additionally emits `"schemaVersion": 2` and `"mode": "expanded"`.

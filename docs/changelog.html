@@ -9,12 +9,95 @@
 </head>
 <body>
 <header class="topbar"><div class="bar"><a class="brand" href="index.html">agda-deps</a><nav><a href="index.html">Home</a><a href="guide.html">Guide</a><a href="examples.html">Examples</a><a href="views/index.html">Views ↗</a><a href="changelog.html" class="active">Changelog</a><a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a></nav></div></header>
-<main><div class="layout"><aside class="toc"><div class="toc-inner"><div class="toc-title">On this page</div><nav><a class="lvl2" href="#2026-06-05--agda-deps--build-provenance-stamped-into-graphjson">2026-06-05 — agda-deps — build provenance stamped into graph.json</a><a class="lvl2" href="#2026-06-05--agda-deps--same-named-helpers-no-longer-collapse-e1-node-collision">2026-06-05 — agda-deps — same-named helpers no longer collapse (E1 node collision)</a><a class="lvl2" href="#2026-06-05--agda-deps--opt-in-normalised--implicit-signatures">2026-06-05 — agda-deps — opt-in normalised / implicit signatures</a><a class="lvl2" href="#2026-06-04--agda-deps--rendered-type-signatures---with-signatures">2026-06-04 — agda-deps — rendered type signatures (--with-signatures)</a><a class="lvl2" href="#2026-06-01--agda-deps----agda-html-dir--sunburst-open-source">2026-06-01 — agda-deps — --agda-html-dir + sunburst &quot;Open source&quot;</a><a class="lvl2" href="#2026-05-29--agda-deps----lenient-imports-docs---resolve-deps-partial---keep-going-emission">2026-05-29 — agda-deps — --lenient-imports docs, --resolve-deps, partial --keep-going emission</a><a class="lvl3" href="#--lenient-imports----safe-incompatibility-documented">--lenient-imports × --safe incompatibility documented</a><a class="lvl3" href="#--resolve-deps-flag">--resolve-deps flag</a><a class="lvl3" href="#partial-def-level-emission-under---keep-going">Partial def-level emission under --keep-going</a><a class="lvl2" href="#2026-05-29--agda-deps--remove-the-14-view-shortcut-boolean-flags">2026-05-29 — agda-deps — remove the 14 view-shortcut boolean flags</a><a class="lvl2" href="#2026-05-28--agda-deps--round-6-p3-ast-subterm-fingerprinting">2026-05-28 — agda-deps — round-6 P3 (AST subterm fingerprinting)</a><a class="lvl2" href="#2026-05-27--agda-deps--yaml-config-agda-depsyml">2026-05-27 — agda-deps — YAML config (.agda-deps.yml)</a><a class="lvl3" href="#schema-and-discovery">Schema and discovery</a><a class="lvl2" href="#2026-05-27--agda-deps--edge-provenance-tagging">2026-05-27 — agda-deps — edge-provenance tagging</a><a class="lvl2" href="#2026-05-27--agda-deps--lazy-mode-placeholder-detail-files-for-modules-with-no-kept-defs">2026-05-27 — agda-deps — lazy-mode placeholder detail files for modules with no kept defs</a><a class="lvl2" href="#2026-05-26--agda-deps----no-externals-actually-drops-externals--externals_summary">2026-05-26 — agda-deps — --no-externals actually drops externals + externals_summary</a><a class="lvl3" href="#--no-externals-actually-drops-externals">--no-externals actually drops externals</a><a class="lvl3" href="#externals_summary-top-level-field">externals_summary top-level field</a><a class="lvl2" href="#2026-05-26--agda-deps--per-definition-line-access-instance-reverse-edges">2026-05-26 — agda-deps — per-definition line, access, instance reverse edges</a><a class="lvl2" href="#2026-05-25--agda-deps--node-identity-and-dead-private-recovery-fixes">2026-05-25 — agda-deps — node-identity and dead-private recovery fixes</a><a class="lvl2" href="#2026-05-23--feature-batch-for-re-exports--kind--edge-contraction">2026-05-23 — Feature batch for re-exports / kind / edge contraction</a><a class="lvl3" href="#edge-contraction-through-ignored-defs">Edge contraction through ignored defs</a><a class="lvl3" href="#kind-discriminator-on-definitions">kind discriminator on definitions</a><a class="lvl3" href="#reexports-in-expanded-json">reexports[] in expanded JSON</a><a class="lvl2" href="#2026-05-22--g12--external-feature-request-batch-157c332">2026-05-22 — G12 · external feature-request batch (157c332)</a><a class="lvl2" href="#g11----skip-agda-b952db9">G11 — --skip-agda (b952db9)</a><a class="lvl2" href="#g10--scaling-to-1m-defs--100k-modules-f6606c3">G10 — Scaling to ~1M defs / 100k modules (f6606c3)</a><a class="lvl2" href="#g9--multi-view-html-system">G9 — Multi-view HTML system</a><a class="lvl2" href="#g8--custom---help-agdadepshelp">G8 — Custom --help (AgdaDeps.Help)</a><a class="lvl2" href="#g7--partial-compilation-under---keep-going">G7 — Partial compilation under --keep-going</a><a class="lvl2" href="#g6--auto-discover-agda-lib-for-non-cwd-invocations-64f3955">G6 — Auto-discover .agda-lib for non-cwd invocations (64f3955)</a><a class="lvl2" href="#g5--bump-to-agda-29-7f50db8">G5 — Bump to Agda 2.9 (7f50db8)</a><a class="lvl2" href="#g4--linked-source-view-edda6a5-76fbe68">G4 — Linked source view (edda6a5, 76fbe68)</a><a class="lvl2" href="#g3--node-colouring-by-state-0283d32">G3 — Node colouring by state (0283d32)</a><a class="lvl2" href="#g2--html-interactive-backend-0283d32">G2 — HTML interactive backend (0283d32)</a><a class="lvl2" href="#g1--remove-nix-scaffolding-0283d32">G1 — Remove nix scaffolding (0283d32)</a></nav></div></aside><div class="prose"><h1 id="changelog">Changelog</h1>
+<main><div class="layout"><aside class="toc"><div class="toc-inner"><div class="toc-title">On this page</div><nav><a class="lvl2" href="#2026-06-12--agda-deps--expanded-graph-invariants--golden-snapshot-phase-3">2026-06-12 — agda-deps — expanded-graph invariants + golden snapshot (phase 3)</a><a class="lvl2" href="#2026-06-12--agda-deps--expanded-emission-routed-through-the-schema-source-of-truth-phase-2">2026-06-12 — agda-deps — expanded emission routed through the schema source of truth (phase 2)</a><a class="lvl2" href="#2026-06-12--agda-deps--expanded-schema-single-source-of-truth--drift-check-phase-1">2026-06-12 — agda-deps — expanded-schema single source of truth + drift check (phase 1)</a><a class="lvl2" href="#2026-06-12--agda-deps----version-reports-the-build-fingerprint-install-recipe">2026-06-12 — agda-deps — --version reports the build fingerprint; install recipe</a><a class="lvl2" href="#2026-06-05--agda-deps--build-provenance-stamped-into-graphjson">2026-06-05 — agda-deps — build provenance stamped into graph.json</a><a class="lvl2" href="#2026-06-05--agda-deps--same-named-helpers-no-longer-collapse-e1-node-collision">2026-06-05 — agda-deps — same-named helpers no longer collapse (E1 node collision)</a><a class="lvl2" href="#2026-06-05--agda-deps--opt-in-normalised--implicit-signatures">2026-06-05 — agda-deps — opt-in normalised / implicit signatures</a><a class="lvl2" href="#2026-06-04--agda-deps--rendered-type-signatures---with-signatures">2026-06-04 — agda-deps — rendered type signatures (--with-signatures)</a><a class="lvl2" href="#2026-06-01--agda-deps----agda-html-dir--sunburst-open-source">2026-06-01 — agda-deps — --agda-html-dir + sunburst &quot;Open source&quot;</a><a class="lvl2" href="#2026-05-29--agda-deps----lenient-imports-docs---resolve-deps-partial---keep-going-emission">2026-05-29 — agda-deps — --lenient-imports docs, --resolve-deps, partial --keep-going emission</a><a class="lvl3" href="#--lenient-imports----safe-incompatibility-documented">--lenient-imports × --safe incompatibility documented</a><a class="lvl3" href="#--resolve-deps-flag">--resolve-deps flag</a><a class="lvl3" href="#partial-def-level-emission-under---keep-going">Partial def-level emission under --keep-going</a><a class="lvl2" href="#2026-05-29--agda-deps--remove-the-14-view-shortcut-boolean-flags">2026-05-29 — agda-deps — remove the 14 view-shortcut boolean flags</a><a class="lvl2" href="#2026-05-28--agda-deps--round-6-p3-ast-subterm-fingerprinting">2026-05-28 — agda-deps — round-6 P3 (AST subterm fingerprinting)</a><a class="lvl2" href="#2026-05-27--agda-deps--yaml-config-agda-depsyml">2026-05-27 — agda-deps — YAML config (.agda-deps.yml)</a><a class="lvl3" href="#schema-and-discovery">Schema and discovery</a><a class="lvl2" href="#2026-05-27--agda-deps--edge-provenance-tagging">2026-05-27 — agda-deps — edge-provenance tagging</a><a class="lvl2" href="#2026-05-27--agda-deps--lazy-mode-placeholder-detail-files-for-modules-with-no-kept-defs">2026-05-27 — agda-deps — lazy-mode placeholder detail files for modules with no kept defs</a><a class="lvl2" href="#2026-05-26--agda-deps----no-externals-actually-drops-externals--externals_summary">2026-05-26 — agda-deps — --no-externals actually drops externals + externals_summary</a><a class="lvl3" href="#--no-externals-actually-drops-externals">--no-externals actually drops externals</a><a class="lvl3" href="#externals_summary-top-level-field">externals_summary top-level field</a><a class="lvl2" href="#2026-05-26--agda-deps--per-definition-line-access-instance-reverse-edges">2026-05-26 — agda-deps — per-definition line, access, instance reverse edges</a><a class="lvl2" href="#2026-05-25--agda-deps--node-identity-and-dead-private-recovery-fixes">2026-05-25 — agda-deps — node-identity and dead-private recovery fixes</a><a class="lvl2" href="#2026-05-23--feature-batch-for-re-exports--kind--edge-contraction">2026-05-23 — Feature batch for re-exports / kind / edge contraction</a><a class="lvl3" href="#edge-contraction-through-ignored-defs">Edge contraction through ignored defs</a><a class="lvl3" href="#kind-discriminator-on-definitions">kind discriminator on definitions</a><a class="lvl3" href="#reexports-in-expanded-json">reexports[] in expanded JSON</a><a class="lvl2" href="#2026-05-22--g12--external-feature-request-batch-157c332">2026-05-22 — G12 · external feature-request batch (157c332)</a><a class="lvl2" href="#g11----skip-agda-b952db9">G11 — --skip-agda (b952db9)</a><a class="lvl2" href="#g10--scaling-to-1m-defs--100k-modules-f6606c3">G10 — Scaling to ~1M defs / 100k modules (f6606c3)</a><a class="lvl2" href="#g9--multi-view-html-system">G9 — Multi-view HTML system</a><a class="lvl2" href="#g8--custom---help-agdadepshelp">G8 — Custom --help (AgdaDeps.Help)</a><a class="lvl2" href="#g7--partial-compilation-under---keep-going">G7 — Partial compilation under --keep-going</a><a class="lvl2" href="#g6--auto-discover-agda-lib-for-non-cwd-invocations-64f3955">G6 — Auto-discover .agda-lib for non-cwd invocations (64f3955)</a><a class="lvl2" href="#g5--bump-to-agda-29-7f50db8">G5 — Bump to Agda 2.9 (7f50db8)</a><a class="lvl2" href="#g4--linked-source-view-edda6a5-76fbe68">G4 — Linked source view (edda6a5, 76fbe68)</a><a class="lvl2" href="#g3--node-colouring-by-state-0283d32">G3 — Node colouring by state (0283d32)</a><a class="lvl2" href="#g2--html-interactive-backend-0283d32">G2 — HTML interactive backend (0283d32)</a><a class="lvl2" href="#g1--remove-nix-scaffolding-0283d32">G1 — Remove nix scaffolding (0283d32)</a></nav></div></aside><div class="prose"><h1 id="changelog">Changelog</h1>
 <p>History of notable changes to <code>agda-deps</code>. Reverse-chronological. For
 runnable recipes see <a href="examples.html">Examples.md</a>; for forward-looking
 work see <a href="roadmap.html">TODO.md</a>; for deferred / refused ideas see
 <a href="backlog.html">Backlog.md</a>.</p>
 <hr />
+<h2 id="2026-06-12--agda-deps--expanded-graph-invariants--golden-snapshot-phase-3">2026-06-12 — <code>agda-deps</code> — expanded-graph invariants + golden snapshot (phase 3)</h2>
+<ul>
+<li><strong><code>toExpandedGraph :: GraphInput -&gt; ExpandedGraph</code></strong> extracted from
+<code>buildExpandedJson</code> (now a thin validate-then-encode wrapper).</li>
+<li><strong><code>Wire.validateExpanded</code></strong> asserts the structural invariants JSON
+Schema can't express — <code>definitionEdgesProvenance</code> length == edges,
+<code>definitionSubterm{Hashes,Depths}</code> length == definitions, and every
+edge endpoint names a definition. They hold by construction, so
+<code>buildExpandedJson</code> <code>error</code>s on a violation (a regression assertion,
+not user-facing).</li>
+<li><strong>Golden snapshot guard.</strong> <code>test/golden/expanded.golden.json</code> +
+<code>schema/golden_check.py</code> catch <em>content</em> regressions (states, kinds,
+edges, provenance, subterm hashes) the schema can't — the normaliser
+strips build/layout/path-volatile fields (<code>producer</code>, per-def <code>x</code>/<code>y</code>,
+absolute paths → sorted basenames) so it's portable across CI. A new
+CI step diffs the freshly-generated expanded output against it.</li>
+<li>Output remains byte-identical (phase 3 is a refactor + new guards).</li>
+</ul>
+<h2 id="2026-06-12--agda-deps--expanded-emission-routed-through-the-schema-source-of-truth-phase-2">2026-06-12 — <code>agda-deps</code> — expanded emission routed through the schema source of truth (phase 2)</h2>
+<p>Completes the single-source design: the expanded <code>graph.json</code> is now
+<em>encoded</em> from the same <code>AgdaDeps.Backend.Wire</code> field tables that
+generate the schema, so the gap is closed by construction.</p>
+<ul>
+<li><strong><code>buildExpandedJson</code> builds an <code>ExpandedGraph</code> and calls
+<code>encodeExpanded</code></strong> (<code>= encodeObject expandedFields</code>). Each field table
+row carries the wire name, schema fragment, and byte encoder together,
+so a field cannot be emitted without appearing in the generated schema
+(and the CI oracle check forces the committed schema to match). The
+old hand-rolled per-field string assembly (<code>defJson</code>, <code>pairJson</code>,
+<code>provJson</code>, <code>reExportsArrayJson</code>, the subterm-array fields) is gone.</li>
+<li><strong><code>Wire</code> now owns the expanded wire tags</strong> (<code>wireState</code> / <code>wireKind</code> /
+<code>wireAccess</code>); the duplicate <code>stateLetter</code> / <code>kindTag</code> / <code>accessTag</code> /
+<code>provJson</code> in <code>GraphJson</code> were removed.</li>
+<li><strong>Output is byte-identical.</strong> Verified against goldens from the
+pre-reroute emitter across <code>default</code>, <code>--with-signatures --with-term-hashes</code>, <code>--no-externals</code>, and <code>--keep-going</code> on the test
+corpus — every byte matches. <code>packed</code> mode and <code>--lazy</code> are untouched
+(still hand-rolled in <code>GraphJson</code>).</li>
+</ul>
+<h2 id="2026-06-12--agda-deps--expanded-schema-single-source-of-truth--drift-check-phase-1">2026-06-12 — <code>agda-deps</code> — expanded-schema single source of truth + drift check (phase 1)</h2>
+<p>Closes the silent-schema-drift gap: open <code>additionalProperties</code> meant a
+new producer field could slip past JSON-Schema validation undocumented.</p>
+<ul>
+<li><strong><code>AgdaDeps.Backend.Wire</code></strong> describes the v2 <em>expanded</em> wire shape
+once (field tables + a small <code>SchemaDoc</code> ADT mirroring the committed
+schema's <code>$defs</code>).</li>
+<li><strong><code>agda-deps --emit-schema</code></strong> prints the JSON Schema generated from
+that description (no Agda run / input file needed).</li>
+<li><strong><code>schema/check_schema.py</code></strong> + a CI step diff the generated schema
+against the committed <code>schema/graph-v2-expanded.schema.json</code>
+<em>structurally</em> (ignoring <code>description</code>/<code>$id</code>/<code>$schema</code>/<code>title</code>,
+sorting <code>required</code>/<code>enum</code>). The committed file stays a frozen oracle
+— never overwritten; a wire-shape change must update it deliberately
+in the same change, so the check fails on drift. (The existing
+<code>check-jsonschema</code> conformance run is unchanged.)</li>
+<li>Phase 1 is schema-only and adds <strong>no</strong> new runtime fields and does
+<strong>not</strong> reroute emission, so <code>graph.json</code> output is byte-identical.
+Phase 2 will route <code>buildExpandedJson</code>'s encoding through the same
+<code>Wire</code> field tables (emitted-bytes ≡ schema by construction).</li>
+</ul>
+<h2 id="2026-06-12--agda-deps----version-reports-the-build-fingerprint-install-recipe">2026-06-12 — <code>agda-deps</code> — <code>--version</code> reports the build fingerprint; install recipe</h2>
+<p>Closes the "which build is this?" / stable-binary-path item from the
+Jolteon usage analysis (~30 transcript Bash calls were binary
+archaeology).</p>
+<ul>
+<li><strong><code>--version</code> / <code>-V</code> now print the full build fingerprint</strong> — version
+<ul>
+<li>git revision + build date + compiling GHC, the same string stamped
+into <code>graph.json</code> as <code>"producer"</code>. Previously <code>--version</code> printed only
+the bare semver (<code>agda-deps 1.1</code>), despite the docs claiming otherwise,
+so identifying a binary still required <code>mtime</code>-vs-<code>git log</code> forensics.
+<code>--numeric-version</code> is unchanged (bare <code>1.1</code>) for tooling that parses
+it.</li>
+</ul></li>
+<li><strong>Documented <code>cabal install</code> recipe</strong> (README <em>Install a stable
+binary</em>, CLAUDE.md <em>Build / run</em>): <code>cabal install exe:agda-deps --overwrite-policy=always</code> puts a stable binary on <code>PATH</code> so callers
+stop hunting under <code>dist-newstyle/</code>.</li>
+<li><strong><code>AGDA_DEPS_GIT_REV</code> override</strong> for <code>BuildInfoTH</code>. <code>cabal install</code>
+builds from an sdist with no <code>.git</code>, so the TH git splice otherwise
+reports <code>git unknown</code>; the env var lets an installer stamp the commit
+(<code>AGDA_DEPS_GIT_REV=$(git rev-parse --short=12 HEAD) cabal install …</code>).
+In-tree builds (<code>cabal build</code> / <code>cabal run</code>) are unaffected — git wins
+when present, so the fingerprint stays byte-identical there.</li>
+</ul>
 <h2 id="2026-06-05--agda-deps--build-provenance-stamped-into-graphjson">2026-06-05 — <code>agda-deps</code> — build provenance stamped into <code>graph.json</code></h2>
 <ul>
 <li><strong>Build fingerprint baked into every binary (<code>BuildInfo</code>).</strong> A new

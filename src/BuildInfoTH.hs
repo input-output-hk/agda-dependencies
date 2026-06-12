@@ -16,6 +16,7 @@ import           Control.Monad              (filterM)
 import           Language.Haskell.TH         (Exp, Q, runIO)
 import           Language.Haskell.TH.Syntax  (addDependentFile, lift)
 import           System.Directory            (doesFileExist)
+import           System.Environment          (lookupEnv)
 import           System.Exit                 (ExitCode (..))
 import           System.Process              (readProcessWithExitCode)
 
@@ -54,14 +55,26 @@ runGit args = do
     _                           -> Nothing
 
 -- | The short revision, with a @+@ suffix when the tree is dirty.
+--
+-- When @git@ yields a revision (the common dev build, in-tree), that
+-- wins and the result is byte-identical to before. When @git@ fails —
+-- notably an sdist build under @cabal install@, which has no @.git@ —
+-- fall back to the @AGDA_DEPS_GIT_REV@ environment variable so an
+-- installer can still stamp the revision
+-- (@AGDA_DEPS_GIT_REV=$(git rev-parse --short=12 HEAD) cabal install …@);
+-- only if that is also unset do we report @"unknown"@.
 captureGit :: IO String
 captureGit = do
   mrev <- runGit ["rev-parse", "--short=12", "HEAD"]
   case mrev of
-    Nothing  -> pure "unknown"
     Just rev -> do
       dirty <- gitDirty
       pure (trim rev ++ if dirty then "+" else "")
+    Nothing  -> do
+      menv <- lookupEnv "AGDA_DEPS_GIT_REV"
+      pure $ case menv of
+        Just v | not (null (trim v)) -> trim v
+        _                            -> "unknown"
   where
     trim = reverse . dropWhile (`elem` (" \r\n\t" :: String)) . reverse
 

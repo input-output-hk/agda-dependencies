@@ -41,6 +41,7 @@ import AgdaDeps.Config
   ( applyConfig, defaultConfig, discoverConfigPath, loadConfig
   , extractConfigArg, inferFormatFromOutput, cfgResolveDeps )
 import AgdaDeps.Driver  ( runAgdaArgsKeepGoing, wantsKeepGoing )
+import AgdaDeps.Backend.Wire ( expandedSchemaJson )
 import AgdaDeps.Help
   ( isHelpRequest, wantsAgdaHelp, rewriteAgdaHelp, printHelp
   , isVersionRequest, printVersion )
@@ -73,6 +74,12 @@ main = do
   case filter isVersionRequest rawArgs of
     (v:_) -> printVersion (v == "--numeric-version") >> exitSuccess
     []    -> return ()
+  -- --emit-schema prints the generated JSON Schema for expanded JSON
+  -- output and exits (no Agda run, no input file needed). CI checks this
+  -- against the committed schema/graph-v2-expanded.schema.json.
+  if "--emit-schema" `elem` rawArgs
+    then putStrLn expandedSchemaJson >> exitSuccess
+    else return ()
   -- Detect --quiet before any 'info' call.
   setQuiet ("--quiet" `elem` rawArgs)
 

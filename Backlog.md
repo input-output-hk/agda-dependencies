@@ -71,9 +71,93 @@ forward-looking items see [TODO.md](TODO.md).
   the surface area of v2 is growing. A v3 bump becomes honest at the
   next *incompatible* change.
 
+- **Warm-`.agdai` edge loss (found 2026-06-12).** The emitted graph is
+  not byte-stable across the `.agdai` cache state: a cold run (modules
+  freshly type-checked) and a warm run (modules loaded from cached
+  interfaces) emit the **same node set** but a different *edge* set —
+  on `test/Test.agda`, cold emits 213 definition edges, warm 204 (9
+  edges lost). The lost edges are out-edges of Agda-generated
+  pattern-helper functions (`Test.Int-0`, `Test.Plus-0/1`,
+  `Test.Var-0` → the `Exp` datatype / its constructors). Mechanism is
+  the documented `postModuleAD` dead-code interaction:
+  `buildInterface` runs `eliminateDeadCode`, so a module *loaded from
+  its interface* exposes a pruned `getSignature`, and the dead-private
+  recovery re-adds the *nodes* but not all of their *body* edges. Cold
+  (fresh-checked) is the more-complete/correct side. Low-impact on the
+  states (nodes are stable), but it means cached-vs-fresh runs can
+  disagree on a handful of edges. Relevant to incremental rebuild (see
+  [TODO.md](TODO.md)): a fragment cache must store *fresh-checked*
+  fragments, and doing so would actually *normalise* this discrepancy
+  rather than inherit it.
+
 ---
 
-## Refused — won't build, with rationale
+## From the Jolteon-FastBFT agent-usage analysis (2026-06-12)
+
+Source: `Jolteon-FastBFT/docs/MCP/UsageAnalysis.md` — a mining pass
+over all 60 Claude-agent session transcripts in that consumer project
+(organic behaviour, not battle-test probes). Producer-side items only;
+consumer/MCP items live in `agda-graph-explorer/Backlog.md`.
+
+- **Incremental rebuild (changed-module cones) — promoted to the
+  Roadmap 2026-06-12.** Profiled and designed; see
+  [TODO.md](TODO.md) ("Incremental rebuild — per-module fragment
+  cache"). The profile corrected the framing: on a warm `.agdai` cache
+  Agda's own load is only ~8 s — the dominant cost (~79 % of a ~151 s
+  run on a 16,769-def corpus) is *our* per-definition `compileDef` /
+  `postModule` walk, re-run in full on every rebuild. Agda's
+  `preModule` `Skip`/`Recompile` API + the already-module-keyed
+  `postCompile` dataflow make a per-module fragment cache (keyed on the
+  interface hash) a localised change rather than a rewrite. This is the
+  root cost behind the consumer-side serve-stale item; both are worth
+  having.
+
+- **Where-helper node identity (battle-test E1, HIGH).** ~~The graph
+  keys definitions by reified qualified name, so same-named
+  `where`/anonymous-module helpers silently merge into one node.~~
+  **SHIPPED 2026-06-05 — predates this analysis.** The mined
+  transcripts captured pre-fix behaviour. `nodeKey` now suffixes
+  `._.`-marked helpers with `@<binding-line>`, `hashQName`/wire
+  `name`/edge endpoints all derive from it, and `nodeKeyVersion` is
+  bumped to `2` so a stale-format cache is detectable. Regression is
+  baked into `test/Collision.agda` (imported by `test/Test.agda`):
+  `useA ⇝ QED@20 ⇝ targetA` and `useB ⇝ QED@26 ⇝ targetB` both
+  survive. See [Changelog.md](Changelog.md) (2026-06-05) and the
+  `nodeKey` gotcha in [CLAUDE.md](CLAUDE.md). Do not re-implement.
+
+- **Inliner gap, producer side — investigated 2026-06-12, deferred with
+  evidence.** Agda inlines every call to an `{-# INLINE #-}` function
+  into the caller's body *during type-checking*, before the backend
+  hook fires, so `agda-unused` reports such live definitions as `dead`
+  (three confirmed FPs in the consumer project; agents grep-verify every
+  `dead` finding, halving the tool's value). Characterised with a
+  fixture (`test/InlineGap.agda`, imported by `test/Test.agda`):
+  - The INLINE helper `twice` is dropped as a node by `ignoreDef`'s
+    `funInline` rule, and its callers `useInline` / `aliasTwice` point
+    straight at `Nat._+_` (the inlined body), never at `twice`.
+  - The lost `⇝ twice` edges are **not** a contraction artefact: with
+    the `funInline` drop disabled, `twice` reappears as a node but the
+    callers *still* point at `_+_`. The call edges are genuinely absent
+    from the elaborated `Defn` the Backend receives — Agda replaced the
+    call with the body upstream of `compileDefAD`.
+  Conclusion: **the full producer fix is not achievable from the
+  post-elaboration internal syntax** (`compileDef` has no pre-inline
+  view; recovering the edges would mean walking abstract syntax /
+  hooking before Agda's inliner, the "principled-but-complex" option).
+  And the cheap partial step — keeping INLINE functions as nodes — is
+  **net-negative**: every call site is inlined away, so the node is
+  always a zero-caller orphan that dead-code analysis flags as a false
+  `dead`. So the `funInline` drop stays (now with a don't-revert note in
+  `ignoreDef` + the CLAUDE.md gotcha), and the **consumer-side
+  source-scan union remains the right fix** (filed in
+  `agda-graph-explorer`): the textual `twice m` call survives in source
+  even when the elaborated edge does not.
+
+- **Stable installed binary path.** ~30 transcript Bash calls were
+  pure binary archaeology (`find dist-newstyle -name agda-deps`,
+  launcher checks, mtime-vs-commit forensics). Confirms the filed
+  launcher-staleness items (consumer F3.2/F4.3/F5.2/F6.1) from the
+  usage side; a `cabal install`-style stable path removes the class.
 
 From an external batch of 14 numbered feature requests, 9 shipped
 (#1, #2, #3, #4, #5b, #8, #9, #10, #11), 1 was already done (#5), and

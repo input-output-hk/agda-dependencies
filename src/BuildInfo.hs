@@ -38,9 +38,11 @@ ghcVersion = "ghc " ++ showVersion compilerVersion
 buildDate :: String
 buildDate = __DATE__ ++ " " ++ __TIME__
 
--- | Best-effort git revision captured at compile time. @"unknown"@ when
--- there's no git checkout (a source tarball); a trailing @"+"@ marks a
--- dirty working tree.
+-- | Best-effort git revision captured at compile time. A trailing
+-- @"+"@ marks a dirty working tree. When there's no git checkout (a
+-- source tarball, e.g. the sdist that @cabal install@ builds), falls
+-- back to the @AGDA_DEPS_GIT_REV@ environment variable, and only
+-- @"unknown"@ if that too is unset.
 gitRevision :: String
 gitRevision = $(gitRevisionE)
 

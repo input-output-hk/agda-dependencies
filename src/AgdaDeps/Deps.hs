@@ -826,7 +826,18 @@ ignoreDef Defn{..} = case theDef of
 
   -- Pattern-lambda / with-generated / Kan-op functions.
   Function{..} | isJust funExtLam || isWithFun funWith || isJust funIsKanOp -> True
-  -- Inlined functions (from instantiated modules).
+  -- 'funInline' functions: a user @{-# INLINE #-}@ (module-instantiation
+  -- copies are already caught by the 'defCopy' guard above, so this rule
+  -- is *not* about them — the historical "instantiated modules" comment
+  -- was wrong). DELIBERATE drop, do NOT remove: Agda inlines every call
+  -- site into the caller's body during type-checking, so by the time
+  -- 'compileDefAD' sees the elaborated 'Defn' an INLINE function has zero
+  -- *incoming* edges (the callers point at its body instead). Keeping it
+  -- would add an orphan node that a downstream dead-code analysis flags
+  -- as a false "dead". The lost call edges are unrecoverable from the
+  -- Backend's post-elaboration syntax (they're gone before the hook
+  -- fires); the principled recovery is consumer-side source scanning.
+  -- Characterised by test/InlineGap.agda; see Backlog.md.
   d@Function{..} | d ^. funInline -> True
 
   -- Primitive functions with no clauses (keeps builtin ones).

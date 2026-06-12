@@ -59,12 +59,15 @@ import AgdaDeps.Csr
   , dedupSortedInt
   )
 import AgdaDeps.Deps    ( ADDef(..), DefKind(..), DefAccess(..)
-                        , EdgeProv(..), provTag
+                        , EdgeProv(..)
                         , nodeKey, nodeKeyVersion, hashQName, collectAllQNames )
 import BuildInfo        ( buildFingerprint )
 import AgdaDeps.Layout  ( Position(..) )
 import AgdaDeps.Options ( DefState(..) )
 import AgdaDeps.Util    ( jsString )
+import AgdaDeps.Backend.Wire
+  ( ExpandedGraph(..), WireDef(..), WireEdge(..), WireExternals(..)
+  , encodeExpanded, validateExpanded )
 
 -- | Where graph data goes in the lazy split.
 data EmitMode
@@ -136,7 +139,11 @@ buildExternalsSummary externals defs =
       (revLast, _revDotty) -> reverse revLast
 
 -- | JSON for 'ExternalsSummary'. Snake-case keys ('modules',
--- 'postulates_by_module').
+-- 'postulates_by_module'). Used by the packed / @--lazy@ @graph.json@;
+-- the expanded path emits the same shape via
+-- @AgdaDeps.Backend.Wire.externalsSummaryFields@, so keep the two byte-
+-- coherent if this shape ever changes (until the lazy path also routes
+-- through Wire).
 externalsSummaryJson :: ExternalsSummary -> String
 externalsSummaryJson (ExternalsSummary mods byMod) =
   "{\"modules\":" ++ stringArrayJson (S.toAscList mods)
@@ -1170,42 +1177,32 @@ kahnRanks nMods adjOut inDeg0 =
 
 -- ** Expanded JSON shape
 
--- | Emit the v2 graph as an "expanded" JSON object: arrays of
--- records keyed by qname / module-name, no base64-encoded typed
--- arrays, no CSR adjacency. Directly readable with @JSON.parse@ and
--- no decoders, at a size cost versus the packed form on large
--- projects.
---
--- Schema (top-level keys):
---
--- @
---   { "v": 2,
---     "schemaVersion": 2,
---     "mode": "expanded",
---     "modules": [<string>, …],
---     "entryModule": <string|null>,
---     "externalModules": [<string>, …],
---     "failedModules": [<string>, …],
---     "definitions": [
---       { "id": <int>,
---         "name": <qname>,
---         "module": <module>,
---         "state": "D"|"P"|"H"|"F",
---         "kind": "function"|"projection"|"datatype"|"record"
---               |"constructor"|"postulate"|"primitive"|"other",
---         "x": <float|null>,
---         "y": <float|null>
---       }, …
---     ],
---     "definitionEdges": [[<srcQName>, <dstQName>], …],
---     "moduleEdges": [[<srcModule>, <dstModule>], …],
---     "transitiveModuleEdges": [[<srcModule>, <dstModule>], …],
---     "moduleFiles": { <moduleName>: <filePath>, … },
---     "sourceFiles": [<filePath>, …]
---   }
--- @
+-- The expanded JSON object: arrays of records keyed by qname /
+-- module-name, no base64-encoded typed arrays, no CSR adjacency.
+-- Directly readable with @JSON.parse@, at a size cost versus the packed
+-- form on large projects. The exact field set and shape are defined once
+-- in "AgdaDeps.Backend.Wire" ('expandedFields' + the @$defs@), which
+-- also generates the JSON Schema (@agda-deps --emit-schema@, CI-checked
+-- against @schema/graph-v2-expanded.schema.json@); this module only
+-- assembles the typed 'ExpandedGraph' value ('toExpandedGraph').
+
+-- | Validate-then-encode the expanded graph. Aborts on a wire-shape
+-- invariant violation ('validateExpanded') rather than shipping a
+-- malformed graph; the invariants hold by construction, so this is a
+-- regression assertion.
 buildExpandedJson :: GraphInput -> String
-buildExpandedJson GraphInput{..} =
+buildExpandedJson gi =
+  case validateExpanded eg of
+    []   -> encodeExpanded eg
+    errs -> error $ "buildExpandedJson: wire-shape invariant violation:\n"
+                 ++ unlines (map ("  - " ++) errs)
+  where eg = toExpandedGraph gi
+
+-- | Build the typed expanded-graph value from a 'GraphInput'. Single
+-- source for the emitted bytes (via 'encodeExpanded') and the structural
+-- check ('validateExpanded').
+toExpandedGraph :: GraphInput -> ExpandedGraph
+toExpandedGraph GraphInput{..} =
   let allQNames :: [QName]
       allQNames = collectAllQNames giDefs
 
@@ -1321,41 +1318,24 @@ buildExpandedJson GraphInput{..} =
                           ]
         in [ (nameOf s, nameOf t) | (s, t) <- transitiveEdgesInt idxEdges ]
 
-      -- Emit "line" / "access" / "type" only when populated; an absent
-      -- field encodes "unknown" (line) / "public" (access).
-      defJson qn =
-        let i      = M.findWithDefault (-1) qn defIndexMap
-            modN   = prettyShow (qnameModule qn)
-            stTag  = stateLetter (defState qn)
-            kdTag  = kindTag (defKind qn)
-            mx     = fmap posX (M.lookup qn giPositions)
-            my     = fmap posY (M.lookup qn giPositions)
-            lineField = case defLine qn of
-              Just ln -> ",\"line\":" ++ show ln
-              Nothing -> ""
-            accessField = case defAccess qn of
-              Just a  -> ",\"access\":" ++ jsString (accessTag a)
-              Nothing -> ""
-            typeField = case defSig qn of
-              Just s  -> ",\"type\":" ++ jsString s
-              Nothing -> ""
-        in "{\"id\":" ++ show i
-        ++ ",\"name\":" ++ jsString (nodeKey qn)
-        ++ ",\"module\":" ++ jsString modN
-        ++ ",\"state\":" ++ jsString stTag
-        ++ ",\"kind\":" ++ jsString kdTag
-        ++ lineField
-        ++ accessField
-        ++ typeField
-        ++ ",\"x\":" ++ maybe "null" showFloat mx
-        ++ ",\"y\":" ++ maybe "null" showFloat my
-        ++ "}"
+      -- Per-definition wire record; encoded by AgdaDeps.Backend.Wire's
+      -- field tables (the single source of truth shared with the schema).
+      mkWireDef qn = WireDef
+        { wdId     = M.findWithDefault (-1) qn defIndexMap
+        , wdName   = nodeKey qn
+        , wdModule = prettyShow (qnameModule qn)
+        , wdState  = defState qn
+        , wdKind   = defKind qn
+        , wdLine   = defLine qn
+        , wdAccess = defAccess qn
+        , wdType   = defSig qn
+        , wdX      = fmap posX (M.lookup qn giPositions)
+        , wdY      = fmap posY (M.lookup qn giPositions)
+        }
 
-      -- Optional diagnostic field; absent when @--no-externals@ wasn't
-      -- passed.
-      externalsSummaryField = case giExternalsSummary of
-        Just es -> ",\"externals_summary\":" ++ externalsSummaryJson es
-        Nothing -> ""
+      -- Externals summary decomposed (ascending) for the wire encoder.
+      toWireExternals (ExternalsSummary mods byMod) =
+        WireExternals (S.toAscList mods) (M.toAscList byMod)
 
       -- @"definitionSubtermHashes"@ and the parallel
       -- @"definitionSubtermDepths"@, both arrays parallel to
@@ -1377,96 +1357,28 @@ buildExpandedJson GraphInput{..} =
         , Just ds <- [_subtermDepths d]
         ]
 
-      subtermHashesField :: String
-      subtermHashesField
-        | M.null defHashesByQ = ""
-        | otherwise =
-            ",\"definitionSubtermHashes\":["
-            ++ intercalate ","
-                 [ word64ArrayJson (M.findWithDefault [] qn defHashesByQ)
-                 | qn <- defsList
-                 ]
-            ++ "]"
-
-      subtermDepthsField :: String
-      subtermDepthsField
-        | M.null defDepthsByQ = ""
-        | otherwise =
-            ",\"definitionSubtermDepths\":["
-            ++ intercalate ","
-                 [ intArrayJson (M.findWithDefault [] qn defDepthsByQ)
-                 | qn <- defsList
-                 ]
-            ++ "]"
-
-      word64ArrayJson :: [Word64] -> String
-      word64ArrayJson xs = "[" ++ intercalate "," (map show xs) ++ "]"
-
-      intArrayJson :: [Int] -> String
-      intArrayJson xs = "[" ++ intercalate "," (map show xs) ++ "]"
-
-  in "{\"v\":2"
-  ++ ",\"schemaVersion\":2"
-  ++ ",\"nodeKeyVersion\":" ++ show nodeKeyVersion
-  ++ ",\"producer\":"       ++ jsString buildFingerprint
-  ++ ",\"mode\":\"expanded\""
-  ++ ",\"modules\":"          ++ stringArrayJson modules
-  ++ ",\"entryModule\":"      ++ maybe "null" jsString giEntryModule
-  ++ ",\"externalModules\":"  ++ stringArrayJson externals
-  ++ ",\"failedModules\":"    ++ stringArrayJson failedMods
-  ++ ",\"definitions\":["     ++ intercalate "," (map defJson defsList) ++ "]"
-  ++ ",\"definitionEdges\":[" ++ intercalate "," (map pairJson defEdgePairs) ++ "]"
-  ++ ",\"definitionEdgesProvenance\":[" ++ intercalate "," (map provJson defEdgeProv) ++ "]"
-  ++ ",\"moduleEdges\":["     ++ intercalate "," (map pairJson moduleEdgePairs) ++ "]"
-  ++ ",\"transitiveModuleEdges\":[" ++ intercalate "," (map pairJson transModPairs) ++ "]"
-  ++ ",\"moduleFiles\":"      ++ stringMapJson giModuleFile
-  ++ ",\"sourceFiles\":"      ++ stringArrayJson giSourceFiles
-  ++ ",\"reexports\":"        ++ reExportsArrayJson giReExports
-  ++ subtermHashesField
-  ++ subtermDepthsField
-  ++ externalsSummaryField
-  ++ "}"
-  where
-    pairJson (a, b) = "[" ++ jsString a ++ "," ++ jsString b ++ "]"
-
-    showFloat f =
-      -- Float Show; downstream parsers accept exponent-form floats.
-      show f
-
-stateLetter :: DefState -> String
-stateLetter Defined   = "D"
-stateLetter Postulate = "P"
-stateLetter Hole      = "H"
-stateLetter Failed    = "F"
-
-kindTag :: DefKind -> String
-kindTag DKFunction    = "function"
-kindTag DKProjection  = "projection"
-kindTag DKDatatype    = "datatype"
-kindTag DKRecord      = "record"
-kindTag DKConstructor = "constructor"
-kindTag DKPostulate   = "postulate"
-kindTag DKPrimitive   = "primitive"
-kindTag DKOther       = "other"
-
--- | Lowercase tag for the @"access"@ field in expanded JSON.
-accessTag :: DefAccess -> String
-accessTag AccPrivate = "private"
-accessTag AccPublic  = "public"
-
--- | Emit a single 'EdgeProv' as its wire string (lowercase).
-provJson :: EdgeProv -> String
-provJson = jsString . provTag
-
--- | Emit @reexports@ as @[{"from": …, "to": …, "names": […]}, …]@.
--- The caller is expected to have already sorted+deduped each
--- @[String]@ payload and sorted the outer list.
-reExportsArrayJson :: [(String, String, [String])] -> String
-reExportsArrayJson xs =
-  "[" ++ intercalate "," (map one xs) ++ "]"
-  where
-    one (fromMod, toMod, names) =
-      "{\"from\":" ++ jsString fromMod
-      ++ ",\"to\":" ++ jsString toMod
-      ++ ",\"names\":" ++ stringArrayJson names
-      ++ "}"
+  -- Assemble the typed wire value; encoding + structural validation are
+  -- handled by 'buildExpandedJson' via AgdaDeps.Backend.Wire.
+  in ExpandedGraph
+       { egNodeKeyVersion = nodeKeyVersion
+       , egProducer       = buildFingerprint
+       , egModules        = modules
+       , egEntryModule    = giEntryModule
+       , egExternals      = externals
+       , egFailed         = failedMods
+       , egDefs           = map mkWireDef defsList
+       , egDefEdges       = map WireEdge defEdgePairs
+       , egDefEdgeProv    = defEdgeProv
+       , egModuleEdges    = map WireEdge moduleEdgePairs
+       , egTransModEdges  = map WireEdge transModPairs
+       , egModuleFiles    = M.toList giModuleFile
+       , egSourceFiles    = giSourceFiles
+       , egReExports      = giReExports
+       , egSubtermHashes  =
+           if M.null defHashesByQ then Nothing
+           else Just [ M.findWithDefault [] qn defHashesByQ | qn <- defsList ]
+       , egSubtermDepths  =
+           if M.null defDepthsByQ then Nothing
+           else Just [ M.findWithDefault [] qn defDepthsByQ | qn <- defsList ]
+       , egExternalsSummary = fmap toWireExternals giExternalsSummary
+       }

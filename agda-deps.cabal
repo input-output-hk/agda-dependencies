@@ -44,6 +44,7 @@ executable agda-deps
                        AgdaDeps.Deps
                        AgdaDeps.Source
                        AgdaDeps.Backend.Dot
+                       AgdaDeps.Backend.Wire
                        AgdaDeps.Backend.GraphJson
                        AgdaDeps.Backend.Html
                        AgdaDeps.Backend.Json

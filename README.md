@@ -46,6 +46,36 @@ cabal build --project-file=cabal.project.agda28 --builddir=dist-agda28 agda-deps
 Both produce byte-identical graphs (apart from the build-specific
 `producer` fingerprint stamped into `graph.json`).
 
+### Install a stable binary
+
+For repeated use (and for tooling that shells out to `agda-deps`),
+install it onto a stable path rather than calling `cabal run` or
+hunting for the binary under `dist-newstyle/`:
+
+```
+cabal install exe:agda-deps --overwrite-policy=always
+```
+
+This copies the binary to cabal's `installdir` (`~/.local/bin/` by
+default, or wherever your `~/.cabal/config` points; pass
+`--installdir=DIR` to override). Make sure that directory is on your
+`PATH`. The installed binary respects the project's `cabal.project`,
+so it builds against the pinned Agda 2.9 like `cabal build` does.
+
+Verify which build is on your `PATH` with `agda-deps --version` — it
+reports the git revision, build date, and GHC, so there's no need to
+inspect `dist-newstyle/` mtimes or `/proc/<pid>/exe` to answer "which
+build is this?".
+
+`cabal install` builds from an sdist tarball, which has no `.git`, so
+by default the installed binary reports `git unknown` (the build date
+and GHC are still captured fresh). To stamp the commit into the
+installed binary too, pass it through the environment:
+
+```
+AGDA_DEPS_GIT_REV="$(git rev-parse --short=12 HEAD)" cabal install exe:agda-deps --overwrite-policy=always
+```
+
 ## Backend flags
 
 Everything after `--` is forwarded to the backend (and to Agda's CLI):
@@ -71,7 +101,8 @@ Everything after `--` is forwarded to the backend (and to Agda's CLI):
 - `--normalise-signatures` — `normalise` each type before rendering it (semantic, fully-reduced form rather than as-written). Off by default; no effect without `--with-signatures`.
 - `--signature-implicits` — render type signatures with implicit (and irrelevant) arguments shown. Off by default; no effect without `--with-signatures`. (Named to avoid clashing with Agda's own `--show-implicit`.)
 - `--quiet` — suppress progress lines on stderr. Errors and warnings still print.
-- `--version` / `-V` / `--numeric-version` — report the `agda-deps` version and exit. (Agda has its own `--version`; we intercept first so the answer identifies *this* binary, not Agda.)
+- `--version` / `-V` — report this binary's full build fingerprint and exit: version, git revision (with a `+` suffix for a dirty tree), build date, and compiling GHC, e.g. `agda-deps 1.1 (git e34d8c9a+, built Jun 12 2026 08:49:36, ghc 9.14)`. The same string is stamped into `graph.json` as `"producer"`. (Agda has its own `--version`; we intercept first so the answer identifies *this* binary, not Agda.) Use `--numeric-version` for just the bare version number (`1.1`) when tooling needs to parse it.
+- `--emit-schema` — print the JSON Schema for expanded `graph.json` to stdout and exit (no Agda run, no input file needed). The schema is generated from the producer's own single source of truth (`AgdaDeps.Backend.Wire`); CI checks it against the committed [`schema/graph-v2-expanded.schema.json`](schema/graph-v2-expanded.schema.json). See [Consuming the JSON output](#consuming-the-json-output).
 
 Independently of `--keep-going`, every run does a **pre-compute** pass: before Agda starts, the backend scans every `.agda` / `.lagda*` file under your `-i` / `--include-path` directories for `module` / `import` declarations. The discovered module-level graph is unioned into the rendered output, so modules whose sub-tree never finished type-checking (under `--keep-going`) still appear with their import wiring; for runs that fully succeed it's a no-op union. A single stderr line summarises what the scan found.
 - `--with-source` — embed each definition's source snippet into the HTML output. Clicking a leaf opens just that definition (signature + body, plus the surrounding paragraph) in a side drawer. See [Linking to source](#linking-to-source).
@@ -370,6 +401,8 @@ Kind values (structural, derived from Agda's `theDef`): `function`, `projection`
 `reexports` rows: `{ "from": "Prelude.Init", "to": "Data.Product", "names": ["Data.Product.Σ", …] }` — each row captures `open import to public` performed in module `from`. Names are fully-qualified (matching `definitions[].name`). Walked from Agda's `iScope` (`NameSpaceId.ImportedNS` and `PublicNS`) so it includes both plain public opens and re-exports through parameterised module applications.
 
 The expanded form has a machine-readable JSON Schema (draft 2020-12) at [`schema/graph-v2-expanded.schema.json`](schema/graph-v2-expanded.schema.json). Validate any expanded `deps.json` with e.g. `pipx run check-jsonschema --schemafile schema/graph-v2-expanded.schema.json deps.json`; CI runs this on every build. Additive fields (`nodeKeyVersion`, `producer`, `definitionEdgesProvenance`, `definitionSubterm*`, `externals_summary`, per-def `line`/`access`/`type`) are optional, so older output still validates. The `packed` form is not schematised.
+
+That schema file is the committed *oracle*, but it is not hand-maintained against the producer by inspection: the expanded wire shape is described once in Haskell (`AgdaDeps.Backend.Wire`), `agda-deps --emit-schema` regenerates the schema from that description, and CI fails if the regenerated schema diverges from the committed file (`schema/check_schema.py`). So the producer cannot gain or drop a field without the committed schema being updated in the same change — closing the silent-drift gap that open-`additionalProperties` validation alone leaves.
 
 For `--lazy` HTML output, the on-disk file layout (`graph.json` + `modules/*.json` + `snippets/*.json`) is documented in [CLAUDE.md](CLAUDE.md#v2-graphjson-schema). The short version: `graph.json`'s `moduleFiles` map is the manifest — walk it to discover detail files, don't derive URLs from module names.
 

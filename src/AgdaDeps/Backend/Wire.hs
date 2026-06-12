@@ -1,0 +1,371 @@
+-- | Single Haskell source of truth for the v2 *expanded* @graph.json@
+-- wire format: both the generated JSON Schema and the byte-level
+-- encoder are derived from one set of field tables, so they cannot
+-- drift from each other.
+--
+-- * 'expandedSchemaJson' renders the JSON Schema from the field tables
+--   (surfaced by @agda-deps --emit-schema@). CI diffs it against the
+--   committed @schema/graph-v2-expanded.schema.json@ (frozen oracle)
+--   via @schema/check_schema.py@.
+-- * 'encodeExpanded' encodes an 'ExpandedGraph' to the wire JSON using
+--   the *same* field tables. 'AgdaDeps.Backend.GraphJson.buildExpandedJson'
+--   builds an 'ExpandedGraph' ('toExpandedGraph') and calls this.
+--
+-- Because each field's wire name, requiredness, schema fragment, and
+-- encoder live together in one row, a field can't be added to the
+-- output without appearing in the generated schema (and vice versa),
+-- and the CI oracle check forces the committed schema to be updated in
+-- lockstep — closing the silent-drift gap.
+--
+-- The generated schema is *structural*: no @description@ text (kept
+-- curated in the committed file), key/array order insignificant; the
+-- checker normalises both sides before comparing.
+module AgdaDeps.Backend.Wire
+  ( -- * Generated schema
+    expandedSchemaJson
+    -- * Wire encoding (single source of truth, shared with the schema)
+  , ExpandedGraph(..)
+  , WireDef(..)
+  , WireEdge(..)
+  , WireExternals(..)
+  , encodeExpanded
+  , validateExpanded
+    -- * Field-table machinery (exposed for tests / introspection)
+  , Field(..)
+  , SchemaDoc(..)
+  , expandedFields
+  , definitionFields
+  , reexportFields
+  , externalsSummaryFields
+  , defsRegistry
+  , objectSchemaOf
+  , encodeObject
+  , renderSchema
+  ) where
+
+import Data.List  ( intercalate )
+import Data.Maybe ( mapMaybe )
+import Data.Word  ( Word64 )
+import qualified Data.Set as S
+
+import AgdaDeps.Options ( DefState(..) )
+import AgdaDeps.Deps    ( DefKind(..), DefAccess(..), EdgeProv, provTag )
+import AgdaDeps.Util    ( jsString )
+
+-- * Wire value types
+--
+-- A presentation-layer mirror of the expanded shape. 'toExpandedGraph'
+-- in "AgdaDeps.Backend.GraphJson" builds these from a @GraphInput@; the
+-- field-table encoders turn them into bytes.
+
+-- | The whole expanded @graph.json@ document.
+data ExpandedGraph = ExpandedGraph
+  { egNodeKeyVersion :: Int
+  , egProducer       :: String
+  , egModules        :: [String]
+  , egEntryModule    :: Maybe String
+  , egExternals      :: [String]              -- ^ externalModules (ascending)
+  , egFailed         :: [String]              -- ^ failedModules (ascending)
+  , egDefs           :: [WireDef]
+  , egDefEdges       :: [WireEdge]
+  , egDefEdgeProv    :: [EdgeProv]            -- ^ parallel to 'egDefEdges'
+  , egModuleEdges    :: [WireEdge]
+  , egTransModEdges  :: [WireEdge]
+  , egModuleFiles    :: [(String, String)]    -- ^ ascending by key
+  , egSourceFiles    :: [String]
+  , egReExports      :: [(String, String, [String])]
+  , egSubtermHashes  :: Maybe [[Word64]]      -- ^ present iff any def carries hashes; parallel to 'egDefs'
+  , egSubtermDepths  :: Maybe [[Int]]
+  , egExternalsSummary :: Maybe WireExternals
+  }
+
+-- | One definition node.
+data WireDef = WireDef
+  { wdId     :: Int
+  , wdName   :: String
+  , wdModule :: String
+  , wdState  :: DefState
+  , wdKind   :: DefKind
+  , wdLine   :: Maybe Int
+  , wdAccess :: Maybe DefAccess
+  , wdType   :: Maybe String
+  , wdX      :: Maybe Float
+  , wdY      :: Maybe Float
+  }
+
+-- | A directed edge as a (source, target) wire-name pair.
+newtype WireEdge = WireEdge (String, String)
+
+-- | The @externals_summary@ diagnostic; lists pre-decomposed in the
+-- ascending order the wire format expects.
+data WireExternals = WireExternals
+  { weModules            :: [String]
+  , wePostulatesByModule :: [(String, [String])]
+  }
+
+-- * Wire tags for the reused enums (the expanded-format spelling).
+
+wireState :: DefState -> String
+wireState Defined   = "D"
+wireState Postulate = "P"
+wireState Hole      = "H"
+wireState Failed    = "F"
+
+wireKind :: DefKind -> String
+wireKind DKFunction    = "function"
+wireKind DKProjection  = "projection"
+wireKind DKDatatype    = "datatype"
+wireKind DKRecord      = "record"
+wireKind DKConstructor = "constructor"
+wireKind DKPostulate   = "postulate"
+wireKind DKPrimitive   = "primitive"
+wireKind DKOther       = "other"
+
+wireAccess :: DefAccess -> String
+wireAccess AccPrivate = "private"
+wireAccess AccPublic  = "public"
+
+-- * The JSON-Schema model (draft 2020-12 subset)
+
+-- | The subset of JSON Schema the expanded wire format uses; one
+-- constructor per shape in @graph-v2-expanded.schema.json@.
+data SchemaDoc
+  = SObject [String] [(String, SchemaDoc)] Bool
+    -- ^ required names, properties, @additionalProperties@ boolean.
+  | SArray SchemaDoc (Maybe Int) (Maybe Int)   -- ^ items, minItems, maxItems
+  | SMap SchemaDoc                             -- ^ object, additionalProperties = schema
+  | SString (Maybe [String])                   -- ^ optional enum
+  | SInteger (Maybe Int)                       -- ^ optional minimum
+  | SConstInt Int
+  | SConstStr String
+  | SNullableType String                       -- ^ @type: [<t>, "null"]@
+  | SRef String                                -- ^ @#/$defs/<name>@
+  deriving (Eq, Show)
+
+-- * Field tables: the single source for BOTH schema and encoder.
+
+-- | One field of a wire object. Carries its wire name, schema fragment,
+-- and encoder. Three flavours distinguish schema-requiredness from
+-- emission:
+--
+--   * 'Required' — in the schema @required@ list; always emitted.
+--   * 'Additive' — NOT in @required@ (older readers / JSON stay valid)
+--     but always emitted by the current producer (e.g. @producer@,
+--     @nodeKeyVersion@, @definitionEdgesProvenance@).
+--   * 'Optional' — not required; emitted only when the encoder yields
+--     'Just' (flag-gated fields).
+data Field a
+  = Required String SchemaDoc (a -> String)
+  | Additive String SchemaDoc (a -> String)
+  | Optional String SchemaDoc (a -> Maybe String)
+
+fName :: Field a -> String
+fName (Required n _ _) = n
+fName (Additive n _ _) = n
+fName (Optional n _ _) = n
+
+fSchema :: Field a -> SchemaDoc
+fSchema (Required _ s _) = s
+fSchema (Additive _ s _) = s
+fSchema (Optional _ s _) = s
+
+fInRequired :: Field a -> Bool
+fInRequired Required{} = True
+fInRequired _          = False
+
+-- | Object schema from a field table: @additionalProperties@ is @true@
+-- (a future additive field must not fail v2 validation).
+objectSchemaOf :: [Field a] -> SchemaDoc
+objectSchemaOf fs =
+  SObject [ fName f | f <- fs, fInRequired f ]
+          [ (fName f, fSchema f) | f <- fs ]
+          True
+
+-- | Encode an object from a field table, in field-table order (which
+-- matches the legacy emitter's byte order). 'Optional' fields whose
+-- encoder yields 'Nothing' are omitted.
+encodeObject :: [Field a] -> a -> String
+encodeObject fs a = "{" ++ intercalate "," (mapMaybe emit fs) ++ "}"
+  where
+    emit (Required n _ e) = Just (jsString n ++ ":" ++ e a)
+    emit (Additive n _ e) = Just (jsString n ++ ":" ++ e a)
+    emit (Optional n _ e) = (\v -> jsString n ++ ":" ++ v) <$> e a
+
+-- * Encoder helpers (kept byte-identical to the legacy emitter)
+
+jArray :: (a -> String) -> [a] -> String
+jArray f xs = "[" ++ intercalate "," (map f xs) ++ "]"
+
+jStrArray :: [String] -> String
+jStrArray = jArray jsString
+
+jStrMap :: [(String, String)] -> String
+jStrMap kvs = "{" ++ intercalate "," [ jsString k ++ ":" ++ jsString v | (k, v) <- kvs ] ++ "}"
+
+encEdge :: WireEdge -> String
+encEdge (WireEdge (a, b)) = "[" ++ jsString a ++ "," ++ jsString b ++ "]"
+
+-- | @{ <key>: [<str>, …], … }@ — the @postulates_by_module@ shape.
+jStrArrMap :: [(String, [String])] -> String
+jStrArrMap kvs = "{" ++ intercalate "," [ jsString k ++ ":" ++ jStrArray v | (k, v) <- kvs ] ++ "}"
+
+-- * The field tables
+
+-- | Top-level expanded object, in emission order.
+expandedFields :: [Field ExpandedGraph]
+expandedFields =
+  [ Required "v"                         (SConstInt 2)            (const "2")
+  , Required "schemaVersion"             (SConstInt 2)            (const "2")
+  , Additive "nodeKeyVersion"            (SInteger (Just 1))      (show . egNodeKeyVersion)
+  , Additive "producer"                  (SString Nothing)        (jsString . egProducer)
+  , Required "mode"                      (SConstStr "expanded")   (const (jsString "expanded"))
+  , Required "modules"                   strArr                   (jStrArray . egModules)
+  , Required "entryModule"               (SNullableType "string") (maybe "null" jsString . egEntryModule)
+  , Required "externalModules"           strArr                   (jStrArray . egExternals)
+  , Required "failedModules"             strArr                   (jStrArray . egFailed)
+  , Required "definitions"               (arrOf (SRef "definition")) (jArray (encodeObject definitionFields) . egDefs)
+  , Required "definitionEdges"           (arrOf (SRef "edge"))    (jArray encEdge . egDefEdges)
+  , Additive "definitionEdgesProvenance" (arrOf (SRef "provenance")) (jArray (jsString . provTag) . egDefEdgeProv)
+  , Required "moduleEdges"               (arrOf (SRef "edge"))    (jArray encEdge . egModuleEdges)
+  , Required "transitiveModuleEdges"     (arrOf (SRef "edge"))    (jArray encEdge . egTransModEdges)
+  , Required "moduleFiles"               (SMap (SString Nothing)) (jStrMap . egModuleFiles)
+  , Required "sourceFiles"               strArr                   (jStrArray . egSourceFiles)
+  , Required "reexports"                 (arrOf (SRef "reexport")) (jArray (encodeObject reexportFields) . egReExports)
+  , Optional "definitionSubtermHashes"   (arrOf nats)             (fmap (jArray natArr) . egSubtermHashes)
+  , Optional "definitionSubtermDepths"   (arrOf nats)             (fmap (jArray natArrI) . egSubtermDepths)
+  , Optional "externals_summary"         (SRef "externalsSummary") (fmap (encodeObject externalsSummaryFields) . egExternalsSummary)
+  ]
+  where
+    strArr   = arrOf (SString Nothing)
+    nats     = arrOf (SInteger (Just 0))
+    natArr   = jArray (show :: Word64 -> String)
+    natArrI  = jArray (show :: Int -> String)
+
+arrOf :: SchemaDoc -> SchemaDoc
+arrOf s = SArray s Nothing Nothing
+
+-- | The @definition@ object (@$defs/definition@), in @defJson@ order.
+definitionFields :: [Field WireDef]
+definitionFields =
+  [ Required "id"     (SInteger Nothing)       (show . wdId)
+  , Required "name"   (SString Nothing)        (jsString . wdName)
+  , Required "module" (SString Nothing)        (jsString . wdModule)
+  , Required "state"  (SRef "state")           (jsString . wireState . wdState)
+  , Required "kind"   (SRef "kind")            (jsString . wireKind . wdKind)
+  , Optional "line"   (SInteger (Just 1))      (fmap show . wdLine)
+  , Optional "access" (SRef "access")          (fmap (jsString . wireAccess) . wdAccess)
+  , Optional "type"   (SString Nothing)        (fmap jsString . wdType)
+  , Required "x"      (SNullableType "number") (maybe "null" show . wdX)
+  , Required "y"      (SNullableType "number") (maybe "null" show . wdY)
+  ]
+
+-- | The @reexport@ object (@$defs/reexport@), encoded from an
+-- @(from, to, names)@ row.
+reexportFields :: [Field (String, String, [String])]
+reexportFields =
+  [ Required "from"  (SString Nothing)        (\(f, _, _) -> jsString f)
+  , Required "to"    (SString Nothing)        (\(_, t, _) -> jsString t)
+  , Required "names" (arrOf (SString Nothing)) (\(_, _, ns) -> jStrArray ns)
+  ]
+
+-- | The @externalsSummary@ object (@$defs/externalsSummary@).
+externalsSummaryFields :: [Field WireExternals]
+externalsSummaryFields =
+  [ Required "modules"              (arrOf (SString Nothing))        (jStrArray . weModules)
+  , Required "postulates_by_module" (SMap (arrOf (SString Nothing))) (jStrArrMap . wePostulatesByModule)
+  ]
+
+-- | Shared @$defs@ shapes, mirroring the committed schema.
+defsRegistry :: [(String, SchemaDoc)]
+defsRegistry =
+  [ ("edge",       SArray (SString Nothing) (Just 2) (Just 2))
+  , ("state",      SString (Just ["D", "P", "H", "F"]))
+  , ("kind",       SString (Just [ "function", "projection", "datatype"
+                                  , "record", "constructor", "postulate"
+                                  , "primitive", "other" ]))
+  , ("access",     SString (Just ["private", "public"]))
+  , ("provenance", SString (Just [ "signature", "body", "where"
+                                  , "with", "unknown" ]))
+  , ("definition",       objectSchemaOf definitionFields)
+  , ("reexport",         objectSchemaOf reexportFields)
+  , ("externalsSummary", objectSchemaOf externalsSummaryFields)
+  ]
+
+-- * Rendering the schema to text
+
+jobj :: [(String, String)] -> String
+jobj kvs = "{" ++ intercalate "," [ jsString k ++ ":" ++ v | (k, v) <- kvs ] ++ "}"
+
+jarr :: [String] -> String
+jarr xs = "[" ++ intercalate "," xs ++ "]"
+
+jbool :: Bool -> String
+jbool b = if b then "true" else "false"
+
+-- | Render a 'SchemaDoc' to a compact JSON Schema fragment.
+renderSchema :: SchemaDoc -> String
+renderSchema sd = case sd of
+  SObject reqd props addP ->
+    jobj $ [ ("type", jsString "object")
+           , ("additionalProperties", jbool addP) ]
+        ++ [ ("required", jarr (map jsString reqd)) | not (null reqd) ]
+        ++ [ ("properties", jobj [ (k, renderSchema v) | (k, v) <- props ]) ]
+  SArray items mn mx ->
+    jobj $ [ ("type", jsString "array")
+           , ("items", renderSchema items) ]
+        ++ [ ("minItems", show n) | Just n <- [mn] ]
+        ++ [ ("maxItems", show n) | Just n <- [mx] ]
+  SMap val ->
+    jobj [ ("type", jsString "object")
+         , ("additionalProperties", renderSchema val) ]
+  SString Nothing   -> jobj [ ("type", jsString "string") ]
+  SString (Just es) -> jobj [ ("type", jsString "string")
+                            , ("enum", jarr (map jsString es)) ]
+  SInteger Nothing  -> jobj [ ("type", jsString "integer") ]
+  SInteger (Just m) -> jobj [ ("type", jsString "integer"), ("minimum", show m) ]
+  SConstInt n       -> jobj [ ("const", show n) ]
+  SConstStr s       -> jobj [ ("const", jsString s) ]
+  SNullableType t   -> jobj [ ("type", jarr [jsString t, jsString "null"]) ]
+  SRef name         -> jobj [ ("$ref", jsString ("#/$defs/" ++ name)) ]
+
+-- | The generated JSON Schema for the expanded @graph.json@, as text.
+expandedSchemaJson :: String
+expandedSchemaJson = jobj
+  [ ("$schema", jsString "https://json-schema.org/draft/2020-12/schema")
+  , ("title",   jsString "agda-deps v2 graph.json (expanded mode)")
+  , ("type",    jsString "object")
+  , ("additionalProperties", jbool True)
+  , ("required", jarr (map jsString [ fName f | f <- expandedFields, fInRequired f ]))
+  , ("properties", jobj [ (fName f, renderSchema (fSchema f)) | f <- expandedFields ])
+  , ("$defs", jobj [ (n, renderSchema d) | (n, d) <- defsRegistry ])
+  ]
+
+-- | Encode an 'ExpandedGraph' to the wire JSON, byte-compatible with the
+-- legacy emitter.
+encodeExpanded :: ExpandedGraph -> String
+encodeExpanded = encodeObject expandedFields
+
+-- | Structural invariants the JSON Schema cannot express: the parallel
+-- arrays line up, and every edge endpoint names a definition. Returns a
+-- list of human-readable violations ('[]' = valid). These hold by
+-- construction in the current producer, so a non-empty result is a
+-- regression — 'buildExpandedJson' aborts on it rather than emit a
+-- malformed graph.
+validateExpanded :: ExpandedGraph -> [String]
+validateExpanded eg = concat
+  [ ck (length (egDefEdgeProv eg) == length (egDefEdges eg))
+       "definitionEdgesProvenance length /= definitionEdges length"
+  , maybe [] (\hs -> ck (length hs == nDefs)
+       "definitionSubtermHashes length /= definitions length") (egSubtermHashes eg)
+  , maybe [] (\ds -> ck (length ds == nDefs)
+       "definitionSubtermDepths length /= definitions length") (egSubtermDepths eg)
+  , ck (null danglers)
+       ("definitionEdges endpoints absent from definitions, e.g. "
+        ++ show (take 3 danglers))
+  ]
+  where
+    nDefs    = length (egDefs eg)
+    names    = S.fromList (map wdName (egDefs eg))
+    danglers = [ (s, t) | WireEdge (s, t) <- egDefEdges eg
+                        , not (S.member s names) || not (S.member t names) ]
+    ck cond msg = if cond then [] else [msg]

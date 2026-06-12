@@ -9,7 +9,7 @@
 </head>
 <body>
 <header class="topbar"><div class="bar"><a class="brand" href="index.html">agda-deps</a><nav><a href="index.html">Home</a><a href="guide.html">Guide</a><a href="examples.html">Examples</a><a href="views/index.html">Views ↗</a><a href="changelog.html">Changelog</a><a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a></nav></div></header>
-<main><div class="layout"><div class="prose"><h1 id="todo">TODO</h1>
+<main><div class="layout"><aside class="toc"><div class="toc-inner"><div class="toc-title">On this page</div><nav><a class="lvl2" href="#incremental-rebuild--per-module-fragment-cache">Incremental rebuild — per-module fragment cache</a><a class="lvl3" href="#why-measured-not-guessed">Why (measured, not guessed)</a><a class="lvl3" href="#why-its-tractable-slots-into-the-existing-dataflow">Why it&#x27;s tractable (slots into the existing dataflow)</a><a class="lvl3" href="#design">Design</a><a class="lvl3" href="#correctness-invariants">Correctness invariants</a><a class="lvl3" href="#phasing">Phasing</a><a class="lvl3" href="#open-questions">Open questions</a></nav></div></aside><div class="prose"><h1 id="todo">TODO</h1>
 <p>Concrete forward-looking work on <code>agda-deps</code>.</p>
 <p>For runnable examples see <a href="examples.html">Examples.md</a>. For deferred or
 refused ideas see <a href="backlog.html">Backlog.md</a>. For shipped work see
@@ -20,6 +20,134 @@ refused ideas see <a href="backlog.html">Backlog.md</a>. For shipped work see
 once Agda 2.9 lands on Hackage. The pin currently points at a
 specific upstream commit on <code>github.com/agda/agda</code> master; bump it
 to track 2.9 fixes until release.</label></li>
+</ul>
+<hr />
+<h2 id="incremental-rebuild--per-module-fragment-cache">Incremental rebuild — per-module fragment cache</h2>
+<p><strong>Status:</strong> designed + profiled 2026-06-12, not yet implemented.
+Promoted from <a href="backlog.html">Backlog.md</a> after the cost was measured and
+the design validated against Agda's backend API.</p>
+<h3 id="why-measured-not-guessed">Why (measured, not guessed)</h3>
+<p>A full run on a 16,769-definition reference corpus (17,995 unique
+QNames, 6,080 module-import edges), <strong>warm <code>.agdai</code> cache</strong>,
+<code>--format=json --json-mode=packed</code>, breaks down as:</p>
+<table>
+<thead>
+<tr>
+<th>phase</th>
+<th>wall time</th>
+<th>share</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agda load + our <code>compileDef</code>/<code>postModule</code> walk + aggregation</td>
+<td>~127 s</td>
+<td>84 %</td>
+</tr>
+<tr>
+<td>contract edges + instance edges + access backfill + layout</td>
+<td>&lt; 1 s</td>
+<td>~0 %</td>
+</tr>
+<tr>
+<td>serialise + write (26 MB)</td>
+<td>~24 s</td>
+<td>16 %</td>
+</tr>
+<tr>
+<td><strong>total</strong></td>
+<td><strong>~151 s</strong></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Standalone <code>agda -i . Everything.agda</code> on the same warm cache returns in
+<strong>~8 s</strong>. So Agda's own interface loading is ~8 s; the remaining
+**~119 s (79 % of the run) is our per-definition backend work** — the
+<code>namesIn</code> walk over <code>defType</code> + <code>theDef</code> and the <code>postModuleAD</code>
+<code>getSignature</code> dead-private-def diff, repeated for all 16,769 defs on
+<em>every</em> rebuild even when one module changed. Layout is <strong>not</strong> a factor
+(the &gt;3000-node grid fallback is instant; sfdp only runs on small
+graphs). This is the cost the cache removes.</p>
+<h3 id="why-its-tractable-slots-into-the-existing-dataflow">Why it's tractable (slots into the existing dataflow)</h3>
+<p>Two structural facts make this a localised change, not a rewrite:</p>
+<ol type="1">
+<li><strong>Agda already exposes the incremental primitive.</strong> <code>preModule :: … -&gt; tcm (Recompile menv mod)</code> where <code>Recompile menv mod = Recompile menv | Skip mod</code>. Returning <code>Skip m</code> tells Agda <em>not</em> to call
+<code>compileDef</code>/<code>postModule</code> for that module and to reuse <code>m</code> as its
+result. Our <code>preModule</code> (<code>moduleSetup</code>) currently <em>always</em> returns
+<code>Recompile</code>.</li>
+<li><strong>Aggregation is already module-keyed and pure.</strong> <code>type ModuleRes = [Maybe ADDef]</code>, and <code>postCompileAD</code> folds the
+<code>Map TopLevelModuleName [Maybe ADDef]</code> Agda hands it
+(<code>concat . M.elems</code>) — there is no global compile-time accumulator to
+keep coherent. A <code>Skip</code>'d module's cached <code>[Maybe ADDef]</code> flows into
+that map identically to a freshly-compiled one, and every downstream
+pass (contraction, instance edges, access backfill, layout, render)
+runs on the merged set unchanged.</li>
+</ol>
+<h3 id="design">Design</h3>
+<ul>
+<li><strong>Cache unit:</strong> the value <code>postModuleAD</code> returns for a module — the
+final <code>[Maybe ADDef]</code> <em>including</em> the recovered dead-private extras
+(so a <code>Skip</code> reproduces <code>postModule</code>'s full output, not just
+<code>compileDef</code>'s). Serialise per module to
+<code>&lt;cacheDir&gt;/&lt;Module&gt;.fragment</code> (cacheDir defaulting under the output
+dir or a dotfile; behind an opt-in <code>--incremental</code> flag at first).</li>
+<li><strong>Cache key:</strong> <code>(Agda interface hash, nodeKeyVersion, content-option fingerprint)</code>. Agda's <code>iFullHash</code> already folds in the transitive
+imported-interface hashes — the same mechanism that decides <code>.agdai</code>
+validity — so a key built on it is invalidated exactly when a
+dependency change alters this module's elaborated defs. <code>nodeKeyVersion</code>
+guards the node-naming convention (same rationale as the <code>graph.json</code>
+stamp). The option fingerprint covers flags that change fragment
+<em>content</em> (<code>--with-signatures</code>, <code>--normalise-signatures</code>,
+<code>--signature-implicits</code>, <code>--with-term-hashes</code>, <code>--min-term-depth</code>,
+<code>--with-source</code>, <code>--exclude</code>, …); a mismatch forces recompute.</li>
+<li><strong>Flow:</strong> <code>preModule</code> looks up the fragment by key → hit ⇒
+<code>Skip cachedFragment</code>; miss/new ⇒ <code>Recompile</code> (current path), and
+<code>postModule</code> writes the fresh fragment before returning.</li>
+</ul>
+<h3 id="correctness-invariants">Correctness invariants</h3>
+<ul>
+<li><strong>Closed-change set in a green build.</strong> Edges are stored by qname on
+the <em>source</em> def, so only changed modules need recompute. If a
+dependency's <em>public</em> API changed, this module's interface hash
+changes too (Agda re-checks it), so it's a cache miss — no dangling
+cross-module edge can survive. This holds only for a fully
+type-checked project.</li>
+<li><strong><code>--keep-going</code> disables fragment caching</strong> (or caches only
+successfully-elaborated modules). A failed module breaks the
+consistency the invariant above relies on; fall back to the full path.</li>
+<li><strong>Cache fresh-checked fragments, not warm-loaded ones.</strong> Output is
+already not byte-stable across <code>.agdai</code> state today — a warm load
+exposes a pruned <code>getSignature</code>, so the dead-private recovery emits a
+handful fewer <em>edges</em> than a cold run (see the "Warm-<code>.agdai</code> edge
+loss" item in <a href="backlog.html">Backlog.md</a>). A fragment written from a
+fresh check captures the complete edge set; reusing it on later runs
+makes output cache-state-independent — so this design <em>fixes</em> that
+latent non-determinism rather than inheriting it, provided fragments
+are only ever written on the <code>Recompile</code> (fresh) path.</li>
+</ul>
+<h3 id="phasing">Phasing</h3>
+<ol type="1">
+<li><strong>P1 — fragment cache.</strong> The ~119 s → (only-changed-modules) win.
+Largest lever; self-contained in <code>Backend.hs</code> + a new
+<code>AgdaDeps.FragmentCache</code> (de/serialise <code>ADDef</code>).</li>
+<li><strong>P2 — incremental serialise.</strong> After P1, the ~24 s write dominates a
+small-change rebuild (~24 s of a ~32 s run). Patch only changed
+modules' slices of <code>graph.json</code> / the <code>--lazy</code> per-module files
+rather than re-emitting 26 MB. Pairs naturally with <code>--lazy</code>'s
+already-split layout.</li>
+<li><strong>Not feasible as a backend:</strong> skipping Agda's ~8 s interface load.
+Agda controls loading; a backend cannot avoid it. Cheap anyway.</li>
+</ol>
+<h3 id="open-questions">Open questions</h3>
+<ul>
+<li><code>ADDef</code> serialisation format + version (reuse the existing wire
+encoding, or a dedicated compact one?).</li>
+<li>Where <code>iFullHash</code> is reachable in <code>preModule</code> (interface may not be
+loaded at that point) vs. keying on the <code>.agdai</code> file hash directly.</li>
+<li>Cache GC / staleness for deleted modules.</li>
+<li>Couples with the consumer repo's serve-stale path — coordinate the
+rollout there.</li>
 </ul>
 </div></div></main>
 <footer class="site-footer"><div class="wrap"><div><a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div><div class="muted">Built from the repository’s Markdown by <code>docs/build.py</code>. <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div></div></footer>

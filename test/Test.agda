@@ -10,6 +10,7 @@ open import Coinductive using (Stream; zeros; mapSuc)
 open import Records using (Point; sumCoords; origin; double)
 open import Where using (sumSquares; weirdSum)
 open import Collision using (useA; useB)  -- E1 regression: same-named `where` helpers
+open import InlineGap using (useInline; useAlias)  -- inliner-gap characterisation (#3)
 
 variable a b : Set
 

@@ -7,6 +7,92 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-06-12 — `agda-deps` — expanded-graph invariants + golden snapshot (phase 3)
+
+- **`toExpandedGraph :: GraphInput -> ExpandedGraph`** extracted from
+  `buildExpandedJson` (now a thin validate-then-encode wrapper).
+- **`Wire.validateExpanded`** asserts the structural invariants JSON
+  Schema can't express — `definitionEdgesProvenance` length == edges,
+  `definitionSubterm{Hashes,Depths}` length == definitions, and every
+  edge endpoint names a definition. They hold by construction, so
+  `buildExpandedJson` `error`s on a violation (a regression assertion,
+  not user-facing).
+- **Golden snapshot guard.** `test/golden/expanded.golden.json` +
+  `schema/golden_check.py` catch *content* regressions (states, kinds,
+  edges, provenance, subterm hashes) the schema can't — the normaliser
+  strips build/layout/path-volatile fields (`producer`, per-def `x`/`y`,
+  absolute paths → sorted basenames) so it's portable across CI. A new
+  CI step diffs the freshly-generated expanded output against it.
+- Output remains byte-identical (phase 3 is a refactor + new guards).
+
+## 2026-06-12 — `agda-deps` — expanded emission routed through the schema source of truth (phase 2)
+
+Completes the single-source design: the expanded `graph.json` is now
+*encoded* from the same `AgdaDeps.Backend.Wire` field tables that
+generate the schema, so the gap is closed by construction.
+
+- **`buildExpandedJson` builds an `ExpandedGraph` and calls
+  `encodeExpanded`** (`= encodeObject expandedFields`). Each field table
+  row carries the wire name, schema fragment, and byte encoder together,
+  so a field cannot be emitted without appearing in the generated schema
+  (and the CI oracle check forces the committed schema to match). The
+  old hand-rolled per-field string assembly (`defJson`, `pairJson`,
+  `provJson`, `reExportsArrayJson`, the subterm-array fields) is gone.
+- **`Wire` now owns the expanded wire tags** (`wireState` / `wireKind` /
+  `wireAccess`); the duplicate `stateLetter` / `kindTag` / `accessTag` /
+  `provJson` in `GraphJson` were removed.
+- **Output is byte-identical.** Verified against goldens from the
+  pre-reroute emitter across `default`, `--with-signatures
+  --with-term-hashes`, `--no-externals`, and `--keep-going` on the test
+  corpus — every byte matches. `packed` mode and `--lazy` are untouched
+  (still hand-rolled in `GraphJson`).
+
+## 2026-06-12 — `agda-deps` — expanded-schema single source of truth + drift check (phase 1)
+
+Closes the silent-schema-drift gap: open `additionalProperties` meant a
+new producer field could slip past JSON-Schema validation undocumented.
+
+- **`AgdaDeps.Backend.Wire`** describes the v2 *expanded* wire shape
+  once (field tables + a small `SchemaDoc` ADT mirroring the committed
+  schema's `$defs`).
+- **`agda-deps --emit-schema`** prints the JSON Schema generated from
+  that description (no Agda run / input file needed).
+- **`schema/check_schema.py`** + a CI step diff the generated schema
+  against the committed `schema/graph-v2-expanded.schema.json`
+  *structurally* (ignoring `description`/`$id`/`$schema`/`title`,
+  sorting `required`/`enum`). The committed file stays a frozen oracle
+  — never overwritten; a wire-shape change must update it deliberately
+  in the same change, so the check fails on drift. (The existing
+  `check-jsonschema` conformance run is unchanged.)
+- Phase 1 is schema-only and adds **no** new runtime fields and does
+  **not** reroute emission, so `graph.json` output is byte-identical.
+  Phase 2 will route `buildExpandedJson`'s encoding through the same
+  `Wire` field tables (emitted-bytes ≡ schema by construction).
+
+## 2026-06-12 — `agda-deps` — `--version` reports the build fingerprint; install recipe
+
+Closes the "which build is this?" / stable-binary-path item from the
+Jolteon usage analysis (~30 transcript Bash calls were binary
+archaeology).
+
+- **`--version` / `-V` now print the full build fingerprint** — version
+  + git revision + build date + compiling GHC, the same string stamped
+  into `graph.json` as `"producer"`. Previously `--version` printed only
+  the bare semver (`agda-deps 1.1`), despite the docs claiming otherwise,
+  so identifying a binary still required `mtime`-vs-`git log` forensics.
+  `--numeric-version` is unchanged (bare `1.1`) for tooling that parses
+  it.
+- **Documented `cabal install` recipe** (README *Install a stable
+  binary*, CLAUDE.md *Build / run*): `cabal install exe:agda-deps
+  --overwrite-policy=always` puts a stable binary on `PATH` so callers
+  stop hunting under `dist-newstyle/`.
+- **`AGDA_DEPS_GIT_REV` override** for `BuildInfoTH`. `cabal install`
+  builds from an sdist with no `.git`, so the TH git splice otherwise
+  reports `git unknown`; the env var lets an installer stamp the commit
+  (`AGDA_DEPS_GIT_REV=$(git rev-parse --short=12 HEAD) cabal install …`).
+  In-tree builds (`cabal build` / `cabal run`) are unaffected — git wins
+  when present, so the fingerprint stays byte-identical there.
+
 ## 2026-06-05 — `agda-deps` — build provenance stamped into `graph.json`
 
 - **Build fingerprint baked into every binary (`BuildInfo`).** A new

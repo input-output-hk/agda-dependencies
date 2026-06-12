@@ -1,0 +1,2558 @@
+{
+  "definitionEdges": [
+    [
+      "Bool.Bool",
+      "Bool.Bool.false"
+    ],
+    [
+      "Bool.Bool",
+      "Bool.Bool.true"
+    ],
+    [
+      "Bool.Bool.false",
+      "Bool.Bool"
+    ],
+    [
+      "Bool.Bool.false",
+      "Bool.Bool.false"
+    ],
+    [
+      "Bool.Bool.true",
+      "Bool.Bool"
+    ],
+    [
+      "Bool.Bool.true",
+      "Bool.Bool.true"
+    ],
+    [
+      "Coinductive.Stream",
+      "Coinductive.Stream"
+    ],
+    [
+      "Coinductive.Stream",
+      "Coinductive.Stream.constructor"
+    ],
+    [
+      "Coinductive.Stream",
+      "Coinductive.Stream.head"
+    ],
+    [
+      "Coinductive.Stream",
+      "Coinductive.Stream.tail"
+    ],
+    [
+      "Coinductive.Stream",
+      "Coinductive.zeros"
+    ],
+    [
+      "Coinductive.Stream.constructor",
+      "Coinductive.Stream"
+    ],
+    [
+      "Coinductive.Stream.constructor",
+      "Coinductive.Stream.constructor"
+    ],
+    [
+      "Coinductive.Stream.head",
+      "Coinductive.Stream"
+    ],
+    [
+      "Coinductive.Stream.head",
+      "Coinductive.Stream.constructor"
+    ],
+    [
+      "Coinductive.Stream.tail",
+      "Coinductive.Stream"
+    ],
+    [
+      "Coinductive.Stream.tail",
+      "Coinductive.Stream.constructor"
+    ],
+    [
+      "Coinductive.mapSuc",
+      "Coinductive.Stream"
+    ],
+    [
+      "Coinductive.mapSuc",
+      "Coinductive.Stream.head"
+    ],
+    [
+      "Coinductive.mapSuc",
+      "Coinductive.Stream.tail"
+    ],
+    [
+      "Coinductive.mapSuc",
+      "Coinductive.mapSuc"
+    ],
+    [
+      "Coinductive.mapSuc",
+      "Coinductive.zeros"
+    ],
+    [
+      "Coinductive.mapSuc",
+      "Nat.Nat"
+    ],
+    [
+      "Coinductive.mapSuc",
+      "Nat.Nat.suc"
+    ],
+    [
+      "Coinductive.zeros",
+      "Coinductive.Stream"
+    ],
+    [
+      "Coinductive.zeros",
+      "Coinductive.Stream.head"
+    ],
+    [
+      "Coinductive.zeros",
+      "Coinductive.Stream.tail"
+    ],
+    [
+      "Coinductive.zeros",
+      "Coinductive.zeros"
+    ],
+    [
+      "Coinductive.zeros",
+      "Nat.Nat"
+    ],
+    [
+      "Coinductive.zeros",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Collision._.QED@20",
+      "Collision.targetA"
+    ],
+    [
+      "Collision._.QED@20",
+      "Nat.Nat"
+    ],
+    [
+      "Collision._.QED@26",
+      "Collision.targetB"
+    ],
+    [
+      "Collision._.QED@26",
+      "Nat.Nat"
+    ],
+    [
+      "Collision.targetA",
+      "Nat.Nat"
+    ],
+    [
+      "Collision.targetA",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Collision.targetB",
+      "Nat.Nat"
+    ],
+    [
+      "Collision.targetB",
+      "Nat.Nat.suc"
+    ],
+    [
+      "Collision.targetB",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Collision.useA",
+      "Collision._.QED@20"
+    ],
+    [
+      "Collision.useA",
+      "Nat.Nat"
+    ],
+    [
+      "Collision.useB",
+      "Collision._.QED@26"
+    ],
+    [
+      "Collision.useB",
+      "Nat.Nat"
+    ],
+    [
+      "Holes.incomplete",
+      "Holes.unsolved#meta.3"
+    ],
+    [
+      "Holes.incomplete",
+      "Nat.Nat"
+    ],
+    [
+      "Holes.magic",
+      "Nat.Nat"
+    ],
+    [
+      "Holes.unsolved#meta.3",
+      "Nat.Nat"
+    ],
+    [
+      "Holes.useMagic",
+      "Holes.magic"
+    ],
+    [
+      "Holes.useMagic",
+      "Nat.Nat"
+    ],
+    [
+      "Holes.useMagic",
+      "Nat._+_"
+    ],
+    [
+      "InlineGap.aliasTwice",
+      "Nat.Nat"
+    ],
+    [
+      "InlineGap.aliasTwice",
+      "Nat._+_"
+    ],
+    [
+      "InlineGap.useAlias",
+      "InlineGap.aliasTwice"
+    ],
+    [
+      "InlineGap.useAlias",
+      "Nat.Nat"
+    ],
+    [
+      "InlineGap.useInline",
+      "Nat.Nat"
+    ],
+    [
+      "InlineGap.useInline",
+      "Nat._+_"
+    ],
+    [
+      "List.List",
+      "List.List.[]"
+    ],
+    [
+      "List.List",
+      "List.List._\u2237_"
+    ],
+    [
+      "List.List.[]",
+      "List.List"
+    ],
+    [
+      "List.List.[]",
+      "List.List.[]"
+    ],
+    [
+      "List.List._\u2237_",
+      "List.List"
+    ],
+    [
+      "List.List._\u2237_",
+      "List.List._\u2237_"
+    ],
+    [
+      "List.List._\u2237_",
+      "List._\u2237_-0"
+    ],
+    [
+      "List.List._\u2237_",
+      "List._\u2237_-1"
+    ],
+    [
+      "Nat.Nat",
+      "Nat.Nat.suc"
+    ],
+    [
+      "Nat.Nat",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Nat.Nat.suc",
+      "Nat.Nat"
+    ],
+    [
+      "Nat.Nat.suc",
+      "Nat.Nat.suc"
+    ],
+    [
+      "Nat.Nat.suc",
+      "Nat.suc-0"
+    ],
+    [
+      "Nat.Nat.zero",
+      "Nat.Nat"
+    ],
+    [
+      "Nat.Nat.zero",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Nat._*_",
+      "Nat.Nat"
+    ],
+    [
+      "Nat._*_",
+      "Nat.Nat.suc"
+    ],
+    [
+      "Nat._*_",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Nat._*_",
+      "Nat._*_"
+    ],
+    [
+      "Nat._*_",
+      "Nat._+_"
+    ],
+    [
+      "Nat._+_",
+      "Nat.Nat"
+    ],
+    [
+      "Nat._+_",
+      "Nat.Nat.suc"
+    ],
+    [
+      "Nat._+_",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Nat._+_",
+      "Nat._+_"
+    ],
+    [
+      "Nat._-_",
+      "Nat.Nat"
+    ],
+    [
+      "Nat._-_",
+      "Nat.Nat.suc"
+    ],
+    [
+      "Nat._-_",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Nat._-_",
+      "Nat._-_"
+    ],
+    [
+      "Nat._<_",
+      "Bool.Bool"
+    ],
+    [
+      "Nat._<_",
+      "Bool.Bool.false"
+    ],
+    [
+      "Nat._<_",
+      "Bool.Bool.true"
+    ],
+    [
+      "Nat._<_",
+      "Nat.Nat"
+    ],
+    [
+      "Nat._<_",
+      "Nat.Nat.suc"
+    ],
+    [
+      "Nat._<_",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Nat._<_",
+      "Nat._<_"
+    ],
+    [
+      "Nat._==_",
+      "Bool.Bool"
+    ],
+    [
+      "Nat._==_",
+      "Bool.Bool.false"
+    ],
+    [
+      "Nat._==_",
+      "Bool.Bool.true"
+    ],
+    [
+      "Nat._==_",
+      "Nat.Nat"
+    ],
+    [
+      "Nat._==_",
+      "Nat.Nat.suc"
+    ],
+    [
+      "Nat._==_",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Nat._==_",
+      "Nat._==_"
+    ],
+    [
+      "Records.Box",
+      "Nat.Nat"
+    ],
+    [
+      "Records.Box",
+      "Records.Box.constructor"
+    ],
+    [
+      "Records.Box",
+      "Records.Box.contents"
+    ],
+    [
+      "Records.Box",
+      "Records.Box.count"
+    ],
+    [
+      "Records.Box.constructor",
+      "Nat.Nat"
+    ],
+    [
+      "Records.Box.constructor",
+      "Records.Box"
+    ],
+    [
+      "Records.Box.constructor",
+      "Records.Box.constructor"
+    ],
+    [
+      "Records.Box.contents",
+      "Nat.Nat"
+    ],
+    [
+      "Records.Box.contents",
+      "Records.Box"
+    ],
+    [
+      "Records.Box.contents",
+      "Records.Box.constructor"
+    ],
+    [
+      "Records.Box.count",
+      "Nat.Nat"
+    ],
+    [
+      "Records.Box.count",
+      "Records.Box"
+    ],
+    [
+      "Records.Box.count",
+      "Records.Box.constructor"
+    ],
+    [
+      "Records.Point",
+      "Nat.Nat"
+    ],
+    [
+      "Records.Point",
+      "Records.Point.constructor"
+    ],
+    [
+      "Records.Point",
+      "Records.Point.x"
+    ],
+    [
+      "Records.Point",
+      "Records.Point.y"
+    ],
+    [
+      "Records.Point",
+      "Records.origin"
+    ],
+    [
+      "Records.Point.constructor",
+      "Nat.Nat"
+    ],
+    [
+      "Records.Point.constructor",
+      "Records.Point"
+    ],
+    [
+      "Records.Point.constructor",
+      "Records.Point.constructor"
+    ],
+    [
+      "Records.Point.x",
+      "Nat.Nat"
+    ],
+    [
+      "Records.Point.x",
+      "Records.Point"
+    ],
+    [
+      "Records.Point.x",
+      "Records.Point.constructor"
+    ],
+    [
+      "Records.Point.y",
+      "Nat.Nat"
+    ],
+    [
+      "Records.Point.y",
+      "Records.Point"
+    ],
+    [
+      "Records.Point.y",
+      "Records.Point.constructor"
+    ],
+    [
+      "Records.double",
+      "Nat.Nat"
+    ],
+    [
+      "Records.double",
+      "Nat._*_"
+    ],
+    [
+      "Records.double",
+      "Records.Box"
+    ],
+    [
+      "Records.double",
+      "Records.Box.count"
+    ],
+    [
+      "Records.mkPoint",
+      "Nat.Nat"
+    ],
+    [
+      "Records.mkPoint",
+      "Records.Point"
+    ],
+    [
+      "Records.mkPoint",
+      "Records.Point.x"
+    ],
+    [
+      "Records.mkPoint",
+      "Records.Point.y"
+    ],
+    [
+      "Records.mkPoint",
+      "Records.origin"
+    ],
+    [
+      "Records.origin",
+      "Nat.Nat"
+    ],
+    [
+      "Records.origin",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Records.origin",
+      "Records.Point"
+    ],
+    [
+      "Records.origin",
+      "Records.Point.x"
+    ],
+    [
+      "Records.origin",
+      "Records.Point.y"
+    ],
+    [
+      "Records.origin",
+      "Records.origin"
+    ],
+    [
+      "Records.sumCoords",
+      "Nat.Nat"
+    ],
+    [
+      "Records.sumCoords",
+      "Nat._+_"
+    ],
+    [
+      "Records.sumCoords",
+      "Records.Point"
+    ],
+    [
+      "Records.sumCoords",
+      "Records.Point.x"
+    ],
+    [
+      "Records.sumCoords",
+      "Records.Point.y"
+    ],
+    [
+      "Records.sumCoords",
+      "Records.origin"
+    ],
+    [
+      "Test.Exp",
+      "Test.Exp.Int"
+    ],
+    [
+      "Test.Exp",
+      "Test.Exp.Plus"
+    ],
+    [
+      "Test.Exp",
+      "Test.Exp.Var"
+    ],
+    [
+      "Test.Exp.Int",
+      "Nat.Nat"
+    ],
+    [
+      "Test.Exp.Int",
+      "Test.Exp"
+    ],
+    [
+      "Test.Exp.Int",
+      "Test.Exp.Int"
+    ],
+    [
+      "Test.Exp.Int",
+      "Test.Int-0"
+    ],
+    [
+      "Test.Exp.Plus",
+      "Test.Exp"
+    ],
+    [
+      "Test.Exp.Plus",
+      "Test.Exp.Plus"
+    ],
+    [
+      "Test.Exp.Plus",
+      "Test.Plus-0"
+    ],
+    [
+      "Test.Exp.Plus",
+      "Test.Plus-1"
+    ],
+    [
+      "Test.Exp.Var",
+      "Test.Exp"
+    ],
+    [
+      "Test.Exp.Var",
+      "Test.Exp.Var"
+    ],
+    [
+      "Test.Exp.Var",
+      "Test.Var-0"
+    ],
+    [
+      "Test._++_",
+      "List.List"
+    ],
+    [
+      "Test._++_",
+      "List.List.[]"
+    ],
+    [
+      "Test._++_",
+      "List.List._\u2237_"
+    ],
+    [
+      "Test._++_",
+      "Test._++_"
+    ],
+    [
+      "Test.eval",
+      "Nat.Nat"
+    ],
+    [
+      "Test.eval",
+      "Nat._+_"
+    ],
+    [
+      "Test.eval",
+      "Test.Exp"
+    ],
+    [
+      "Test.eval",
+      "Test.Exp.Int"
+    ],
+    [
+      "Test.eval",
+      "Test.Exp.Plus"
+    ],
+    [
+      "Test.eval",
+      "Test.Exp.Var"
+    ],
+    [
+      "Test.eval",
+      "Test.eval"
+    ],
+    [
+      "Test.eval'",
+      "Nat.Nat"
+    ],
+    [
+      "Test.eval'",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Test.eval'",
+      "Test.Exp"
+    ],
+    [
+      "Test.map",
+      "List.List"
+    ],
+    [
+      "Test.map",
+      "List.List.[]"
+    ],
+    [
+      "Test.map",
+      "List.List._\u2237_"
+    ],
+    [
+      "Test.map",
+      "Test.map"
+    ],
+    [
+      "Test.sum",
+      "List.List"
+    ],
+    [
+      "Test.sum",
+      "List.List.[]"
+    ],
+    [
+      "Test.sum",
+      "List.List._\u2237_"
+    ],
+    [
+      "Test.sum",
+      "Nat.Nat"
+    ],
+    [
+      "Test.sum",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Test.sum",
+      "Nat._+_"
+    ],
+    [
+      "Test.sum",
+      "Test.sum"
+    ],
+    [
+      "Where._.bump@27",
+      "Nat.Nat"
+    ],
+    [
+      "Where._.bump@27",
+      "Nat._+_"
+    ],
+    [
+      "Where._.go@18",
+      "List.List"
+    ],
+    [
+      "Where._.go@18",
+      "List.List.[]"
+    ],
+    [
+      "Where._.go@18",
+      "List.List._\u2237_"
+    ],
+    [
+      "Where._.go@18",
+      "Nat.Nat"
+    ],
+    [
+      "Where._.go@18",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Where._.go@18",
+      "Nat._+_"
+    ],
+    [
+      "Where._.go@18",
+      "Where._.go@18"
+    ],
+    [
+      "Where._.go@18",
+      "Where._.sq@15"
+    ],
+    [
+      "Where._.sq@15",
+      "List.List"
+    ],
+    [
+      "Where._.sq@15",
+      "Nat.Nat"
+    ],
+    [
+      "Where._.sq@15",
+      "Nat._*_"
+    ],
+    [
+      "Where.sumSquares",
+      "List.List"
+    ],
+    [
+      "Where.sumSquares",
+      "Nat.Nat"
+    ],
+    [
+      "Where.sumSquares",
+      "Where._.go@18"
+    ],
+    [
+      "Where.weirdSum",
+      "Nat.Nat"
+    ],
+    [
+      "Where.weirdSum",
+      "Nat._+_"
+    ],
+    [
+      "Where.weirdSum",
+      "Where._.bump@27"
+    ]
+  ],
+  "definitionEdgesProvenance": [
+    "body",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "body",
+    "body",
+    "unknown",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "unknown",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "where",
+    "signature",
+    "where",
+    "signature",
+    "body",
+    "signature",
+    "signature",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "body",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "body",
+    "body",
+    "unknown",
+    "signature",
+    "signature",
+    "body",
+    "signature",
+    "signature",
+    "body",
+    "signature",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "signature",
+    "body",
+    "body",
+    "unknown",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "unknown",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "unknown",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "where",
+    "where",
+    "signature",
+    "signature",
+    "body",
+    "signature",
+    "signature",
+    "where",
+    "signature",
+    "body",
+    "where"
+  ],
+  "definitionSubtermDepths": [
+    [
+      5,
+      4,
+      3
+    ],
+    [],
+    [
+      5,
+      4,
+      3,
+      3
+    ],
+    [],
+    [
+      5,
+      4,
+      3
+    ],
+    [
+      4,
+      3,
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [],
+    [
+      4,
+      3
+    ],
+    [
+      5,
+      4,
+      3
+    ],
+    [],
+    [],
+    [
+      3
+    ],
+    [
+      5,
+      4,
+      3
+    ],
+    [
+      3
+    ],
+    [
+      5,
+      4,
+      3,
+      3
+    ],
+    [
+      3,
+      3
+    ],
+    [
+      3
+    ],
+    [
+      5,
+      4,
+      3
+    ],
+    [],
+    [],
+    [],
+    [],
+    [
+      4,
+      3
+    ],
+    [
+      3
+    ],
+    [],
+    [
+      3,
+      3
+    ],
+    [],
+    [],
+    [],
+    [],
+    [
+      3,
+      3
+    ],
+    [],
+    [
+      3,
+      3
+    ],
+    [],
+    [
+      3
+    ],
+    [],
+    [
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [
+      3
+    ],
+    [],
+    [
+      3
+    ],
+    [],
+    [],
+    [
+      3
+    ],
+    [],
+    [],
+    [],
+    [],
+    [
+      6,
+      5,
+      4,
+      3
+    ],
+    [],
+    [
+      3,
+      3
+    ],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [
+      3,
+      3,
+      3
+    ],
+    [],
+    [
+      6,
+      5,
+      4,
+      3,
+      3
+    ],
+    [
+      6,
+      5,
+      4,
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [
+      3
+    ],
+    [
+      3
+    ]
+  ],
+  "definitionSubtermHashes": [
+    [
+      705999098734522799,
+      11490950793565522592,
+      4628922517967782141
+    ],
+    [],
+    [
+      11472675577394482029,
+      797699628075349321,
+      10445805424528010258,
+      14929642634682412436
+    ],
+    [],
+    [
+      11053747566500130704,
+      9151679150939105826,
+      1764602776149622446
+    ],
+    [
+      5905846430059874293,
+      17407368232927050545,
+      14967838818423741378
+    ],
+    [
+      5594891313583273653,
+      12414141865957839590
+    ],
+    [],
+    [
+      7288438585478967945,
+      3142866962725126275
+    ],
+    [
+      1570020897712646964,
+      3998131597585393648,
+      5745094546293959160
+    ],
+    [],
+    [],
+    [
+      16851722297276717944
+    ],
+    [
+      17509991508585387712,
+      8696787719743036849,
+      511354308412946056
+    ],
+    [
+      15110967548103553614
+    ],
+    [
+      1570020897712646964,
+      3998131597585393648,
+      5745094546293959160,
+      5853184923943985833
+    ],
+    [
+      14206164873674702944,
+      6892163928050598771
+    ],
+    [
+      15058666949816219313
+    ],
+    [
+      9436652876642671107,
+      10024656216500979893,
+      18116076500930457536
+    ],
+    [],
+    [],
+    [],
+    [],
+    [
+      17757480843250017643,
+      7027669866769713802
+    ],
+    [
+      5746864539318884019
+    ],
+    [],
+    [
+      17407368232927050545,
+      6085404679124660906
+    ],
+    [],
+    [],
+    [],
+    [],
+    [
+      15058666949816219313,
+      6809722726284533735
+    ],
+    [],
+    [
+      15058666949816219313,
+      11537642600578598316
+    ],
+    [],
+    [
+      17407368232927050545
+    ],
+    [],
+    [
+      2922849905253142238
+    ],
+    [
+      16150074351601234966,
+      7695207578809777256
+    ],
+    [
+      2524830791631425389,
+      11128799983408281375
+    ],
+    [
+      2922849905253142238
+    ],
+    [],
+    [
+      2261524423492794912
+    ],
+    [],
+    [],
+    [
+      15110967548103553614
+    ],
+    [],
+    [],
+    [],
+    [],
+    [
+      16413620078856606245,
+      10389158726901342143,
+      6350280196609319520,
+      15665566587276120329
+    ],
+    [],
+    [
+      15058666949816219313,
+      10285933853144125979
+    ],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [
+      17816455636848200477,
+      10838640019838869921,
+      17103234435142918104
+    ],
+    [],
+    [
+      17245405744760681848,
+      14230860254720110907,
+      10155583264528434163,
+      8955434891132231917,
+      6701021790336183949
+    ],
+    [
+      6376511331326972540,
+      14863096680875765460,
+      2771295277154201753,
+      18054754374908415185
+    ],
+    [
+      8898627849982343010,
+      15058666949816219313
+    ],
+    [
+      1505167476749645660
+    ],
+    [
+      1842168825312284360
+    ]
+  ],
+  "definitions": [
+    {
+      "access": "public",
+      "id": 0,
+      "kind": "constructor",
+      "module": "Records.Box",
+      "name": "Records.Box.constructor",
+      "state": "D",
+      "type": "{A : Set} (contents : A) (count : Nat) \u2192 Records.Box A"
+    },
+    {
+      "access": "public",
+      "id": 1,
+      "kind": "datatype",
+      "line": 4,
+      "module": "Bool",
+      "name": "Bool.Bool",
+      "state": "D",
+      "type": "Set"
+    },
+    {
+      "access": "public",
+      "id": 2,
+      "kind": "function",
+      "line": 43,
+      "module": "Test",
+      "name": "Test._++_",
+      "state": "D",
+      "type": "{a : Set} \u2192 List a \u2192 List a \u2192 List a"
+    },
+    {
+      "access": "public",
+      "id": 3,
+      "kind": "function",
+      "line": 15,
+      "module": "Holes",
+      "name": "Holes.useMagic",
+      "state": "D",
+      "type": "Nat"
+    },
+    {
+      "access": "public",
+      "id": 4,
+      "kind": "constructor",
+      "line": 20,
+      "module": "Test.Exp",
+      "name": "Test.Exp.Plus",
+      "state": "D",
+      "type": "{v : Set} \u2192 Exp v \u2192 Exp v \u2192 Exp v"
+    },
+    {
+      "access": "public",
+      "id": 5,
+      "kind": "function",
+      "line": 18,
+      "module": "Where._",
+      "name": "Where._.go@18",
+      "state": "D",
+      "type": "(xs : List Nat) \u2192 List Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 6,
+      "kind": "constructor",
+      "line": 6,
+      "module": "List.List",
+      "name": "List.List.[]",
+      "state": "D",
+      "type": "{a : Agda.Primitive.Level} {A : Set a} \u2192 List A"
+    },
+    {
+      "access": "public",
+      "id": 7,
+      "kind": "function",
+      "line": 24,
+      "module": "InlineGap",
+      "name": "InlineGap.useInline",
+      "state": "D",
+      "type": "Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 8,
+      "kind": "constructor",
+      "line": 22,
+      "module": "Test.Exp",
+      "name": "Test.Exp.Var",
+      "state": "D",
+      "type": "{v : Set} \u2192 v \u2192 Exp v"
+    },
+    {
+      "access": "public",
+      "id": 9,
+      "kind": "function",
+      "line": 31,
+      "module": "Test",
+      "name": "Test.eval'",
+      "state": "D",
+      "type": "{a : Set} \u2192 (a \u2192 Nat) \u2192 Exp a \u2192 Nat"
+    },
+    {
+      "id": 10,
+      "kind": "other",
+      "module": "Test",
+      "name": "Test.Var-0",
+      "state": "D"
+    },
+    {
+      "access": "public",
+      "id": 11,
+      "kind": "constructor",
+      "line": 8,
+      "module": "Nat.Nat",
+      "name": "Nat.Nat.suc",
+      "state": "D",
+      "type": "Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 12,
+      "kind": "datatype",
+      "line": 5,
+      "module": "List",
+      "name": "List.List",
+      "state": "D",
+      "type": "{a : Agda.Primitive.Level} \u2192 Set a \u2192 Set a"
+    },
+    {
+      "access": "public",
+      "id": 13,
+      "kind": "projection",
+      "line": 11,
+      "module": "Coinductive.Stream",
+      "name": "Coinductive.Stream.tail",
+      "state": "D",
+      "type": "{a : Agda.Primitive.Level} {A : Set a} \u2192 Stream A \u2192 Stream A"
+    },
+    {
+      "access": "public",
+      "id": 14,
+      "kind": "function",
+      "line": 32,
+      "module": "Nat",
+      "name": "Nat._<_",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Bool.Bool"
+    },
+    {
+      "access": "public",
+      "id": 15,
+      "kind": "function",
+      "line": 25,
+      "module": "Test",
+      "name": "Test.eval",
+      "state": "D",
+      "type": "{a : Set} \u2192 (a \u2192 Nat) \u2192 Exp a \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 16,
+      "kind": "function",
+      "line": 41,
+      "module": "Records",
+      "name": "Records.double",
+      "state": "D",
+      "type": "Records.Box Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 17,
+      "kind": "function",
+      "line": 18,
+      "module": "Nat",
+      "name": "Nat._-_",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 18,
+      "kind": "projection",
+      "line": 10,
+      "module": "Coinductive.Stream",
+      "name": "Coinductive.Stream.head",
+      "state": "D",
+      "type": "{a : Agda.Primitive.Level} {A : Set a} \u2192 Stream A \u2192 A"
+    },
+    {
+      "access": "public",
+      "id": 19,
+      "kind": "constructor",
+      "line": 7,
+      "module": "Nat.Nat",
+      "name": "Nat.Nat.zero",
+      "state": "D",
+      "type": "Nat"
+    },
+    {
+      "access": "public",
+      "id": 20,
+      "kind": "postulate",
+      "line": 8,
+      "module": "Holes",
+      "name": "Holes.magic",
+      "state": "P",
+      "type": "Nat"
+    },
+    {
+      "id": 21,
+      "kind": "other",
+      "module": "Nat",
+      "name": "Nat.suc-0",
+      "state": "D"
+    },
+    {
+      "access": "public",
+      "id": 22,
+      "kind": "projection",
+      "line": 12,
+      "module": "Records.Point",
+      "name": "Records.Point.y",
+      "state": "D",
+      "type": "Point \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 23,
+      "kind": "projection",
+      "line": 36,
+      "module": "Records.Box",
+      "name": "Records.Box.contents",
+      "state": "D",
+      "type": "{A : Set} \u2192 Records.Box A \u2192 A"
+    },
+    {
+      "access": "public",
+      "id": 24,
+      "kind": "function",
+      "line": 15,
+      "module": "Where._",
+      "name": "Where._.sq@15",
+      "state": "D",
+      "type": "(xs : List Nat) \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 25,
+      "kind": "function",
+      "line": 28,
+      "module": "Records",
+      "name": "Records.origin",
+      "state": "D",
+      "type": "Point"
+    },
+    {
+      "access": "public",
+      "id": 26,
+      "kind": "function",
+      "line": 36,
+      "module": "Test",
+      "name": "Test.sum",
+      "state": "D",
+      "type": "List Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 27,
+      "kind": "function",
+      "line": 17,
+      "module": "Collision",
+      "name": "Collision.useA",
+      "state": "D",
+      "type": "Nat"
+    },
+    {
+      "id": 28,
+      "kind": "other",
+      "module": "List",
+      "name": "List._\u2237_-1",
+      "state": "D"
+    },
+    {
+      "id": 29,
+      "kind": "other",
+      "module": "Test",
+      "name": "Test.Int-0",
+      "state": "D"
+    },
+    {
+      "access": "public",
+      "id": 30,
+      "kind": "function",
+      "line": 14,
+      "module": "Collision",
+      "name": "Collision.targetB",
+      "state": "D",
+      "type": "Nat"
+    },
+    {
+      "access": "public",
+      "id": 31,
+      "kind": "function",
+      "line": 23,
+      "module": "Nat",
+      "name": "Nat._*_",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 32,
+      "kind": "datatype",
+      "line": 6,
+      "module": "Nat",
+      "name": "Nat.Nat",
+      "state": "D",
+      "type": "Set"
+    },
+    {
+      "access": "public",
+      "id": 33,
+      "kind": "function",
+      "line": 14,
+      "module": "Nat",
+      "name": "Nat._+_",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 34,
+      "kind": "function",
+      "line": 32,
+      "module": "InlineGap",
+      "name": "InlineGap.useAlias",
+      "state": "D",
+      "type": "Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 35,
+      "kind": "function",
+      "line": 12,
+      "module": "Where",
+      "name": "Where.sumSquares",
+      "state": "D",
+      "type": "List Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 36,
+      "kind": "record",
+      "line": 34,
+      "module": "Records",
+      "name": "Records.Box",
+      "state": "D",
+      "type": "(A : Set) \u2192 Set"
+    },
+    {
+      "access": "public",
+      "id": 37,
+      "kind": "function",
+      "line": 17,
+      "module": "Records",
+      "name": "Records.mkPoint",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Point"
+    },
+    {
+      "access": "public",
+      "id": 38,
+      "kind": "projection",
+      "line": 37,
+      "module": "Records.Box",
+      "name": "Records.Box.count",
+      "state": "D",
+      "type": "{A : Set} \u2192 Records.Box A \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 39,
+      "kind": "constructor",
+      "line": 21,
+      "module": "Test.Exp",
+      "name": "Test.Exp.Int",
+      "state": "D",
+      "type": "{v : Set} \u2192 Nat \u2192 Exp v"
+    },
+    {
+      "access": "public",
+      "id": 40,
+      "kind": "constructor",
+      "module": "Records.Point",
+      "name": "Records.Point.constructor",
+      "state": "D",
+      "type": "(x y : Nat) \u2192 Point"
+    },
+    {
+      "access": "public",
+      "id": 41,
+      "kind": "function",
+      "line": 20,
+      "module": "Collision._",
+      "name": "Collision._.QED@20",
+      "state": "D",
+      "type": "Nat"
+    },
+    {
+      "access": "public",
+      "id": 42,
+      "kind": "function",
+      "line": 28,
+      "module": "InlineGap",
+      "name": "InlineGap.aliasTwice",
+      "state": "D",
+      "type": "Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 43,
+      "kind": "function",
+      "line": 18,
+      "module": "Coinductive",
+      "name": "Coinductive.zeros",
+      "state": "D",
+      "type": "Stream Nat"
+    },
+    {
+      "access": "public",
+      "id": 44,
+      "kind": "record",
+      "line": 9,
+      "module": "Records",
+      "name": "Records.Point",
+      "state": "D",
+      "type": "Set"
+    },
+    {
+      "access": "public",
+      "id": 45,
+      "kind": "function",
+      "line": 27,
+      "module": "Nat",
+      "name": "Nat._==_",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Bool.Bool"
+    },
+    {
+      "access": "public",
+      "id": 46,
+      "kind": "projection",
+      "line": 11,
+      "module": "Records.Point",
+      "name": "Records.Point.x",
+      "state": "D",
+      "type": "Point \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 47,
+      "kind": "function",
+      "line": 11,
+      "module": "Collision",
+      "name": "Collision.targetA",
+      "state": "D",
+      "type": "Nat"
+    },
+    {
+      "id": 48,
+      "kind": "other",
+      "module": "Test",
+      "name": "Test.Plus-1",
+      "state": "D"
+    },
+    {
+      "access": "public",
+      "id": 49,
+      "kind": "function",
+      "line": 26,
+      "module": "Collision._",
+      "name": "Collision._.QED@26",
+      "state": "D",
+      "type": "Nat"
+    },
+    {
+      "access": "public",
+      "id": 50,
+      "kind": "constructor",
+      "module": "Coinductive.Stream",
+      "name": "Coinductive.Stream.constructor",
+      "state": "D",
+      "type": "{a : Agda.Primitive.Level} {A : Set a} (head : A) (tail : Stream A) \u2192 Stream A"
+    },
+    {
+      "access": "public",
+      "id": 51,
+      "kind": "datatype",
+      "line": 19,
+      "module": "Test",
+      "name": "Test.Exp",
+      "state": "D",
+      "type": "Set \u2192 Set"
+    },
+    {
+      "access": "public",
+      "id": 52,
+      "kind": "function",
+      "line": 24,
+      "module": "Where",
+      "name": "Where.weirdSum",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 53,
+      "kind": "postulate",
+      "line": 12,
+      "module": "Holes",
+      "name": "Holes.unsolved#meta.3",
+      "state": "H",
+      "type": "(n : Nat) \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 54,
+      "kind": "function",
+      "line": 11,
+      "module": "Holes",
+      "name": "Holes.incomplete",
+      "state": "H",
+      "type": "Nat \u2192 Nat"
+    },
+    {
+      "id": 55,
+      "kind": "other",
+      "module": "Test",
+      "name": "Test.Plus-0",
+      "state": "D"
+    },
+    {
+      "access": "public",
+      "id": 56,
+      "kind": "constructor",
+      "line": 5,
+      "module": "Bool.Bool",
+      "name": "Bool.Bool.true",
+      "state": "D",
+      "type": "Bool.Bool"
+    },
+    {
+      "id": 57,
+      "kind": "other",
+      "module": "List",
+      "name": "List._\u2237_-0",
+      "state": "D"
+    },
+    {
+      "access": "public",
+      "id": 58,
+      "kind": "constructor",
+      "line": 5,
+      "module": "Bool.Bool",
+      "name": "Bool.Bool.false",
+      "state": "D",
+      "type": "Bool.Bool"
+    },
+    {
+      "access": "public",
+      "id": 59,
+      "kind": "function",
+      "line": 25,
+      "module": "Coinductive",
+      "name": "Coinductive.mapSuc",
+      "state": "D",
+      "type": "Stream Nat \u2192 Stream Nat"
+    },
+    {
+      "access": "public",
+      "id": 60,
+      "kind": "function",
+      "line": 23,
+      "module": "Collision",
+      "name": "Collision.useB",
+      "state": "D",
+      "type": "Nat"
+    },
+    {
+      "access": "public",
+      "id": 61,
+      "kind": "function",
+      "line": 48,
+      "module": "Test",
+      "name": "Test.map",
+      "state": "D",
+      "type": "{a b : Set} \u2192 (a \u2192 b) \u2192 List a \u2192 List b"
+    },
+    {
+      "access": "public",
+      "id": 62,
+      "kind": "constructor",
+      "line": 7,
+      "module": "List.List",
+      "name": "List.List._\u2237_",
+      "state": "D",
+      "type": "{a : Agda.Primitive.Level} {A : Set a} \u2192 A \u2192 List A \u2192 List A"
+    },
+    {
+      "access": "public",
+      "id": 63,
+      "kind": "function",
+      "line": 27,
+      "module": "Where._",
+      "name": "Where._.bump@27",
+      "state": "D",
+      "type": "(a b : Nat) \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 64,
+      "kind": "function",
+      "line": 23,
+      "module": "Records",
+      "name": "Records.sumCoords",
+      "state": "D",
+      "type": "Point \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 65,
+      "kind": "record",
+      "line": 7,
+      "module": "Coinductive",
+      "name": "Coinductive.Stream",
+      "state": "D",
+      "type": "{a : Agda.Primitive.Level} (A : Set a) \u2192 Set a"
+    }
+  ],
+  "entryModule": "Test",
+  "externalModules": [
+    "Agda.Builtin.Nat",
+    "Agda.Primitive",
+    "Agda.Primitive.Cubical"
+  ],
+  "failedModules": [],
+  "mode": "expanded",
+  "moduleEdges": [
+    [
+      "Agda.Primitive.Cubical",
+      "Agda.Primitive"
+    ],
+    [
+      "Bool",
+      "Agda.Primitive"
+    ],
+    [
+      "Bool",
+      "Bool.Bool"
+    ],
+    [
+      "Bool.Bool",
+      "Bool"
+    ],
+    [
+      "Coinductive",
+      "Agda.Primitive"
+    ],
+    [
+      "Coinductive",
+      "Coinductive.Stream"
+    ],
+    [
+      "Coinductive",
+      "Nat"
+    ],
+    [
+      "Coinductive",
+      "Nat.Nat"
+    ],
+    [
+      "Coinductive.Stream",
+      "Coinductive"
+    ],
+    [
+      "Collision",
+      "Agda.Primitive"
+    ],
+    [
+      "Collision",
+      "Collision._"
+    ],
+    [
+      "Collision",
+      "Nat"
+    ],
+    [
+      "Collision",
+      "Nat.Nat"
+    ],
+    [
+      "Collision._",
+      "Collision"
+    ],
+    [
+      "Collision._",
+      "Nat"
+    ],
+    [
+      "DeadPrivate",
+      "Agda.Builtin.Nat"
+    ],
+    [
+      "GoalsTest",
+      "List"
+    ],
+    [
+      "GoalsTest",
+      "Nat"
+    ],
+    [
+      "Holes",
+      "Agda.Primitive"
+    ],
+    [
+      "Holes",
+      "Nat"
+    ],
+    [
+      "InlineGap",
+      "Agda.Primitive"
+    ],
+    [
+      "InlineGap",
+      "Nat"
+    ],
+    [
+      "List",
+      "Agda.Primitive"
+    ],
+    [
+      "List",
+      "List.List"
+    ],
+    [
+      "List.List",
+      "List"
+    ],
+    [
+      "Nat",
+      "Agda.Primitive"
+    ],
+    [
+      "Nat",
+      "Bool"
+    ],
+    [
+      "Nat",
+      "Bool.Bool"
+    ],
+    [
+      "Nat",
+      "Nat.Nat"
+    ],
+    [
+      "Nat.Nat",
+      "Nat"
+    ],
+    [
+      "Records",
+      "Agda.Primitive"
+    ],
+    [
+      "Records",
+      "Nat"
+    ],
+    [
+      "Records",
+      "Nat.Nat"
+    ],
+    [
+      "Records",
+      "Records.Box"
+    ],
+    [
+      "Records",
+      "Records.Point"
+    ],
+    [
+      "Records.Box",
+      "Nat"
+    ],
+    [
+      "Records.Box",
+      "Records"
+    ],
+    [
+      "Records.Point",
+      "Nat"
+    ],
+    [
+      "Records.Point",
+      "Records"
+    ],
+    [
+      "Test",
+      "Agda.Primitive"
+    ],
+    [
+      "Test",
+      "Coinductive"
+    ],
+    [
+      "Test",
+      "Collision"
+    ],
+    [
+      "Test",
+      "Holes"
+    ],
+    [
+      "Test",
+      "InlineGap"
+    ],
+    [
+      "Test",
+      "List"
+    ],
+    [
+      "Test",
+      "List.List"
+    ],
+    [
+      "Test",
+      "Nat"
+    ],
+    [
+      "Test",
+      "Nat.Nat"
+    ],
+    [
+      "Test",
+      "Records"
+    ],
+    [
+      "Test",
+      "Test.Exp"
+    ],
+    [
+      "Test",
+      "Where"
+    ],
+    [
+      "Test.Exp",
+      "Nat"
+    ],
+    [
+      "Test.Exp",
+      "Test"
+    ],
+    [
+      "Where",
+      "Agda.Primitive"
+    ],
+    [
+      "Where",
+      "List"
+    ],
+    [
+      "Where",
+      "Nat"
+    ],
+    [
+      "Where",
+      "Where._"
+    ],
+    [
+      "Where._",
+      "List"
+    ],
+    [
+      "Where._",
+      "List.List"
+    ],
+    [
+      "Where._",
+      "Nat"
+    ],
+    [
+      "Where._",
+      "Nat.Nat"
+    ]
+  ],
+  "moduleFiles": {
+    "Bool": "Bool.agda",
+    "Bool.Bool": "Bool.agda",
+    "Coinductive": "Coinductive.agda",
+    "Coinductive.Stream": "Coinductive.agda",
+    "Collision": "Collision.agda",
+    "Collision._": "Collision.agda",
+    "Holes": "Holes.agda",
+    "InlineGap": "InlineGap.agda",
+    "List": "List.agda",
+    "List.List": "List.agda",
+    "Nat": "Nat.agda",
+    "Nat.Nat": "Nat.agda",
+    "Records": "Records.agda",
+    "Records.Box": "Records.agda",
+    "Records.Point": "Records.agda",
+    "Test": "Test.agda",
+    "Test.Exp": "Test.agda",
+    "Where": "Where.agda",
+    "Where._": "Where.agda"
+  },
+  "modules": [
+    "Agda.Builtin.Nat",
+    "Agda.Primitive",
+    "Agda.Primitive.Cubical",
+    "Bool",
+    "Bool.Bool",
+    "Coinductive",
+    "Coinductive.Stream",
+    "Collision",
+    "Collision._",
+    "DeadPrivate",
+    "GoalsTest",
+    "Holes",
+    "InlineGap",
+    "List",
+    "List.List",
+    "Nat",
+    "Nat.Nat",
+    "Records",
+    "Records.Box",
+    "Records.Point",
+    "Test",
+    "Test.Exp",
+    "Where",
+    "Where._"
+  ],
+  "nodeKeyVersion": 2,
+  "producer": "<normalised>",
+  "reexports": [
+    {
+      "from": "Bool",
+      "names": [
+        "Bool.Bool.false",
+        "Bool.Bool.true"
+      ],
+      "to": "Bool.Bool"
+    },
+    {
+      "from": "Coinductive",
+      "names": [
+        "Coinductive.Stream.head",
+        "Coinductive.Stream.tail"
+      ],
+      "to": "Coinductive.Stream"
+    },
+    {
+      "from": "List",
+      "names": [
+        "List.List.[]",
+        "List.List._\u2237_"
+      ],
+      "to": "List.List"
+    },
+    {
+      "from": "Nat",
+      "names": [
+        "Nat.Nat.suc",
+        "Nat.Nat.zero"
+      ],
+      "to": "Nat.Nat"
+    },
+    {
+      "from": "Records",
+      "names": [
+        "Records.Box.contents",
+        "Records.Box.count"
+      ],
+      "to": "Records.Box"
+    },
+    {
+      "from": "Records",
+      "names": [
+        "Records.Point.x",
+        "Records.Point.y"
+      ],
+      "to": "Records.Point"
+    },
+    {
+      "from": "Test",
+      "names": [
+        "Test.Exp.Int",
+        "Test.Exp.Plus",
+        "Test.Exp.Var"
+      ],
+      "to": "Test.Exp"
+    }
+  ],
+  "schemaVersion": 2,
+  "sourceFiles": [
+    "Bool.agda",
+    "Coinductive.agda",
+    "Collision.agda",
+    "DeadPrivate.agda",
+    "GoalsTest.agda",
+    "Holes.agda",
+    "InlineGap.agda",
+    "List.agda",
+    "Nat.agda",
+    "Records.agda",
+    "Test.agda",
+    "Where.agda"
+  ],
+  "transitiveModuleEdges": [
+    [
+      "Bool",
+      "Agda.Primitive"
+    ],
+    [
+      "Coinductive",
+      "Agda.Primitive"
+    ],
+    [
+      "Coinductive",
+      "Nat"
+    ],
+    [
+      "Coinductive",
+      "Nat.Nat"
+    ],
+    [
+      "Collision",
+      "Agda.Primitive"
+    ],
+    [
+      "Collision",
+      "Nat"
+    ],
+    [
+      "Collision",
+      "Nat.Nat"
+    ],
+    [
+      "Collision._",
+      "Nat"
+    ],
+    [
+      "Holes",
+      "Agda.Primitive"
+    ],
+    [
+      "InlineGap",
+      "Agda.Primitive"
+    ],
+    [
+      "List",
+      "Agda.Primitive"
+    ],
+    [
+      "Nat",
+      "Agda.Primitive"
+    ],
+    [
+      "Nat",
+      "Bool"
+    ],
+    [
+      "Nat",
+      "Bool.Bool"
+    ],
+    [
+      "Records",
+      "Agda.Primitive"
+    ],
+    [
+      "Records",
+      "Nat"
+    ],
+    [
+      "Records",
+      "Nat.Nat"
+    ],
+    [
+      "Records",
+      "Records.Box"
+    ],
+    [
+      "Records",
+      "Records.Point"
+    ],
+    [
+      "Records.Box",
+      "Nat"
+    ],
+    [
+      "Records.Point",
+      "Nat"
+    ],
+    [
+      "Test",
+      "Agda.Primitive"
+    ],
+    [
+      "Test",
+      "Coinductive"
+    ],
+    [
+      "Test",
+      "Collision"
+    ],
+    [
+      "Test",
+      "Holes"
+    ],
+    [
+      "Test",
+      "InlineGap"
+    ],
+    [
+      "Test",
+      "List"
+    ],
+    [
+      "Test",
+      "List.List"
+    ],
+    [
+      "Test",
+      "Nat"
+    ],
+    [
+      "Test",
+      "Nat.Nat"
+    ],
+    [
+      "Test",
+      "Records"
+    ],
+    [
+      "Test",
+      "Where"
+    ],
+    [
+      "Test.Exp",
+      "Nat"
+    ],
+    [
+      "Where",
+      "Agda.Primitive"
+    ],
+    [
+      "Where",
+      "List"
+    ],
+    [
+      "Where",
+      "Nat"
+    ],
+    [
+      "Where._",
+      "List"
+    ],
+    [
+      "Where._",
+      "List.List"
+    ],
+    [
+      "Where._",
+      "Nat"
+    ],
+    [
+      "Where._",
+      "Nat.Nat"
+    ]
+  ],
+  "v": 2
+}

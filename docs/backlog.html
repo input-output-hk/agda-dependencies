@@ -9,7 +9,7 @@
 </head>
 <body>
 <header class="topbar"><div class="bar"><a class="brand" href="index.html">agda-deps</a><nav><a href="index.html">Home</a><a href="guide.html">Guide</a><a href="examples.html">Examples</a><a href="views/index.html">Views ↗</a><a href="changelog.html">Changelog</a><a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a></nav></div></header>
-<main><div class="layout"><aside class="toc"><div class="toc-inner"><div class="toc-title">On this page</div><nav><a class="lvl2" href="#deferred--would-be-useful-no-current-push">Deferred — would be useful, no current push</a><a class="lvl2" href="#refused--wont-build-with-rationale">Refused — won&#x27;t build, with rationale</a><a class="lvl3" href="#5--schema-version-stamp-on-the-json-output">#5 — Schema-version stamp on the JSON output</a><a class="lvl3" href="#7--stable-def_id-across-runs">#7 — Stable def_id across runs</a><a class="lvl3" href="#12--first_seen--last_seen-per-qname-in-lazy-archives">#12 — first_seen / last_seen per qname in lazy archives</a><a class="lvl3" href="#13--per-commit-churn--pivot-hints">#13 — Per-commit churn / pivot hints</a><a class="lvl3" href="#14--stable-per-commit-present-qname-set">#14 — Stable per-commit present: [qname] set</a></nav></div></aside><div class="prose"><h1 id="backlog">Backlog</h1>
+<main><div class="layout"><aside class="toc"><div class="toc-inner"><div class="toc-title">On this page</div><nav><a class="lvl2" href="#deferred--would-be-useful-no-current-push">Deferred — would be useful, no current push</a><a class="lvl2" href="#from-the-jolteon-fastbft-agent-usage-analysis-2026-06-12">From the Jolteon-FastBFT agent-usage analysis (2026-06-12)</a><a class="lvl3" href="#5--schema-version-stamp-on-the-json-output">#5 — Schema-version stamp on the JSON output</a><a class="lvl3" href="#7--stable-def_id-across-runs">#7 — Stable def_id across runs</a><a class="lvl3" href="#12--first_seen--last_seen-per-qname-in-lazy-archives">#12 — first_seen / last_seen per qname in lazy archives</a><a class="lvl3" href="#13--per-commit-churn--pivot-hints">#13 — Per-commit churn / pivot hints</a><a class="lvl3" href="#14--stable-per-commit-present-qname-set">#14 — Stable per-commit present: [qname] set</a></nav></div></aside><div class="prose"><h1 id="backlog">Backlog</h1>
 <p>Deferred ideas, refused requests, exploratory work that isn't ready to
 be picked up. For shipped work see <a href="changelog.html">Changelog.md</a>; for
 runnable recipes see <a href="examples.html">Examples.md</a>; for concrete
@@ -71,9 +71,91 @@ correct). The round-4 <code>definitionEdgesProvenance</code> field was also
 added under v2 — still additive, still backwards-compatible — but
 the surface area of v2 is growing. A v3 bump becomes honest at the
 next <em>incompatible</em> change.</p></li>
+<li><p><strong>Warm-<code>.agdai</code> edge loss (found 2026-06-12).</strong> The emitted graph is
+not byte-stable across the <code>.agdai</code> cache state: a cold run (modules
+freshly type-checked) and a warm run (modules loaded from cached
+interfaces) emit the <strong>same node set</strong> but a different <em>edge</em> set —
+on <code>test/Test.agda</code>, cold emits 213 definition edges, warm 204 (9
+edges lost). The lost edges are out-edges of Agda-generated
+pattern-helper functions (<code>Test.Int-0</code>, <code>Test.Plus-0/1</code>,
+<code>Test.Var-0</code> → the <code>Exp</code> datatype / its constructors). Mechanism is
+the documented <code>postModuleAD</code> dead-code interaction:
+<code>buildInterface</code> runs <code>eliminateDeadCode</code>, so a module <em>loaded from
+its interface</em> exposes a pruned <code>getSignature</code>, and the dead-private
+recovery re-adds the <em>nodes</em> but not all of their <em>body</em> edges. Cold
+(fresh-checked) is the more-complete/correct side. Low-impact on the
+states (nodes are stable), but it means cached-vs-fresh runs can
+disagree on a handful of edges. Relevant to incremental rebuild (see
+<a href="roadmap.html">TODO.md</a>): a fragment cache must store <em>fresh-checked</em>
+fragments, and doing so would actually <em>normalise</em> this discrepancy
+rather than inherit it.</p></li>
 </ul>
 <hr />
-<h2 id="refused--wont-build-with-rationale">Refused — won't build, with rationale</h2>
+<h2 id="from-the-jolteon-fastbft-agent-usage-analysis-2026-06-12">From the Jolteon-FastBFT agent-usage analysis (2026-06-12)</h2>
+<p>Source: <code>Jolteon-FastBFT/docs/MCP/UsageAnalysis.md</code> — a mining pass
+over all 60 Claude-agent session transcripts in that consumer project
+(organic behaviour, not battle-test probes). Producer-side items only;
+consumer/MCP items live in <code>agda-graph-explorer/Backlog.md</code>.</p>
+<ul>
+<li><p><strong>Incremental rebuild (changed-module cones) — promoted to the
+Roadmap 2026-06-12.</strong> Profiled and designed; see
+<a href="roadmap.html">TODO.md</a> ("Incremental rebuild — per-module fragment
+cache"). The profile corrected the framing: on a warm <code>.agdai</code> cache
+Agda's own load is only ~8 s — the dominant cost (~79 % of a ~151 s
+run on a 16,769-def corpus) is <em>our</em> per-definition <code>compileDef</code> /
+<code>postModule</code> walk, re-run in full on every rebuild. Agda's
+<code>preModule</code> <code>Skip</code>/<code>Recompile</code> API + the already-module-keyed
+<code>postCompile</code> dataflow make a per-module fragment cache (keyed on the
+interface hash) a localised change rather than a rewrite. This is the
+root cost behind the consumer-side serve-stale item; both are worth
+having.</p></li>
+<li><p><strong>Where-helper node identity (battle-test E1, HIGH).</strong> <del>The graph
+keys definitions by reified qualified name, so same-named
+<code>where</code>/anonymous-module helpers silently merge into one node.</del>
+<strong>SHIPPED 2026-06-05 — predates this analysis.</strong> The mined
+transcripts captured pre-fix behaviour. <code>nodeKey</code> now suffixes
+<code>._.</code>-marked helpers with <code>@&lt;binding-line&gt;</code>, <code>hashQName</code>/wire
+<code>name</code>/edge endpoints all derive from it, and <code>nodeKeyVersion</code> is
+bumped to <code>2</code> so a stale-format cache is detectable. Regression is
+baked into <code>test/Collision.agda</code> (imported by <code>test/Test.agda</code>):
+<code>useA ⇝ QED@20 ⇝ targetA</code> and <code>useB ⇝ QED@26 ⇝ targetB</code> both
+survive. See <a href="changelog.html">Changelog.md</a> (2026-06-05) and the
+<code>nodeKey</code> gotcha in <a href="internals.html">CLAUDE.md</a>. Do not re-implement.</p></li>
+<li><p><strong>Inliner gap, producer side — investigated 2026-06-12, deferred with
+evidence.</strong> Agda inlines every call to an <code>{-# INLINE #-}</code> function
+into the caller's body <em>during type-checking</em>, before the backend
+hook fires, so <code>agda-unused</code> reports such live definitions as <code>dead</code>
+(three confirmed FPs in the consumer project; agents grep-verify every
+<code>dead</code> finding, halving the tool's value). Characterised with a
+fixture (<code>test/InlineGap.agda</code>, imported by <code>test/Test.agda</code>):</p>
+<ul>
+<li>The INLINE helper <code>twice</code> is dropped as a node by <code>ignoreDef</code>'s
+<code>funInline</code> rule, and its callers <code>useInline</code> / <code>aliasTwice</code> point
+straight at <code>Nat._+_</code> (the inlined body), never at <code>twice</code>.</li>
+<li>The lost <code>⇝ twice</code> edges are <strong>not</strong> a contraction artefact: with
+the <code>funInline</code> drop disabled, <code>twice</code> reappears as a node but the
+callers <em>still</em> point at <code>_+_</code>. The call edges are genuinely absent
+from the elaborated <code>Defn</code> the Backend receives — Agda replaced the
+call with the body upstream of <code>compileDefAD</code>.
+Conclusion: <strong>the full producer fix is not achievable from the
+post-elaboration internal syntax</strong> (<code>compileDef</code> has no pre-inline
+view; recovering the edges would mean walking abstract syntax /
+hooking before Agda's inliner, the "principled-but-complex" option).
+And the cheap partial step — keeping INLINE functions as nodes — is
+<strong>net-negative</strong>: every call site is inlined away, so the node is
+always a zero-caller orphan that dead-code analysis flags as a false
+<code>dead</code>. So the <code>funInline</code> drop stays (now with a don't-revert note in
+<code>ignoreDef</code> + the CLAUDE.md gotcha), and the <strong>consumer-side
+source-scan union remains the right fix</strong> (filed in
+<code>agda-graph-explorer</code>): the textual <code>twice m</code> call survives in source
+even when the elaborated edge does not.</li>
+</ul></li>
+<li><p><strong>Stable installed binary path.</strong> ~30 transcript Bash calls were
+pure binary archaeology (<code>find dist-newstyle -name agda-deps</code>,
+launcher checks, mtime-vs-commit forensics). Confirms the filed
+launcher-staleness items (consumer F3.2/F4.3/F5.2/F6.1) from the
+usage side; a <code>cabal install</code>-style stable path removes the class.</p></li>
+</ul>
 <p>From an external batch of 14 numbered feature requests, 9 shipped
 (#1, #2, #3, #4, #5b, #8, #9, #10, #11), 1 was already done (#5), and
 these are the rest.</p>

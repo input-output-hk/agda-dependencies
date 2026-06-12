@@ -20,6 +20,8 @@ module AgdaDeps.Help
 import Data.Version ( showVersion )
 import Paths_agda_deps ( version )
 
+import BuildInfo ( buildFingerprint )
+
 import Agda.Compiler.Backend ( commandLineFlags )
 import Agda.Utils.GetOpt ( OptDescr, usageInfo )
 
@@ -46,15 +48,16 @@ wantsAgdaHelp = (== "--agda-help")
 rewriteAgdaHelp :: [String] -> [String]
 rewriteAgdaHelp = map (\a -> if wantsAgdaHelp a then "--help" else a)
 
--- | Print the @agda-deps@ version. Plain @--version@ prints
--- @agda-deps <semver>@; @--numeric-version@ prints just the version
--- number for tooling that wants to parse it.
+-- | Print the @agda-deps@ build identity. Plain @--version@ \/ @-V@
+-- prints the full 'buildFingerprint' (version + git revision + build
+-- date + compiling GHC) so "which build is this?" is answerable from
+-- the binary itself, with no @mtime@-vs-@git log@ archaeology;
+-- @--numeric-version@ prints just the bare version number for tooling
+-- that parses it.
 printVersion :: Bool -> IO ()
 printVersion numericOnly
-  | numericOnly = putStrLn ver
-  | otherwise   = putStrLn $ "agda-deps " ++ ver
-  where
-    ver = showVersion version
+  | numericOnly = putStrLn (showVersion version)
+  | otherwise   = putStrLn buildFingerprint
 
 -- | Print a help message listing only the @agda-deps@ backend options,
 -- plus a brief reminder of the Agda CLI flags routinely combined with
@@ -80,6 +83,8 @@ printHelp = putStr $ unlines
   , ""
   , "  --version, -V, --numeric-version"
   , "             Print the agda-deps version and exit."
+  , "  --emit-schema"
+  , "             Print the JSON Schema for expanded graph.json and exit."
   , "  --agda-help"
   , "             Show Agda's own full help instead of just the backend's."
   , ""
