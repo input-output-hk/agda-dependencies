@@ -58,11 +58,13 @@ forward-looking items see [TODO.md](TODO.md).
   grow into recognising `.agda-lib` `depend:` libraries directly for
   better classification on multi-library projects.
 
-- **`classifyExternalModules` misses pure re-export hubs.** Stdlib
-  modules that only re-export from elsewhere never appear in
-  `allQNames` and so slip past `--no-externals`. Now that
-  `reexports[]` is populated, those hosts could be unioned into the
-  classification input. ~5-line change.
+- ~~**`classifyExternalModules` misses pure re-export hubs.**~~
+  **SHIPPED 2026-06-13** — see [Changelog.md](Changelog.md). The
+  re-export host + source module names (`collectReExports` over the
+  visited interfaces) are pooled into the classification input, so an
+  out-of-root hub that only `open … public`s (e.g. `Data.List`) is now
+  seen and dropped under `--no-externals`. Additive — the test corpus
+  has no external re-export hub, so the golden is unchanged.
 
 - **Schema bump to v3.** `kind` and `reexports[]` were added at
   `schemaVersion: 2` (consumers ignore unknown fields, so strictly
@@ -71,24 +73,153 @@ forward-looking items see [TODO.md](TODO.md).
   the surface area of v2 is growing. A v3 bump becomes honest at the
   next *incompatible* change.
 
-- **Warm-`.agdai` edge loss (found 2026-06-12).** The emitted graph is
-  not byte-stable across the `.agdai` cache state: a cold run (modules
-  freshly type-checked) and a warm run (modules loaded from cached
-  interfaces) emit the **same node set** but a different *edge* set —
-  on `test/Test.agda`, cold emits 213 definition edges, warm 204 (9
-  edges lost). The lost edges are out-edges of Agda-generated
-  pattern-helper functions (`Test.Int-0`, `Test.Plus-0/1`,
-  `Test.Var-0` → the `Exp` datatype / its constructors). Mechanism is
-  the documented `postModuleAD` dead-code interaction:
-  `buildInterface` runs `eliminateDeadCode`, so a module *loaded from
-  its interface* exposes a pruned `getSignature`, and the dead-private
-  recovery re-adds the *nodes* but not all of their *body* edges. Cold
-  (fresh-checked) is the more-complete/correct side. Low-impact on the
-  states (nodes are stable), but it means cached-vs-fresh runs can
-  disagree on a handful of edges. Relevant to incremental rebuild (see
-  [TODO.md](TODO.md)): a fragment cache must store *fresh-checked*
-  fragments, and doing so would actually *normalise* this discrepancy
-  rather than inherit it.
+- **Warm-`.agdai` edge loss (found 2026-06-12; understood + mitigated
+  2026-06-12).** The emitted graph is not byte-stable across the
+  `.agdai` cache state: a cold run and a warm run emit the same node
+  set but a different *edge* set (on `test/Test.agda`: 213 vs 204
+  definition edges; the lost edges are out-edges of Agda-generated
+  pattern helpers `Test.Int-0` / `Test.Plus-0/1` / `Test.Var-0`).
+  **Refinement from the `--incremental` work: this is a
+  main-module-only phenomenon.** The `getSignature` dead-private
+  recovery only ever fires for the entry module — `stSignature` holds
+  only the main module's defs at backend time; imported modules'
+  emission is a pure function of their (always-pruned) interface and
+  is cache-state independent. Mitigations shipped 2026-06-12: the
+  committed golden is now generated from a cold run and CI clears
+  `.agdai` before golden-feeding runs; `--incremental` serves the
+  complete (fresh-check) main-module fragment even on warm runs.
+  Remaining gap: a warm, *non-incremental* run still emits the
+  degraded main-module variant — fixing that at the root would mean
+  recovering dead-private defs from somewhere other than
+  `stSignature`. Deferred.
+
+- ~~**`--keep-going` emits *no* graph on a real broken corpus — the
+  partial pass dies before `postCompile` (found 2026-06-12).**~~
+  **SHIPPED 2026-06-12** — see [Changelog.md](Changelog.md)
+  ("`--keep-going` hardening"). The diagnosis below was close but
+  attributed the death to the wrong sub-region: exit 120 is Agda's
+  `ImpossibleError` — `__IMPOSSIBLE__` thrown as a **GHC exception,
+  which `catchError` cannot catch** — so the per-module guards were
+  blind to it; the trigger was `--with-signatures` reification dying
+  in `infallibleSortKit` because the post-rollback partial pass had
+  re-merged only interface *signatures*, not builtins.
+  `mergeIfaceState` + `catchAllTCM` guards at every stage fix it;
+  `test-keepgoing/` + a CI step lock the always-emit guarantee;
+  validated on Jolteon-FastBFT with a broken `TestTrace` (exit 0,
+  4841 defs vs. previously nothing). Two known limitations, both
+  acceptable for best-effort: `failedModules` may name the importing
+  parent rather than the failing leaf (`stCurrentModule` attribution),
+  and `entryModule` is absent when the entry never elaborated
+  (deliberate — the old behaviour reported a *wrong* entry). The
+  cross-repo companion (serve-stale fallback in `agda-graph-explorer`
+  `AgdaMcp.State`) is still open on the consumer side.
+
+  <details><summary>Original analysis (historical)</summary>
+
+  This was the headline robustness gap, proposed as a feature: a
+  dependency / navigation tool must be **best-effort**. One broken
+  module — a WIP proof, a scratch `TestTrace` — should not blind the
+  explorer to the other 483 modules that type-check fine. Today it
+  does, and that is exactly the failure mode that pushes downstream
+  agents back to `grep` (cf. the consumer usage analysis: 307 CLI
+  calls vs. ~20 organic MCP calls).
+
+  **Repro (verified).** Jolteon-FastBFT corpus, entry `Main.lagda.md`,
+  whose closure transitively imports
+  `Protocol/Jolteon/Global/TraceVerification/TestTrace.agda:185`
+  (a genuine `[UnequalTypes]` instance-resolution error — Agda cannot
+  pick the `Monad` instance for a `_>>=_`, leaving unsolved metas
+  `_x_1153` / `_tc_1163`). Run, as the `agda-explore` daemon invokes it:
+  ```
+  agda-deps --format=json --json-mode=expanded --no-externals \
+    --keep-going --with-term-hashes --min-term-depth=3 --with-signatures \
+    -i <proj> -o <out> <proj>/Main.lagda.md
+  ```
+  → **exit 120, no `deps.json` written.** The consumer
+  (`agda-graph-explorer` `AgdaMcp.State.runOne`) reports
+  `agda-deps produced no graph for … (exit 120)`, so every graph-backed
+  MCP tool (`search` / `locate` / `callers` / `impact` / …) has nothing
+  to query and the daemon goes dark.
+
+  **Diagnosis (file:line, against `src/AgdaDeps/ModuleExplorer.hs`).**
+  The partial path *is* reached — this is **not** a missing call:
+  - `handleCheckError` (:170–184) runs: stderr shows
+    `tagging 'Protocol.Jolteon.…TestTrace' as Failed:` (:178) and
+    `483 module(s) loaded successfully before the failure.` (:182).
+    It returns `Left` (:184), so `partialBackendInteraction`'s `Left`
+    branch fires `partialCompilerMain` per backend (:166–168).
+  - But `partialCompilerMain`'s post-fold progress log
+    `emitted def-level data for N/M loaded module(s)` (:239–242) **never
+    prints**, and neither do any per-module
+    `skipping def-level recovery for '…'` breadcrumbs (`reportSkippedModule`,
+    :264–271). So execution dies **between entering
+    `partialCompilerMain` (:221) and the log at :239** — i.e. inside the
+    un-`catchError`'d setup region at :226–238: `getDecodedModules` +
+    `mapM_ visitModule` (:226–227), `setTCLens' stSignature
+    emptySignature` + `mapM_ mergeIfaceSig` (:235–236), or
+    `preCompile backend (options backend)` (:237). The per-module fold
+    (:238, :245–253) *is* individually guarded; this prelude is not.
+  - `postCompile` (:243) is therefore never reached, so nothing is
+    serialized. The failure surfaces only as a bare exit 120 — no
+    diagnostic — so from the outside it is indistinguishable from a
+    crash.
+
+  Candidate mechanism to check first: the failing module leaves
+  **unsolved metavariables / a partial signature** in the persistent
+  `stDecodedModules`, and `mergeIfaceSig`'s `HMap.union` into
+  `stImports` (:258–262) or `preCompile` then trips on it. The existing
+  keep-going test fixtures presumably use a cleaner error (e.g. an
+  out-of-scope name) that does not leave dangling metas, which is why CI
+  is green while this corpus fails. This also **contradicts the
+  documented `--keep-going` guarantee** in `README.md` ("modules whose
+  sub-tree never finished type-checking … still appear with their import
+  wiring") — here not even the precomputed module-level wiring survives.
+
+  **What already exists to build on** (so this is hardening, not
+  greenfield): `runPartial` / `partialBackendInteraction` /
+  `partialCompilerMain` (`ModuleExplorer.hs`); the `reportFailed`
+  callback → `failedModulesRef`; `egFailedModules` in the schema
+  (`agda-graph-explorer` `AgdaGraph.Schema`) and its consumer parse; and
+  the `Precompute` module-level scan that `postCompileAD` already unions
+  into the output (`Backend.hs`).
+
+  **Suggested fixes (for the dev picking this up):**
+    1. **Guarantee emission.** Make `postCompile` run and write a
+       `deps.json` even when def-level recovery yields few/zero modules —
+       wrap the :226–238 prelude so a throw there *falls through* to
+       emission rather than aborting. At minimum the precomputed
+       module-level graph + `failedModules[]` should always be written;
+       a graph with import wiring and zero def edges is far more useful
+       than no file.
+    2. **Localize the actual throw** in :226–238 with a `-v`/debug build
+       — confirm whether it is the signature merge (`mergeIfaceSig` /
+       `setTCLens' stSignature`) or `preCompile`, and whether unsolved
+       metas from the failed module are the trigger; if so, prune/skip
+       meta-bearing or `failed`-tagged interfaces before the merge.
+    3. **Don't swallow.** A partial pass that cannot emit should print
+       *why* (which stage threw) instead of exiting 120 silently;
+       wrap `partialCompilerMain` in its own diagnostic `catchError`.
+    4. **Add a fixture**, in the style of `test/Collision.agda` /
+       `test/InlineGap.agda`: an entry importing exactly one
+       type-erroring module (ideally an instance-resolution error that
+       leaves metas), asserting `deps.json` *is* produced, the broken
+       module appears in `failedModules[]`, and the sibling modules'
+       defs/edges survive. This locks the guarantee that CI currently
+       misses.
+    5. **Cross-repo companion** (file in
+       `agda-graph-explorer/Backlog.md`): even with a perfect producer,
+       `AgdaMcp.State` should fall back to the last-good snapshot (or the
+       precomputed module-level graph) when a rebuild emits nothing, so
+       the serve-stale daemon degrades instead of going dark on the first
+       broken edit.
+
+  **Pick up when:** this is the single biggest blocker to the tool being
+  usable during active *proof construction* (its primary use case) — a
+  corpus mid-edit almost always has at least one non-checking module.
+  High value; arguably promote to [TODO.md](TODO.md) rather than leave
+  deferred.
+
+  </details>
 
 ---
 
@@ -100,9 +231,10 @@ over all 60 Claude-agent session transcripts in that consumer project
 consumer/MCP items live in `agda-graph-explorer/Backlog.md`.
 
 - **Incremental rebuild (changed-module cones) — promoted to the
-  Roadmap 2026-06-12.** Profiled and designed; see
+  Roadmap 2026-06-12; P1 SHIPPED 2026-06-12 as `--incremental`.**
+  Profiled and designed; see
   [TODO.md](TODO.md) ("Incremental rebuild — per-module fragment
-  cache"). The profile corrected the framing: on a warm `.agdai` cache
+  cache") for what shipped vs. the open P2 (incremental serialise). The profile corrected the framing: on a warm `.agdai` cache
   Agda's own load is only ~8 s — the dominant cost (~79 % of a ~151 s
   run on a 16,769-def corpus) is *our* per-definition `compileDef` /
   `postModule` walk, re-run in full on every rebuild. Agda's

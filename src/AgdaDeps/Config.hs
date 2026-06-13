@@ -81,6 +81,12 @@ data Config = Config
   , cfgGzip            :: Maybe Bool
   , cfgKeepGoing       :: Maybe Bool
   , cfgSkipAgda        :: Maybe Bool
+  , cfgIncremental     :: Maybe Bool
+    -- ^ Mirror of @--incremental@: per-module fragment cache.
+  , cfgCacheDir        :: Maybe FilePath
+    -- ^ Mirror of @--cache-dir=PATH@.
+  , cfgPackedAnalytical :: Maybe Bool
+    -- ^ Mirror of @--packed-analytical@.
   , cfgQuiet           :: Maybe Bool
   , cfgNoExternals     :: Maybe Bool
   , cfgJsonMode        :: Maybe JsonMode
@@ -121,6 +127,9 @@ defaultConfig = Config
   , cfgGzip            = Nothing
   , cfgKeepGoing       = Nothing
   , cfgSkipAgda        = Nothing
+  , cfgIncremental     = Nothing
+  , cfgCacheDir        = Nothing
+  , cfgPackedAnalytical = Nothing
   , cfgQuiet           = Nothing
   , cfgNoExternals     = Nothing
   , cfgJsonMode        = Nothing
@@ -244,6 +253,9 @@ instance FromJSON Config where
     cfgGzip            <- o .:? "gzip"
     cfgKeepGoing       <- o .:? "keep-going"
     cfgSkipAgda        <- o .:? "skip-agda"
+    cfgIncremental     <- o .:? "incremental"
+    cfgCacheDir        <- o .:? "cache-dir"
+    cfgPackedAnalytical <- o .:? "packed-analytical"
     cfgQuiet           <- o .:? "quiet"
     cfgNoExternals     <- o .:? "no-externals"
     cfgJsonMode        <- o .:? "json-mode"
@@ -290,6 +302,9 @@ applyConfig c opts0 =
       , optGzip            = fromMaybe (optGzip       opts1) (cfgGzip       c)
       , optKeepGoing       = fromMaybe (optKeepGoing  opts1) (cfgKeepGoing  c)
       , optSkipAgda        = fromMaybe (optSkipAgda   opts1) (cfgSkipAgda   c)
+      , optIncremental     = fromMaybe (optIncremental opts1) (cfgIncremental c)
+      , optCacheDir        = maybe (optCacheDir opts1) Just (cfgCacheDir c)
+      , optPackedAnalytical = fromMaybe (optPackedAnalytical opts1) (cfgPackedAnalytical c)
       , optQuiet           = fromMaybe (optQuiet      opts1) (cfgQuiet      c)
       , optNoExternals     = fromMaybe (optNoExternals opts1) (cfgNoExternals c)
       , optJsonMode        = fromMaybe (optJsonMode    opts1) (cfgJsonMode    c)

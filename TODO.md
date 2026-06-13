@@ -180,10 +180,29 @@ Two structural facts make this a localised change, not a rewrite:
 
 ## Packed-complete — a consumer-usable packed form
 
-**Status:** proposed 2026-06-13. Requested after the consumer
-(`agda-graph-explorer`) confirmed it **cannot** load today's packed form;
-it now refuses packed with an actionable error and documents the gap in
-`agda-graph-explorer/test/packed/README.md`.
+**Status:** SHIPPED 2026-06-13 as `--packed-analytical` (see
+[Changelog.md](Changelog.md)). The producer side is done; the remaining
+work is **consumer-side** in `agda-graph-explorer`: add the base64-LE +
+CSR decoder mapping packed-analytical → `ExpandedGraph` (use
+`base64-bytestring` + a `Storable` cast, not a hand-rolled bit loop, to
+stay fast on a 174 MB graph), and assert
+`decodePackedComplete(packed) ≡ loadExpanded(expanded)` on the committed
+fixture pair. Producer-side notes vs. the proposal below:
+
+- **`access` shipped 3-valued** (`0`=unknown/absent, `1`=public,
+  `2`=private), not the 2-valued spec — the expanded form omits `access`
+  for QNames with no local `ADDef` (external/dep-only nodes, common), so
+  a 2-valued enum would have failed the byte-identical gate on every such
+  node. `line` (`-1`) and `type` (`null`) already handled it.
+- **Parity is structural, not just tested:** the per-QName
+  kind/line/access/type/subterm lookups are now shared (`mkDef*` over the
+  same `defsList`) between `toExpandedGraph` and the packed arrays, so
+  the node sets and defaults can't drift. `encodeDefKind`/`encodeDefAccess`
+  sit beside `encodeDefState`; kind ordering matches `Wire.wireKind`.
+- The acceptance gate runs in CI (`schema/packed_analytical_check.py`),
+  both sides cold-started to avoid the warm-`.agdai` main-module skew.
+
+Original proposal (kept for the consumer-side work):
 
 ### The problem
 

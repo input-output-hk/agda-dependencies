@@ -25,6 +25,7 @@ import AgdaDeps.Backend.GraphJson
 
 renderJson
   :: JsonMode                -- ^ packed (default) or expanded
+  -> Bool                    -- ^ @--packed-analytical@
   -> Map QName DefState
   -> Set String              -- ^ external module names
   -> Set String              -- ^ failed module names (--keep-going)
@@ -38,7 +39,7 @@ renderJson
   -> Maybe ExternalsSummary  -- ^ diagnostic summary under --no-externals
   -> [ADDef]
   -> String
-renderJson mode stateMap externals failed entryModule importEdges sourceFiles moduleFile positions reexports externalsSummary defs =
+renderJson mode packedAnalytical stateMap externals failed entryModule importEdges sourceFiles moduleFile positions reexports externalsSummary defs =
   let gi = GraphInput
         { giDefs            = defs
         , giStateMap        = stateMap
@@ -55,6 +56,7 @@ renderJson mode stateMap externals failed entryModule importEdges sourceFiles mo
         , giExtraModules    = S.empty
         , giReExports       = reexports
         , giExternalsSummary = externalsSummary
+        , giPackedAnalytical = packedAnalytical
         }
   in case mode of
        JsonPacked   -> gjoGraphJson (buildGraphJson gi)

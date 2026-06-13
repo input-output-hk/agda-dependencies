@@ -42,6 +42,8 @@ executable agda-deps
                        AgdaDeps.Layout
                        AgdaDeps.Options
                        AgdaDeps.Deps
+                       AgdaDeps.FragmentCache
+                       AgdaDeps.SerialiseCache
                        AgdaDeps.Source
                        AgdaDeps.Backend.Dot
                        AgdaDeps.Backend.Wire
@@ -70,6 +72,7 @@ executable agda-deps
                        fgl,
                        directory,
                        mtl,
+                       transformers,
                        bytestring,
                        process >= 1.6 && < 2,
                        template-haskell,

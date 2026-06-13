@@ -29,7 +29,7 @@ import Data.Map ( Map )
 import qualified Data.Map as M
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
-import Data.Maybe ( catMaybes )
+import Data.Maybe ( catMaybes, fromMaybe )
 import Data.Set ( Set )
 import qualified Data.Set as S
 
@@ -71,7 +71,7 @@ import Agda.TypeChecking.Monad ( TCM, liftTCM )
 import Agda.TypeChecking.Monad.Base
   ( iImportedModules, miInterface, Interface
   , iScope, iModuleName, iTopLevelModuleName
-  , iSignature, sigDefinitions
+  , iSignature, sigDefinitions, iFullHash
   )
 import Agda.TypeChecking.Monad.Imports ( getVisitedModules )
 import Agda.TypeChecking.Monad.State ( getSignature )
@@ -89,7 +89,18 @@ import AgdaDeps.Deps
   ( ADDef(..), DefAccess(..)
   , compileDefAD, collectAllQNames, nodeKey, hashQName
   , resetIgnoredEdges, contractIgnoredEdges
-  , resetMethodProviders, addInstanceMethodEdges )
+  , resetMethodProviders, addInstanceMethodEdges
+  , IgnoredEdgeMap, readIgnoredEdges, mergeIgnoredEdges
+  , MethodProviderMap, readMethodProviders, mergeMethodProviders )
+import AgdaDeps.FragmentCache
+  ( FragmentData(..), fragmentCacheSupported
+  , optionsFingerprint, fragmentFileFor, readFragment, writeFragment
+  , gcFragments )
+import AgdaDeps.SerialiseCache
+  ( Manifest, readManifest, writeManifest, manifestLookup, manifestFromList
+  , Epoch, combineEpochs, hashEpoch )
+import AgdaDeps.Deps ( nodeKeyVersion )
+import BuildInfo ( buildFingerprint )
 import AgdaDeps.Layout ( Position, computePositions )
 import AgdaDeps.Options
   ( Options(..), OutputFormat(..), View(..), DefState
@@ -97,6 +108,7 @@ import AgdaDeps.Options
   , outdirOpt, formatOpt, viewOpt
   , colorOpt, withSourceOpt, agdaHtmlDirOpt, lazyOpt, excludeOpt
   , noSourceForOpt, maxSnippetBytesOpt, gzipOpt, keepGoingOpt, skipAgdaOpt
+  , incrementalOpt, cacheDirOpt, packedAnalyticalOpt
   , quietOpt, noExternalsOpt, jsonModeOpt, lenientImportsOpt
   , resolveDepsOpt
   , withTermHashesOpt, minTermDepthOpt, withSignaturesOpt
@@ -117,9 +129,17 @@ import AgdaDeps.Backend.GraphJson ( ExternalsSummary, buildExternalsSummary )
 import AgdaDeps.Backend.Html ( renderHtml, renderLazyHtml, LazyOutput(..) )
 import AgdaDeps.Backend.Json ( renderJson )
 
--- | The set of names in scope captured during 'moduleSetup', threaded
--- to 'postModuleAD'.
-data ModuleEnv = ModuleEnv { namesInScope :: Set QName }
+-- | Per-module state captured during 'moduleSetup', threaded to
+-- 'postModuleAD': the in-scope names, plus pre-module snapshots of the
+-- two compile-time side-channels so the fragment cache can attribute
+-- each module's contributions exactly (as a before/after delta —
+-- name-based slicing fails for defs Agda homes in anonymous modules,
+-- e.g. @_.IsMajority@ copies from a @module _ ⦃ asm ⦄@ block).
+data ModuleEnv = ModuleEnv
+  { namesInScope       :: Set QName
+  , envIgnoredBefore   :: IgnoredEdgeMap
+  , envProvidersBefore :: MethodProviderMap
+  }
 
 -- | @--theme=NAME@ parser. Sets the four 'optColor*' slots; individual
 -- @--color-*@ flags appearing later in argv override their slot.
@@ -191,6 +211,12 @@ backendWithSeed seed = Backend'
         "Continue past Agda type-check errors. Modules whose type-check\nfailed are tagged 'failed' in the output graph."
       , Option []    ["skip-agda"] (NoArg skipAgdaOpt)
         "Don't invoke Agda at all. Render a module-level graph straight\nfrom the source-file scan (line-parses 'module' / 'import')."
+      , Option []    ["incremental"] (NoArg incrementalOpt)
+        "Cache each module's compiled dependency fragment under\n<out-dir>/.agda-deps-cache, keyed on the module's interface hash,\nand skip the per-definition walk on later runs when the module is\nunchanged. Requires Agda >= 2.9; disabled under --keep-going."
+      , Option []    ["cache-dir"] (ReqArg cacheDirOpt "DIR")
+        "Override the --incremental cache location (fragments +\nserialise manifest). Default: <out-dir>/.agda-deps-cache. No\neffect without --incremental."
+      , Option []    ["packed-analytical"] (NoArg packedAnalyticalOpt)
+        "Augment --json-mode=packed's 'defs' with per-definition\nanalytical arrays (kind/line/access, plus type under\n--with-signatures and subterm hashes under --with-term-hashes),\nso the compact form carries everything expanded does. Off by\ndefault; no effect on expanded output."
       , Option []    ["quiet"] (NoArg quietOpt)
         "Suppress 'I am working' progress lines on stderr; only genuine\nwarnings and errors are printed."
       , Option []    ["no-externals"] (NoArg noExternalsOpt)
@@ -226,19 +252,109 @@ backendWithSeed seed = Backend'
 
 -- | Pre-compile hook. Clears the side-channels (edges through ignored
 -- definitions; instance-method providers) so repeated runs in the same
--- process start fresh.
+-- process start fresh, and surfaces the @--incremental@ availability
+-- caveats once per run.
 preCompileAD :: Options -> TCM Options
 preCompileAD opts = do
   resetIgnoredEdges
   resetMethodProviders
+  liftIO $ writeIORef recompiledRef False
+  when (optIncremental opts && not fragmentCacheSupported) $
+    liftIO $ hPutStrLn stderr $
+      "agda-deps: --incremental requires Agda >= 2.9 (this build cannot "
+      ++ "serialise fragments); running without the cache."
+  when (optIncremental opts && optKeepGoing opts) $
+    info ("agda-deps: --incremental is disabled under --keep-going "
+       ++ "(fragments are only cached from fully-checked runs).")
   return opts
+
+-- | Whether the fragment cache is active this run.
+useFragmentCache :: Options -> Bool
+useFragmentCache opts =
+  optIncremental opts && not (optKeepGoing opts) && fragmentCacheSupported
+
+-- | Where fragments + the serialise manifest live. @--cache-dir@
+-- overrides; otherwise under the output dir (or the working directory —
+-- the project root after 'Main''s @.agda-lib@ discovery — when output
+-- goes to stdout).
+cacheDirFor :: Options -> FilePath
+cacheDirFor opts = case optCacheDir opts of
+  Just dir -> dir
+  Nothing  -> fromMaybe "." (optOutDir opts) </> ".agda-deps-cache"
+
+-- | Whether the @--incremental@ serialise cache is active. Independent
+-- of 'fragmentCacheSupported' (the manifest is plain text + a
+-- version-stable hash, so it works on 2.8 too) — but the monolithic
+-- no-op skip additionally needs the fragment cache to detect \"nothing
+-- recompiled\", so on 2.8 (no fragments) every module recompiles and
+-- that skip never fires. Disabled under @--keep-going@.
+useSerialiseCache :: Options -> Bool
+useSerialiseCache opts = optIncremental opts && not (optKeepGoing opts)
+
+-- | Output-context token for the monolithic no-op skip: a fingerprint
+-- of everything other than per-definition /content/ that the output
+-- depends on — the live module set, the output-affecting options, the
+-- build identity, and the node-key convention. Combined with \"nothing
+-- recompiled this run\" (per 'recompiledRef', which guards the def
+-- content), an unchanged token means the on-disk output is byte-identical.
+outputToken :: Options -> [String] -> Epoch
+outputToken opts modules = combineEpochs
+  [ hashEpoch buildFingerprint
+  , fromIntegral nodeKeyVersion
+  , hashEpoch (unwords optStrings)
+  , hashEpoch (unwords modules)
+  ]
+  where
+    -- One 'show' per output-affecting option (a single 16-tuple would
+    -- exceed GHC's tuple 'Show' limit). Add any new output-affecting
+    -- option here, or the no-op skip could serve stale output.
+    optStrings =
+      [ show (optFormat opts), show (optJsonMode opts), show (optView opts)
+      , show (optColors opts), show (optGzip opts), show (optAgdaHtmlDir opts)
+      , show (optNoExternals opts), show (optExcludeModules opts)
+      , show (optWithSource opts), show (optNoSourceFor opts)
+      , show (optMaxSnippetBytes opts), show (optWithSignatures opts)
+      , show (optNormaliseSignatures opts), show (optShowImplicit opts)
+      , show (optWithTermHashes opts), show (optMinTermDepth opts)
+      , show (optPackedAnalytical opts)
+      ]
 
 moduleSetup
   :: Options -> IsMain -> TopLevelModuleName -> Maybe FilePath
   -> TCM (Recompile ModuleEnv ModuleRes)
-moduleSetup _ _ _ _ = do
-  allNamesInScope <- nsInScope . allThingsInScope <$> liftTCM getCurrentScope
-  return $ Recompile (ModuleEnv allNamesInScope)
+moduleSetup opts isMain tlmn _ = do
+  mCached <-
+    if useFragmentCache opts
+      then do
+        iface <- curIF
+        let path = fragmentFileFor (cacheDirFor opts) (prettyShow tlmn)
+        readFragment path (optionsFingerprint opts) (iFullHash iface)
+      else return Nothing
+  case mCached of
+    Just frag -> do
+      -- The Skip path bypasses compileDef + postModule entirely:
+      -- re-inject the module's side-channel slices (otherwise
+      -- contraction loses every edge routed through this module's
+      -- ignored helpers) and the entry-module capture postModuleAD
+      -- would have done.
+      mergeIgnoredEdges (fragIgnored frag)
+      mergeMethodProviders (fragProviders frag)
+      case isMain of
+        IsMain -> do
+          iface <- curIF
+          let imports = map fst (iImportedModules iface)
+          liftIO $ writeIORef mainModuleRef (Just (tlmn, imports))
+        NotMain -> return ()
+      info $ "agda-deps: --incremental: fragment hit for '"
+             ++ prettyShow tlmn ++ "' ("
+             ++ show (length (fragDefs frag)) ++ " defs)"
+      return $ Skip (map Just (fragDefs frag))
+    Nothing -> do
+      liftIO $ writeIORef recompiledRef True
+      allNamesInScope <- nsInScope . allThingsInScope <$> liftTCM getCurrentScope
+      ignoredBefore   <- readIgnoredEdges
+      providersBefore <- readMethodProviders
+      return $ Recompile (ModuleEnv allNamesInScope ignoredBefore providersBefore)
 
 {-# NOINLINE mainModuleRef #-}
 mainModuleRef :: IORef (Maybe (TopLevelModuleName, [TopLevelModuleName]))
@@ -251,6 +367,15 @@ failedModulesRef = unsafePerformIO $ newIORef S.empty
 {-# NOINLINE precomputedGraphRef #-}
 precomputedGraphRef :: IORef PrecomputedGraph
 precomputedGraphRef = unsafePerformIO $ newIORef emptyGraph
+
+-- | Set 'True' whenever a module is (re)compiled this run rather than
+-- served from the fragment cache. 'postCompileAD' reads it: an
+-- all-cache-hit run (this stays 'False') with an unchanged output
+-- context means the on-disk monolithic output is already byte-identical
+-- and the serialise can be skipped. Reset in 'preCompileAD'.
+{-# NOINLINE recompiledRef #-}
+recompiledRef :: IORef Bool
+recompiledRef = unsafePerformIO $ newIORef False
 
 
 postModuleAD
@@ -286,7 +411,47 @@ postModuleAD opts env isMain tlmn defs = do
       missing       = [ def | (qn, def) <- sigDefs
                             , not (qn `S.member` visitedQNames) ]
   extras <- mapM (compileDefAD opts env isMain) missing
-  return (defs ++ extras)
+  let result = defs ++ extras
+
+  -- '--incremental' write path.
+  --
+  -- For an IMPORTED module the emitted fragment is a pure function of
+  -- its (always dead-code-pruned) interface — identical whether the
+  -- module was fresh-checked or warm-loaded — so it is cached
+  -- unconditionally. Only the MAIN module's output is enriched by the
+  -- 'getSignature' dead-private recovery above, and 'stSignature'
+  -- holds its defs only when it was actually type-checked this run
+  -- ('sigDefs' non-empty): caching a warm-loaded main module would
+  -- freeze the degraded warm variant (the "warm-.agdai edge loss",
+  -- see TODO.md) into the cache, so the main module is cached only
+  -- from a fresh check.
+  when (useFragmentCache opts) $ do
+    let cacheable = case isMain of
+          NotMain -> True
+          IsMain  -> not (null sigDefs) || null (catMaybes result)
+    when cacheable $ do
+      ignoredAll   <- readIgnoredEdges
+      providersAll <- readMethodProviders
+      -- This module's contributions = what was added to the
+      -- side-channels since 'moduleSetup' snapshotted them. Exact by
+      -- construction: a name-prefix slice misses defs Agda homes in
+      -- anonymous modules (bare '_.…' / prefixless copies), whose
+      -- chains then silently lose their contracted edges on an
+      -- all-cache-hit run.
+      let ignoredFrag = M.difference ignoredAll (envIgnoredBefore env)
+          -- Providers grow by *prepending* binders per method key, so
+          -- the delta on a shared key is the new list's prefix.
+          providersFrag = M.differenceWith
+            (\ new old -> case take (length new - length old) new of
+                            [] -> Nothing
+                            xs -> Just xs)
+            providersAll
+            (envProvidersBefore env)
+          path = fragmentFileFor (cacheDirFor opts) (prettyShow tlmn)
+      writeFragment path (optionsFingerprint opts) (iFullHash iface)
+        (FragmentData (catMaybes result) ignoredFrag providersFrag)
+
+  return result
 
 -- | After all modules are compiled, build the per-format output.
 postCompileAD
@@ -341,8 +506,24 @@ postCompileAD opts _ defMap = do
       precomputeImportEndpoints :: [String]
       precomputeImportEndpoints =
         concat [ [s, t] | (s, t) <- precomputedImports precomputed ]
+      -- Re-export hubs: a module that only @open … public@s names from
+      -- elsewhere contributes no QName of its own to 'allQNames0', so
+      -- without this it slips past classification entirely and survives
+      -- @--no-externals@. Pool both the re-export host and the source it
+      -- re-exports from, so a stdlib hub like @Data.List@ gets seen and
+      -- (being out-of-root) classified external. In-root hubs already
+      -- carry True via the QName / precompute signals, and 'M.insertWith
+      -- (||)' keeps it.
+      reExportEndpoints :: [String]
+      reExportEndpoints =
+        concat
+          [ [h, t]
+          | (_src, mi) <- M.toList visited
+          , (h, t, _n) <- collectReExports (miInterface mi)
+          ]
       allEndpointModules :: [String]
-      allEndpointModules = visitedImportEndpoints ++ precomputeImportEndpoints
+      allEndpointModules =
+        visitedImportEndpoints ++ precomputeImportEndpoints ++ reExportEndpoints
 
   externals0 <- liftIO $
     classifyExternalModules
@@ -448,6 +629,17 @@ postCompileAD opts _ defMap = do
     Just dir -> liftIO $ createDirectoryIfMissing True dir
     Nothing  -> return ()
 
+  -- '--incremental' serialise skip: an all-cache-hit run (nothing
+  -- recompiled) whose output context (module set + options + build) is
+  -- unchanged produces byte-identical monolithic output, so the
+  -- re-emit can be skipped. 'anyRecompiled' guards the def /content/;
+  -- 'monoToken' guards everything else.
+  let liveModules = map prettyShow (M.keys defMap)
+      cacheDir    = cacheDirFor opts
+      monoToken   = outputToken opts liveModules
+  anyRecompiled <- liftIO $ readIORef recompiledRef
+  let monoSkippable = useSerialiseCache opts && not anyRecompiled
+
   info "agda-deps: writing output…"
   case optFormat opts of
     FmtDot ->
@@ -456,10 +648,25 @@ postCompileAD opts _ defMap = do
            Just dir -> liftIO $ TL.writeFile (dir </> "deps.dot") dotText
            Nothing  -> liftIO $ TL.putStrLn dotText
     FmtJson ->
-      let jsonText = renderJson (optJsonMode opts) stateMap externalModules failedModules entryModule importEdges sourceFiles moduleFileMap positions reExportRows externalsSummary defs
-      in case optOutDir opts of
-           Just dir -> liftIO $ writeFile (dir </> "deps.json") jsonText
-           Nothing  -> liftIO $ putStrLn jsonText
+      case optOutDir opts of
+        Nothing -> liftIO $ putStrLn $
+          renderJson (optJsonMode opts) (optPackedAnalytical opts) stateMap externalModules failedModules entryModule importEdges sourceFiles moduleFileMap positions reExportRows externalsSummary defs
+        Just dir -> liftIO $ do
+          let path = dir </> "deps.json"
+          skip <- if monoSkippable
+                    then do
+                      m <- readManifest cacheDir (optGzip opts)
+                      ex <- System.Directory.doesFileExist path
+                      pure (manifestLookup "deps.json" m == Just monoToken && ex)
+                    else pure False
+          if skip
+            then info "agda-deps: --incremental: deps.json unchanged; skipped re-emit."
+            else do
+              writeFile path $
+                renderJson (optJsonMode opts) (optPackedAnalytical opts) stateMap externalModules failedModules entryModule importEdges sourceFiles moduleFileMap positions reExportRows externalsSummary defs
+              when (useSerialiseCache opts) $
+                writeManifest cacheDir (optGzip opts)
+                  (manifestFromList [("deps.json", monoToken)])
     FmtHtml ->
       case optOutDir opts of
         Nothing -> liftIO $ do
@@ -481,7 +688,17 @@ postCompileAD opts _ defMap = do
                      ++ "without embedded snippets. Use --with-source --lazy, or "
                      ++ "--agda-html-dir=DIR to link out to `agda --html` pages.")
                 return M.empty
-          liftIO $ writeHtmlOutput dir opts snippetMap stateMap externalModules failedModules entryModule importEdges sourceFiles moduleFileMap positions externalsSummary defs
+          liftIO $ writeHtmlOutput dir opts (SerialiseCtx (useSerialiseCache opts) cacheDir monoSkippable monoToken) snippetMap stateMap externalModules failedModules entryModule importEdges sourceFiles moduleFileMap positions externalsSummary defs
+
+  -- '--incremental': prune fragment files for modules no longer in the
+  -- graph (deleted / renamed source) so the cache doesn't grow without
+  -- bound. Live set = every module Agda processed this run (the keys of
+  -- the def map, hit or recompiled).
+  when (useFragmentCache opts) $ do
+    removed <- gcFragments cacheDir liveModules
+    when (removed > 0) $
+      info $ "agda-deps: --incremental: pruned " ++ show removed
+           ++ " stale fragment(s)."
 
 -- | Compute (x, y) positions per definition QName. Each node id is
 -- paired with an integer module id so the grid fallback keeps a
@@ -516,11 +733,26 @@ computeQNamePositions allQNames defs = do
     , Just qn <- [IM.lookup nid qnameById]
     ]
 
+-- | The @--incremental@ serialise-cache context threaded into the
+-- output writers. When 'scEnabled' is 'False' the writers behave
+-- exactly as the non-incremental path (write everything, no manifest).
+data SerialiseCtx = SerialiseCtx
+  { scEnabled   :: Bool       -- ^ 'useSerialiseCache'.
+  , scCacheDir  :: FilePath   -- ^ where the serialise manifest lives.
+  , scMonoSkip  :: Bool       -- ^ enabled && nothing recompiled this run.
+  , scMonoToken :: Epoch      -- ^ output-context token ('outputToken').
+  }
+
 -- | Write the HTML output: a single self-contained @deps.html@, or
 -- (with @--lazy@) a small shell plus @graph.json@, per-module detail
 -- files, and per-module snippet files.
+--
+-- Under @--incremental@ the lazy per-module + snippet files are
+-- rewritten only when their content epoch changed since the last run
+-- (skipped files never even force their content thunk); the non-lazy
+-- single @deps.html@ uses the monolithic no-op skip.
 writeHtmlOutput
-  :: FilePath -> Options
+  :: FilePath -> Options -> SerialiseCtx
   -> Map QName Snippet -> Map QName DefState
   -> Set String         -- ^ external module names
   -> Set String         -- ^ failed module names
@@ -531,42 +763,100 @@ writeHtmlOutput
   -> Map QName Position  -- ^ positions per QName
   -> Maybe ExternalsSummary -- ^ diagnostic summary under --no-externals
   -> [ADDef] -> IO ()
-writeHtmlOutput dir opts snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFileMap positions externalsSummary defs
+writeHtmlOutput dir opts sc snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFileMap positions externalsSummary defs
   | optLazy opts = do
       let gz = optGzip opts
           lo = renderLazyHtml (optView opts) (optColors opts) gz (optAgdaHtmlDir opts) snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFileMap positions externalsSummary defs
+      -- Shell + module-level skeleton are small: always (re)write.
       writeFile (dir </> "deps.html")  (lazyShellHtml lo)
       writeJsonMaybeGz gz (dir </> "graph.json") (lazyGraphJson lo)
 
-      case lazyModuleDetails lo of
-        []      -> return ()
-        details -> do
-          let modulesDir = dir </> "modules"
-          createDirectoryIfMissing True modulesDir
-          mapM_ (writeFileInDir gz modulesDir) details
+      oldManifest <-
+        if scEnabled sc then readManifest (scCacheDir sc) gz else pure mempty
 
-      case lazySnippetBundles lo of
-        []      -> return ()
-        bundles -> do
-          let snippetDir = dir </> "snippets"
-          createDirectoryIfMissing True snippetDir
-          mapM_ (writeBundleCapped gz snippetDir (optMaxSnippetBytes opts)) bundles
+      detailEntries <-
+        case lazyModuleDetails lo of
+          []      -> return []
+          details -> do
+            let modulesDir = dir </> "modules"
+            createDirectoryIfMissing True modulesDir
+            mapM (writeDetail gz oldManifest modulesDir) details
+
+      snippetEntries <-
+        case lazySnippetBundles lo of
+          []      -> return []
+          bundles -> do
+            let snippetDir = dir </> "snippets"
+            createDirectoryIfMissing True snippetDir
+            mapM (writeBundle gz oldManifest snippetDir (optMaxSnippetBytes opts)) bundles
+
+      when (scEnabled sc) $
+        writeManifest (scCacheDir sc) gz
+          (manifestFromList (catMaybes (detailEntries ++ snippetEntries)))
   | otherwise = do
-      let html = renderHtml (optView opts) (optColors opts) (optGzip opts) (optAgdaHtmlDir opts) snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFileMap positions externalsSummary defs
-      writeFile (dir </> "deps.html") html
+      let path = dir </> "deps.html"
+      skip <- if scMonoSkip sc
+                then do
+                  m  <- readManifest (scCacheDir sc) (optGzip opts)
+                  ex <- System.Directory.doesFileExist path
+                  pure (manifestLookup "deps.html" m == Just (scMonoToken sc) && ex)
+                else pure False
+      if skip
+        then info "agda-deps: --incremental: deps.html unchanged; skipped re-emit."
+        else do
+          writeFile path $
+            renderHtml (optView opts) (optColors opts) (optGzip opts) (optAgdaHtmlDir opts) snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFileMap positions externalsSummary defs
+          when (scEnabled sc) $
+            writeManifest (scCacheDir sc) (optGzip opts)
+              (manifestFromList [("deps.html", scMonoToken sc)])
   where
-    writeFileInDir :: Bool -> FilePath -> (FilePath, String) -> IO ()
-    writeFileInDir gz destDir (fname, content) =
-      writeJsonMaybeGz gz (destDir </> fname) content
+    -- Whether a file (and its .gz sibling, if gzip) is already on disk.
+    fileCurrent :: Bool -> FilePath -> IO Bool
+    fileCurrent gz full = do
+      a <- System.Directory.doesFileExist full
+      if not gz then pure a
+                else (a &&) <$> System.Directory.doesFileExist (full ++ ".gz")
 
-    writeBundleCapped :: Bool -> FilePath -> Maybe Int -> (FilePath, String) -> IO ()
-    writeBundleCapped gz destDir mCap (fname, content) = case mCap of
-      Just n | length content > n -> do
-        hPutStrLn stderr $
-          "agda-deps: skipping snippet bundle "
-            ++ fname ++ " (" ++ show (length content)
-            ++ " bytes > " ++ show n ++ " byte cap; set --max-snippet-bytes=0 to disable)"
-      _ -> writeJsonMaybeGz gz (destDir </> fname) content
+    -- A module-detail file. Returns the manifest entry to record (always
+    -- 'Just' — the file is on disk afterwards), forcing the content
+    -- thunk only when an actual write is needed.
+    writeDetail
+      :: Bool -> Manifest -> FilePath -> (FilePath, Epoch, String)
+      -> IO (Maybe (String, Epoch))
+    writeDetail gz oldM destDir (fname, epoch, content) = do
+      let slot = "modules/" ++ fname
+          full = destDir </> fname
+      uptodate <- if scEnabled sc && manifestLookup slot oldM == Just epoch
+                    then fileCurrent gz full else pure False
+      when (not uptodate) $ writeJsonMaybeGz gz full content
+      pure (Just (slot, epoch))
+
+    -- A snippet bundle. The byte cap is checked only when a (re)write is
+    -- actually needed, so an unchanged bundle is skipped without forcing
+    -- its content. A cap change is folded into the epoch so it forces a
+    -- re-evaluation. Cap-skipped bundles write no file and record no
+    -- manifest entry ('Nothing').
+    writeBundle
+      :: Bool -> Manifest -> FilePath -> Maybe Int -> (FilePath, Epoch, String)
+      -> IO (Maybe (String, Epoch))
+    writeBundle gz oldM destDir mCap (fname, epoch0, content) = do
+      let slot  = "snippets/" ++ fname
+          full  = destDir </> fname
+          epoch = combineEpochs [epoch0, hashEpoch (show mCap)]
+      uptodate <- if scEnabled sc && manifestLookup slot oldM == Just epoch
+                    then fileCurrent gz full else pure False
+      if uptodate
+        then pure (Just (slot, epoch))
+        else case mCap of
+          Just n | length content > n -> do
+            hPutStrLn stderr $
+              "agda-deps: skipping snippet bundle "
+                ++ fname ++ " (" ++ show (length content)
+                ++ " bytes > " ++ show n ++ " byte cap; set --max-snippet-bytes=0 to disable)"
+            pure Nothing
+          _ -> do
+            writeJsonMaybeGz gz full content
+            pure (Just (slot, epoch))
 
 -- | Write a JSON file at @path@, and (when @gz@ is set) a gzip-compressed
 -- @path.gz@ sibling.

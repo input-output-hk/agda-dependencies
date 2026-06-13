@@ -43,6 +43,8 @@ module AgdaDeps.Deps
   , ignoredEdgesRef
   , resetIgnoredEdges
   , recordIgnoredDef
+  , readIgnoredEdges
+  , mergeIgnoredEdges
   , expandThroughIgnored
   , contractIgnoredEdges
 
@@ -52,6 +54,7 @@ module AgdaDeps.Deps
   , resetMethodProviders
   , recordMethodProviders
   , readMethodProviders
+  , mergeMethodProviders
   , addInstanceMethodEdges
   ) where
 
@@ -477,6 +480,19 @@ recordIgnoredDef :: MonadIO m => QName -> Map QName EdgeProv -> m ()
 recordIgnoredDef qn deps =
   liftIO $ modifyIORef' ignoredEdgesRef (M.insert qn deps)
 
+-- | Read the ignored-edges map. Used by the fragment cache's write
+-- path to extract a module's slice.
+readIgnoredEdges :: MonadIO m => m IgnoredEdgeMap
+readIgnoredEdges = liftIO $ readIORef ignoredEdgesRef
+
+-- | Union a cached module's ignored-edges slice back in (fragment
+-- cache hit: the module's @compileDef@ hooks never ran, so its
+-- entries must come from the fragment). Left-biased on collision —
+-- a freshly-recorded entry wins over a cached one.
+mergeIgnoredEdges :: MonadIO m => IgnoredEdgeMap -> m ()
+mergeIgnoredEdges extra =
+  liftIO $ modifyIORef' ignoredEdgesRef (`M.union` extra)
+
 -- ** Side-channel: instance-method providers
 --
 -- Records (method -> [binders]) for each instance binder checked, so
@@ -500,6 +516,14 @@ resetMethodProviders = liftIO $ writeIORef methodProvidersRef M.empty
 -- | Read the providers map. Used by 'Backend.postCompileAD'.
 readMethodProviders :: MonadIO m => m MethodProviderMap
 readMethodProviders = liftIO $ readIORef methodProvidersRef
+
+-- | Union a cached module's provider slice back in (fragment cache
+-- hit). Per-method binder lists are appended; downstream
+-- 'addInstanceMethodEdges' treats them as a set, so order is
+-- immaterial.
+mergeMethodProviders :: MonadIO m => MethodProviderMap -> m ()
+mergeMethodProviders extra =
+  liftIO $ modifyIORef' methodProvidersRef (M.unionWith (++) extra)
 
 -- | Append @binder@ to the providers list for each of @methods@. An
 -- empty @methods@ list is a no-op (the binder is still recorded by the

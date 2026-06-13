@@ -24,12 +24,14 @@ import Data.Map ( Map )
 import qualified Data.Map as M
 import Data.Set ( Set )
 import qualified Data.Set as S
+import Data.Word ( Word64 )
 
 import Data.FileEmbed ( embedStringFile )
 
 import Agda.Syntax.Abstract.Name ( QName )
 import Agda.Syntax.Internal ( qnameModule )
 import Agda.Syntax.Common.Pretty ( prettyShow )
+import Agda.Utils.Hash ( hashString )
 
 import AgdaDeps.Deps    ( ADDef(..), hashQName )
 import AgdaDeps.Layout  ( Position )
@@ -38,7 +40,8 @@ import AgdaDeps.Source  ( Snippet(..) )
 import AgdaDeps.Util    ( jsString )
 
 import AgdaDeps.Backend.GraphJson
-  ( GraphInput(..), GraphJsonOutput(..), ModuleDetailJson(..)
+  ( GraphInput(..), GraphJsonOutput(..)
+  , ModuleDetailJson(mdjFileName, mdjEpoch, mdjContent)
   , ExternalsSummary
   , buildGraphJson
   , snippetBundleFilename
@@ -82,6 +85,7 @@ renderHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap externals fa
         , giExtraModules    = S.empty
         , giReExports       = []
         , giExternalsSummary = externalsSummary
+        , giPackedAnalytical = False
         }
   in renderHtmlFromInput view palette gzipEnabled agdaHtmlDir gi
 
@@ -97,13 +101,18 @@ renderHtmlFromInput view palette gzipEnabled agdaHtmlDir gi =
   in htmlTemplate view palette gzipEnabled agdaHtmlDir TemplateInline (gjoGraphJson gjo) withSourceJs
 
 -- | The fan-out of files for the lazy HTML output mode.
+--
+-- The module-detail and snippet entries carry a content @epoch@
+-- ('Word64') alongside the filename and content, so the
+-- incremental-serialise path can skip rewriting an unchanged file
+-- without forcing its (lazy) content thunk.
 data LazyOutput = LazyOutput
   { lazyShellHtml      :: String
   , lazyGraphJson      :: String
-  , lazyModuleDetails  :: [(FilePath, String)]
-    -- ^ @(filename-only, content)@ pairs to write under @modules/@.
-  , lazySnippetBundles :: [(FilePath, String)]
-    -- ^ @(filename-only, content)@ pairs to write under @snippets/@.
+  , lazyModuleDetails  :: [(FilePath, Word64, String)]
+    -- ^ @(filename-only, epoch, content)@ to write under @modules/@.
+  , lazySnippetBundles :: [(FilePath, Word64, String)]
+    -- ^ @(filename-only, epoch, content)@ to write under @snippets/@.
   }
 
 -- | Render the dependency graph as a small page shell plus separate
@@ -143,17 +152,20 @@ renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap external
         , giExtraModules    = S.empty
         , giReExports       = []
         , giExternalsSummary = externalsSummary
+        , giPackedAnalytical = False
         }
       gjo = buildGraphJson gi
 
       moduleDetails =
-        [ (mdjFileName md, mdjContent md) | md <- gjoModuleDetails gjo ]
+        [ (mdjFileName md, mdjEpoch md, mdjContent md) | md <- gjoModuleDetails gjo ]
 
       snippetBundles =
         [ ( snippetBundleFilename m
-          , renderBundleJson (snippetsForModule snippetMap m)
+          , snippetBundleEpoch entries
+          , renderBundleJson entries
           )
         | m <- snippetModules
+        , let entries = snippetsForModule snippetMap m
         ]
 
       withSourceJs = if M.null snippetMap then "false" else "true"
@@ -187,6 +199,17 @@ renderBundleJson entries =
       ++ "{\"source\":" ++ jsString (snippetText sn)
       ++ ",\"sourceLine\":" ++ show (snippetStartLine sn)
       ++ "}"
+
+-- | Cheap content fingerprint of a snippet bundle, mirroring
+-- 'renderBundleJson''s inputs (node id + source + line) without
+-- building the JSON. Lets the incremental-serialise path skip
+-- rewriting an unchanged bundle.
+snippetBundleEpoch :: [(QName, Snippet)] -> Word64
+snippetBundleEpoch entries =
+  hashString $ concat
+    [ show (hashQName qn) ++ "\v" ++ show (snippetStartLine sn)
+      ++ "\v" ++ snippetText sn ++ "\f"
+    | (qn, sn) <- entries ]
 
 -- ** Template
 

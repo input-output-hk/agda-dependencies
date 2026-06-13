@@ -7,6 +7,215 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-06-13 — `agda-deps` — `--packed-analytical` (consumer-usable packed form)
+
+The packed `graph.json` is ~5× smaller than expanded but, built for the
+HTML viewer, its `defs` carried only `names`/`modules`/`states`/`x`/`y`
+— omitting every per-definition analytical field the analysis consumers
+need (`kind`, `line`, `access`, `type`, subterm hashes/depths). So a
+consumer had to choose size *or* fidelity. `--packed-analytical` removes
+the choice.
+
+- **New arrays parallel to `defs.names`**, reusing the existing
+  little-endian typed-array encoders (`AgdaDeps.Backend.Csr`, + a new
+  `encodeWord64LE`): `defs.kinds` (Int8, enum `0..7`), `defs.lines`
+  (Int32, `-1`=unknown), `defs.access` (Int8), `defs.types`
+  (`[string|null]`, under `--with-signatures`), and CSR-packed
+  `defs.subtermOffsets`/`subtermHashes` (Int64-LE)/`subtermDepths`
+  (under `--with-term-hashes`). No edge/topology change — packed already
+  carried CSR edges + provenance.
+- **`access` is 3-valued** (`0`=unknown/absent, `1`=public, `2`=private),
+  not the two values first proposed: the expanded form *omits* `access`
+  for QNames with no local `ADDef` (external / dependency-only targets),
+  and `0` round-trips to that omission so the two forms match exactly.
+  (`line` uses `-1`, `type` uses `null` for the same reason.)
+- **Shared lookups guarantee parity.** The per-QName
+  kind/line/access/type/subterm lookups (`mkDefKind`/`mkDefLine`/… over
+  the same `defsList`) are now a single source of truth used by *both*
+  the expanded emitter (`toExpandedGraph`) and the packed-analytical
+  arrays, so the node set and the per-node defaults can't drift. Kind
+  Int8 encoding (`encodeDefKind`) matches `Wire.wireKind`'s ordering (and
+  `FragmentCache.kindToInt`); a new `encodeDefAccess` sits beside the
+  existing `encodeDefState`.
+- **Off by default** (CLI `--packed-analytical` / YAML
+  `packed-analytical:`); default packed output stays byte-identical, so
+  HTML-viewer users are unaffected. Only meaningful with
+  `--json-mode=packed` (expanded already carries everything).
+- **Acceptance gate.** `schema/packed_analytical_check.py` decodes the
+  packed arrays and asserts they equal the expanded form node-for-node
+  (kind/line/access/type/subterm hashes); a CI step runs it (both sides
+  cold-started, to avoid the warm-`.agdai` main-module skew). The
+  Word64 subterm hashes are actually *more* faithful here than in
+  expanded, which emits them as JSON numbers (exact only because the
+  Haskell consumer parses via `Scientific`).
+- **Consumer side** (sibling `agda-graph-explorer`) already documented
+  the gap + a fixture and refuses today's packed; it can now add a
+  base64-LE + CSR decoder mapping packed-analytical → its `ExpandedGraph`.
+
+## 2026-06-13 — `agda-deps` — incremental serialise (P2), cache GC + `--cache-dir`, re-export-hub externals
+
+Three follow-ups to the `--incremental` / `--no-externals` work.
+
+### Incremental serialise (P2)
+
+After the P1 fragment cache cut the per-definition /walk/, this cuts
+the /serialise + write/ on a rebuild. New module
+`AgdaDeps.SerialiseCache` (plain-text manifest in the cache dir; no
+CPP — only the version-stable `hashString`):
+
+- **Monolithic output** (`deps.json` / inline `deps.html`) is one blob
+  whose slices can't be patched cheaply, so the win is the /no-op
+  rebuild/: when nothing recompiled this run (every fragment hit —
+  tracked by a new `recompiledRef`) and the output-context token
+  (`outputToken`: module set + output-affecting options + build
+  identity + `nodeKeyVersion`) is unchanged, the on-disk file is
+  byte-identical, so generation /and/ write are skipped.
+- **Lazy per-module files** (`modules/<M>.json`, `snippets/<M>.json`)
+  each carry a content `mdjEpoch`/bundle epoch computed cheaply from
+  the structured inputs (no base64, no JSON assembly), so a skipped
+  file never forces its (lazy) content thunk. A body-only edit
+  rewrites just the edited module's file; adding/removing a definition
+  shifts the global node indices the per-module `outEdges` reference,
+  so many epochs change (correct, if not minimal — truly minimal would
+  need a stable-index lazy wire change, coordinated with the JS
+  consumer).
+- **Honest scope.** Profiling the warm rebuild on Jolteon-FastBFT
+  (308 modules, 5862 defs) showed the dominant cost is **Agda's own
+  interface load (~96 s)**, which a backend cannot avoid; the
+  post-Agda aggregation (contraction over 734k edges, layout,
+  classification) is ~40 ms, and serialise+write of the 12 MB lazy
+  output is sub-second. So incremental serialise pays off where the
+  /output/ is large relative to the graph — the monolithic expanded
+  JSON with `--with-signatures --with-term-hashes` (≈150 MB; the
+  daemon's config), `--with-source` snippet bundles — and on no-op
+  rebuilds (skipping the re-emit + the mtime bump that a file-watcher
+  would react to). It does not, and cannot, touch the Agda-load floor.
+- Gated on `--incremental`; default output path is byte-identical.
+  CI gains a no-op-skip / edit-detect / GC / lazy-no-rewrite step.
+
+### Fragment cache GC + `--cache-dir`
+
+- **GC.** After an `--incremental` run, `*.frag` files for modules no
+  longer in the graph (deleted / renamed source) are pruned
+  (`gcFragments`), keyed on the modules Agda processed this run.
+  Failures are swallowed; only `*.frag` is touched.
+- **`--cache-dir=PATH`** (CLI + YAML `cache-dir:`) overrides the
+  default `<out-dir>/.agda-deps-cache` for both fragments and the
+  serialise manifest.
+
+### `classifyExternalModules` now sees re-export hubs
+
+A stdlib module that only `open … public`s names from elsewhere
+contributes no QName of its own, so it used to slip past
+`--no-externals`. The re-export host + source module names
+(`collectReExports` over the visited interfaces) are now pooled into
+the classification input, so an out-of-root hub like `Data.List` is
+seen and dropped. In-root hubs already carry an in-root signal, and
+the `M.insertWith (||)` union keeps it. Additive: the test corpus has
+no external re-export hub, so the golden is unchanged.
+
+## 2026-06-12 — `agda-deps` — `--keep-going` hardening: a graph is always emitted
+
+Closes the headline robustness gap (Backlog 2026-06-12): on a real
+broken corpus the partial pass died with a bare **exit 120** and no
+`deps.json`, blinding every downstream graph consumer the moment one
+WIP module stopped type-checking.
+
+- **Root cause found and fixed.** Exit 120 is Agda's
+  `ImpossibleError`: `__IMPOSSIBLE__` is thrown as a *GHC exception*,
+  not a `TCErr`, so every `catchError` guard in the partial driver was
+  blind to it. The concrete trigger: TCM's `catchError` instance rolls
+  the whole `TCState` back on a check failure, and
+  `partialCompilerMain` re-merged only interface *signatures* —
+  reification under `--with-signatures` then hit `infallibleSortKit`'s
+  `fromMaybe __IMPOSSIBLE__` on the missing builtin bindings.
+- **`mergeIfaceState`** now rebuilds the import state the way Agda's
+  own (non-exported) `mergeInterface` does: signature + builtin
+  bindings (with per-primitive rebinds) + remote meta store + pattern
+  synonyms + display forms.
+- **`catchAllTCM`** (TCErr *and* GHC exceptions; `ExitCode`/async
+  re-thrown) now guards every stage of the partial pass — per
+  definition, per module, per interface merge — so a broken piece is
+  skipped with a breadcrumb instead of aborting; `preCompile` /
+  `postCompile` failures print a diagnostic naming the stage before
+  re-throwing, so an abort is never a silent exit code. A non-`TCErr`
+  exception thrown *during* `check` itself is also caught and tagged
+  now, not just `TCErr`s.
+- **The partial pass no longer claims an entry module.** It used to
+  pass `IsMain` to every module's hooks, so `entryModule` recorded
+  whichever module was processed last (observed: a stdlib module).
+  Under `--keep-going` with a failed entry the field is now absent.
+- **Fixture + CI step** (`test-keepgoing/`, kept outside `test/` so
+  the main corpus stays type-correct): entry imports one healthy and
+  one failing module (instance-resolution error leaving unsolved
+  metas, mirroring the Jolteon TestTrace failure); CI asserts
+  `deps.json` is produced with the sibling's defs/edges/signatures and
+  `failedModules == ["Broken"]`, under the full agda-explore daemon
+  flag set.
+- **Validated at scale** on the Jolteon-FastBFT corpus with a
+  deliberately broken `TestTrace`: exit 0, 4841 defs (4533 with
+  signatures), 703k edges, broken module tagged — where the same run
+  previously produced nothing.
+
+## 2026-06-12 — `agda-deps` — `--incremental`: per-module fragment cache
+
+Implements P1 of the incremental-rebuild design (TODO.md): the
+dominant rebuild cost (~79 % of a full run on a 16k-def corpus) is the
+per-definition backend walk, re-run for *every* module on every
+rebuild even when nothing changed.
+
+- **`AgdaDeps.FragmentCache`** caches, per module, what
+  `postModuleAD` returns (defs *including* dead-private extras) plus
+  the module's contributions to the two compile-time side-channels
+  (ignored edges, instance-method providers) — a `Skip`ped module
+  never runs `compileDef`, so without those slices contraction would
+  silently lose edges through its helpers. The slices are exact
+  **before/after deltas** (`moduleSetup` snapshots the refs into
+  `ModuleEnv`): the first cut filtered by module-name prefix, which
+  missed defs Agda homes in *anonymous* modules (bare `_.…` /
+  prefixless copies from `module _ ⦃ asm ⦄ where open … public`
+  blocks) — on Jolteon, 21 such helpers carried ~12k contracted edges
+  that an all-cache-hit run silently dropped. Fragment format v2;
+  v1 fragments are auto-invalidated.
+- **Key:** `(fragment format version, content-option fingerprint,
+  iFullHash, nodeKeyVersion)`. `iFullHash` folds in the transitive
+  imported-interface hashes, so a dependency change invalidates
+  exactly the affected cone. Rendering-only options are excluded from
+  the fingerprint.
+- **Flow:** `moduleSetup` (preModule) returns `Skip cachedFragment` on
+  a hit; `postModuleAD` writes fragments — imported modules
+  unconditionally (their output is a pure function of the pruned
+  interface, fresh or warm), the **main module only from a fresh
+  check** (its output is enriched by the `getSignature` dead-private
+  recovery, which a warm load can't see). A fragment hit therefore
+  serves the *complete* main-module variant even on warm runs —
+  `--incremental` normalises the warm-`.agdai` edge loss instead of
+  inheriting it.
+- **Serialisation:** Agda's own `EmbPrj` machinery, so `QName`s
+  (NameIds, binding-site ranges) round-trip exactly and downstream TCM
+  lookups on decoded names just work. The byte layer is only exposed
+  by Agda ≥ 2.9; on 2.8 the flag degrades to a warning + no caching.
+- **Surface:** `--incremental` / YAML `incremental: true`. Fragments
+  live under `<out-dir>/.agda-deps-cache/`. Disabled under
+  `--keep-going` (a failed module breaks the closed-cone invariant).
+  Cache misses, corrupt fragments, and write failures all degrade to
+  recompute/breadcrumbs, never an abort.
+- **CI:** cold-write + warm-hit runs must emit byte-identical JSON and
+  match the golden.
+
+## 2026-06-12 — `agda-deps` — golden snapshot regenerated from a cold run
+
+The committed golden had been generated from a warm-`.agdai` working
+tree, freezing the *degraded* main-module variant (missing
+`Test.Int-0`-class pattern-helper edges/kinds/types — the
+"warm-`.agdai` edge loss"). CI only stayed green because its expanded
+run happened to be the fifth corpus invocation, hence equally warm.
+The golden is now the cold (complete) variant, and CI clears `.agdai`
+before the runs that feed the golden check, making the comparison
+deterministic. The warm-loss itself also turns out to be a
+**main-module-only** phenomenon: imported modules' emission is a pure
+function of their already-pruned interface, cache-state independent.
+
 ## 2026-06-12 — `agda-deps` — expanded-graph invariants + golden snapshot (phase 3)
 
 - **`toExpandedGraph :: GraphInput -> ExpandedGraph`** extracted from

@@ -92,15 +92,31 @@ src/AgdaDeps/
                                   exposing runAgdaArgsKeepGoing.
   ModuleExplorer.hs               --keep-going glue: drop-in for
                                   backendInteraction that catches
-                                  TCErr. On the failure branch
-                                  re-drives preModule / compileDef /
-                                  postModule over every decoded
-                                  interface (merging signatures
-                                  into stImports first) so
+                                  check failures (TCErr AND other GHC
+                                  exceptions via catchAllTCM). On the
+                                  failure branch re-drives preModule /
+                                  compileDef / postModule over every
+                                  decoded interface (rebuilding the
+                                  import state — signature, builtins,
+                                  metas, pattern syns, display forms —
+                                  via mergeIfaceState first) so
                                   postCompile receives def-level
                                   data for every module that did
-                                  elaborate, not just module-level
-                                  edges.
+                                  elaborate. Every stage guarded:
+                                  postCompile always runs.
+  FragmentCache.hs                --incremental: per-module fragment
+                                  cache (EmbPrj-serialised ADDefs +
+                                  side-channel slices), keyed on
+                                  iFullHash + option fingerprint +
+                                  nodeKeyVersion. Agda >= 2.9 only;
+                                  no-op fallback on 2.8. Also
+                                  gcFragments (prune stale .frag).
+  SerialiseCache.hs               --incremental serialise (P2): a
+                                  plain-text manifest of content
+                                  epochs in the cache dir, letting a
+                                  rebuild skip re-emitting unchanged
+                                  output (monolithic no-op skip +
+                                  per-module lazy-file skip). No CPP.
   LibResolve.hs                   --resolve-deps machinery: parses
                                   the project's .agda-lib and
                                   Agda's libraries registry, walks
@@ -407,6 +423,98 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges (topsort DP)
   look at `funCompiled :: CompiledClauses` (the case-tree
   representation) or work upstream of the killRange pass, NOT at
   `clauseLHSRange`.
+
+- **`catchError` cannot catch `__IMPOSSIBLE__` (exit 120) — the
+  partial pass guards with `catchAllTCM`.** Agda's `Impossible` is a
+  GHC exception, not a `TCErr`; before 2026-06-12 every guard in
+  `ModuleExplorer` was `catchError`-only, so one internal error killed
+  the whole `--keep-going` pass with a bare exit 120 and no output.
+  `catchAllTCM` (built on the `TCM`/`unTCM` newtype, present in both
+  2.8 and 2.9; re-throws `ExitCode` + async) now guards every stage:
+  per definition, per module, per interface merge; `preCompile` /
+  `postCompile` get named diagnostics + rethrow. Don't "simplify"
+  these back to `catchError`. Companion fix: TCM's `catchError`
+  instance ROLLS BACK the whole TCState on a check failure, so
+  `partialCompilerMain` must rebuild the import state from the decoded
+  interfaces via `mergeIfaceState` — signature alone is not enough
+  (missing builtins kill `--with-signatures` reification in
+  `infallibleSortKit`); it merges builtins (with per-prim rebinds),
+  remote metas, pattern synonyms, and display forms, mirroring Agda's
+  non-exported `mergeInterface`. Also: the partial pass passes
+  `NotMain` to every module's hooks — passing the global `IsMain`
+  made `entryModule` record whichever module was processed last.
+  Locked by `test-keepgoing/` + the CI step.
+
+- **The golden must be regenerated from a COLD run** (`rm -f
+  test/*.agdai` first — CI does this before the runs that feed the
+  golden check). A warm-loaded main module skips the `getSignature`
+  dead-private recovery and emits a slightly poorer graph (the
+  "warm-`.agdai` edge loss" — `Test.Int-0`-class pattern helpers lose
+  edges/kind/type). The loss is MAIN-MODULE-ONLY: `stSignature` holds
+  only the entry module's defs at backend time, so imported modules'
+  emission is a pure function of their pruned interface, cache-state
+  independent. The pre-2026-06-12 golden was warm-derived and CI
+  only stayed green because its expanded run was the fifth (warm)
+  corpus invocation.
+
+- **`--incremental` fragment invariants.** Fragments must carry the
+  module's `ignoredEdgesRef` + `methodProvidersRef` contributions — a
+  `Skip`ped module never runs `compileDef`, so without them
+  `contractIgnoredEdges` silently loses every edge through that
+  module's with-/where-helpers. **The slices must be before/after
+  deltas (snapshots in `ModuleEnv`), not name-prefix filters**: Agda
+  homes module-instantiation copies from anonymous blocks
+  (`module _ ⦃ asm ⦄ where open Assumptions asm public`) at bare
+  `_.…`/prefixless QNames that no interface's module name prefixes —
+  prefix slicing lost 21 such helpers (≈12k contracted edges) on
+  Jolteon while the small corpus stayed green, so don't "simplify"
+  the delta back to a filter.
+
+- **`--packed-analytical` parity is by construction, and `access` is
+  3-valued.** The analytical packed arrays (`kinds`/`lines`/`access`/
+  `types`/subterm CSR in `defsObjectJson`) must agree node-for-node with
+  the expanded form, because the consumer treats them as interchangeable.
+  That parity is guaranteed by sharing the per-QName lookups
+  (`mkDefKind`/`mkDefLine`/`mkDefAccess`/`mkDefSig`/`mkDefHashes`/
+  `mkDefDepths`) between `toExpandedGraph` and `buildGraphJson` over the
+  same `defsList` — **don't inline them back per-form** or the defaults
+  for dep-only QNames will drift. `access` MUST stay 3-valued
+  (`encodeDefAccess`: `0`=unknown/absent, `1`=public, `2`=private):
+  expanded *omits* `access` (and `line`, and `type`) for QNames with no
+  local `ADDef`, so the unknown value is what round-trips to that
+  omission; a 2-valued enum silently breaks the byte-identical gate on
+  every external node. The gate is `schema/packed_analytical_check.py`
+  (run both sides cold — a warm `.agdai` degrades only one side's main
+  module and yields a spurious mismatch).
+
+- **`--incremental` serialise skip (`SerialiseCache`) — the monolithic
+  no-op skip needs BOTH guards, the lazy skip needs the content epoch.**
+  Monolithic `deps.json`/`deps.html` is skipped only when
+  `not anyRecompiled` (per `recompiledRef`, set in `moduleSetup`'s
+  Recompile branch — this guards per-definition *content*) AND the
+  `outputToken` matches (module set + output-affecting options + build
+  identity — this guards everything else). Dropping either guard serves
+  stale output: the token alone misses a recompiled body (same module
+  set/options), and `anyRecompiled` alone misses a toggled rendering
+  option like `--no-externals` (not in the fragment fingerprint, doesn't
+  cause a recompile). **`outputToken` must list every output-affecting
+  option** (same discipline as `NFData Options`) — a missing one means a
+  stale skip. The lazy per-module skip is content-epoch based
+  (`mdjEpoch`, computed from the *exact* renderOne inputs without base64,
+  so the content thunk isn't forced for skipped files); it self-corrects
+  on a global-index shift because `outEdges` (hence the epoch) change.
+  The measured warm-rebuild floor is Agda's interface load, NOT
+  serialise — so this helps signature-/source-heavy output and no-op
+  rebuilds, not the floor. The main module is cached only from a
+  fresh check (see the gotcha above); imported modules
+  unconditionally. Serialisation rides Agda's `EmbPrj` so `QName`s
+  round-trip with exact `NameId`s (required: `getConstInfo` and the
+  `Map QName` joins key on `NameId`); the byte layer
+  (`Agda.Utils.Serialize`) is only exported by Agda ≥ 2.9 — on 2.8
+  `fragmentCacheSupported = False` and the flag warns + no-ops. Bump
+  `fragmentFormatVersion` whenever the wire payload shape changes;
+  the option fingerprint must list every flag that changes fragment
+  *content* (`optionsFingerprint`). Disabled under `--keep-going`.
 
 ## State semantics
 

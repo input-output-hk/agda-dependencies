@@ -38,6 +38,9 @@ module AgdaDeps.Options
   , gzipOpt
   , keepGoingOpt
   , skipAgdaOpt
+  , incrementalOpt
+  , cacheDirOpt
+  , packedAnalyticalOpt
   , quietOpt
   , noExternalsOpt
   , jsonModeOpt
@@ -217,6 +220,22 @@ data Options = Options
     -- @--show-implicit@): render type signatures with implicit (and
     -- irrelevant) arguments shown, via 'withShowAllArguments'. Off by
     -- default. No effect unless 'optWithSignatures' is also set.
+  , optIncremental    :: Bool
+    -- ^ @--incremental@: per-module fragment cache for the
+    -- per-definition backend walk, keyed on the interface hash.
+    -- Opt-in; requires Agda >= 2.9 ('fragmentCacheSupported') and is
+    -- disabled under @--keep-going@. See 'AgdaDeps.FragmentCache'.
+  , optCacheDir       :: Maybe FilePath
+    -- ^ @--cache-dir=PATH@: override the @--incremental@ cache
+    -- location (fragments + serialise manifest). Default:
+    -- @\<out-dir\>/.agda-deps-cache@. No effect without
+    -- @--incremental@.
+  , optPackedAnalytical :: Bool
+    -- ^ @--packed-analytical@: augment the packed @defs@ object with the
+    -- per-definition analytical arrays (kind\/line\/access\/type\/subterm
+    -- hashes) so the compact form carries everything the expanded form
+    -- does. Off by default (packed output stays byte-identical); only
+    -- affects @--json-mode=packed@.
   , optAgdaHtmlDir    :: Maybe FilePath
     -- ^ @--agda-html-dir=DIR@: location of the syntax-highlighted pages
     -- written by @agda --html@, interpreted by the browser relative to
@@ -227,13 +246,13 @@ data Options = Options
   }
 
 instance NFData Options where
-  rnf (Options d f v c s l e ns ms g k sa q ne jm li wth mtd wsig nsig simp ahd) =
+  rnf (Options d f v c s l e ns ms g k sa q ne jm li wth mtd wsig nsig simp inc cd pa ahd) =
         rnf d  `seq` rnf f  `seq` rnf v  `seq` rnf c  `seq` rnf s
     `seq` rnf l  `seq` rnf e  `seq` rnf ns `seq` rnf ms
     `seq` rnf g  `seq` rnf k  `seq` rnf sa
     `seq` rnf q  `seq` rnf ne `seq` rnf jm `seq` rnf li
     `seq` rnf wth `seq` rnf mtd `seq` rnf wsig
-    `seq` rnf nsig `seq` rnf simp `seq` rnf ahd
+    `seq` rnf nsig `seq` rnf simp `seq` rnf inc `seq` rnf cd `seq` rnf pa `seq` rnf ahd
     `seq` ()
 
 defaultOptions :: Options
@@ -259,6 +278,9 @@ defaultOptions = Options
   , optWithSignatures  = False
   , optNormaliseSignatures = False
   , optShowImplicit    = False
+  , optIncremental     = False
+  , optCacheDir        = Nothing
+  , optPackedAnalytical = False
   , optAgdaHtmlDir     = Nothing
   }
 
@@ -308,6 +330,19 @@ keepGoingOpt opts = return opts{ optKeepGoing = True }
 
 skipAgdaOpt :: Monad m => Options -> m Options
 skipAgdaOpt opts = return opts{ optSkipAgda = True }
+
+-- | Enable the per-module fragment cache. See 'optIncremental'.
+incrementalOpt :: Monad m => Options -> m Options
+incrementalOpt opts = return opts{ optIncremental = True }
+
+-- | @--cache-dir=PATH@. Override the @--incremental@ cache location.
+cacheDirOpt :: Monad m => FilePath -> Options -> m Options
+cacheDirOpt dir opts = return opts{ optCacheDir = Just dir }
+
+-- | @--packed-analytical@. Emit the analytical per-def arrays in packed
+-- JSON. See 'optPackedAnalytical'.
+packedAnalyticalOpt :: Monad m => Options -> m Options
+packedAnalyticalOpt opts = return opts{ optPackedAnalytical = True }
 
 quietOpt :: Monad m => Options -> m Options
 quietOpt opts = return opts{ optQuiet = True }

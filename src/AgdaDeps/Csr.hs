@@ -25,6 +25,7 @@ module AgdaDeps.Csr
   , encodeInt32LE
   , encodeInt8LE
   , encodeFloat32LE
+  , encodeWord64LE
   , b64
   ) where
 
@@ -33,6 +34,7 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Builder as B
 import Data.Bits ( shiftL, shiftR, (.&.), (.|.) )
 import Data.Int ( Int32, Int8 )
+import Data.Word ( Word64 )
 import qualified Data.IntMap.Strict as IM
 import Data.List ( sort )
 
@@ -111,6 +113,14 @@ encodeInt8LE xs = b64 . BL.toStrict . B.toLazyByteString $
 encodeFloat32LE :: [Float] -> String
 encodeFloat32LE xs = b64 . BL.toStrict . B.toLazyByteString $
   foldMap B.floatLE xs
+
+-- | Encode a list of 64-bit words as a base64 string of their
+-- little-endian byte representation. Used for the canonical 'Word64'
+-- subterm hashes in the packed-analytical @defs@ arrays (exact, unlike
+-- the JSON-number form expanded uses).
+encodeWord64LE :: [Word64] -> String
+encodeWord64LE xs = b64 . BL.toStrict . B.toLazyByteString $
+  foldMap B.word64LE xs
 
 -- | RFC 4648 base64 encoding of a strict 'BS.ByteString', standard
 -- alphabet plus @=@ padding. Hand-rolled to avoid a new package

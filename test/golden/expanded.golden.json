@@ -641,6 +641,42 @@
       "Test.Var-0"
     ],
     [
+      "Test.Int-0",
+      "Nat.Nat"
+    ],
+    [
+      "Test.Int-0",
+      "Test.Exp"
+    ],
+    [
+      "Test.Int-0",
+      "Test.Exp.Int"
+    ],
+    [
+      "Test.Plus-0",
+      "Test.Exp"
+    ],
+    [
+      "Test.Plus-0",
+      "Test.Exp.Plus"
+    ],
+    [
+      "Test.Plus-1",
+      "Test.Exp"
+    ],
+    [
+      "Test.Plus-1",
+      "Test.Exp.Plus"
+    ],
+    [
+      "Test.Var-0",
+      "Test.Exp"
+    ],
+    [
+      "Test.Var-0",
+      "Test.Exp.Var"
+    ],
+    [
       "Test._++_",
       "List.List"
     ],
@@ -979,6 +1015,15 @@
     "body",
     "body",
     "signature",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "signature",
     "body",
     "body",
     "body",
@@ -1061,7 +1106,10 @@
       4,
       3
     ],
-    [],
+    [
+      4,
+      3
+    ],
     [],
     [
       3
@@ -1110,7 +1158,10 @@
     ],
     [],
     [],
-    [],
+    [
+      4,
+      3
+    ],
     [],
     [
       3,
@@ -1151,7 +1202,10 @@
     ],
     [],
     [],
-    [],
+    [
+      4,
+      3
+    ],
     [],
     [
       6,
@@ -1166,7 +1220,10 @@
     ],
     [],
     [],
-    [],
+    [
+      4,
+      3
+    ],
     [],
     [],
     [],
@@ -1238,7 +1295,10 @@
       3998131597585393648,
       5745094546293959160
     ],
-    [],
+    [
+      15241608234248999687,
+      6190176659868349026
+    ],
     [],
     [
       16851722297276717944
@@ -1287,7 +1347,10 @@
     ],
     [],
     [],
-    [],
+    [
+      17220126313483794802,
+      5745094546293959160
+    ],
     [],
     [
       15058666949816219313,
@@ -1328,7 +1391,10 @@
     ],
     [],
     [],
-    [],
+    [
+      5290952726666939646,
+      174781178164142781
+    ],
     [],
     [
       16413620078856606245,
@@ -1343,7 +1409,10 @@
     ],
     [],
     [],
-    [],
+    [
+      5290952726666939646,
+      174781178164142781
+    ],
     [],
     [],
     [],
@@ -1478,11 +1547,13 @@
       "type": "{a : Set} \u2192 (a \u2192 Nat) \u2192 Exp a \u2192 Nat"
     },
     {
+      "access": "public",
       "id": 10,
-      "kind": "other",
+      "kind": "function",
       "module": "Test",
       "name": "Test.Var-0",
-      "state": "D"
+      "state": "D",
+      "type": "(v : Set) (d : Exp v) \u2192 v"
     },
     {
       "access": "public",
@@ -1659,11 +1730,13 @@
       "state": "D"
     },
     {
+      "access": "public",
       "id": 29,
-      "kind": "other",
+      "kind": "function",
       "module": "Test",
       "name": "Test.Int-0",
-      "state": "D"
+      "state": "D",
+      "type": "(v : Set) (d : Exp v) \u2192 Nat"
     },
     {
       "access": "public",
@@ -1845,11 +1918,13 @@
       "type": "Nat"
     },
     {
+      "access": "public",
       "id": 48,
-      "kind": "other",
+      "kind": "function",
       "module": "Test",
       "name": "Test.Plus-1",
-      "state": "D"
+      "state": "D",
+      "type": "(v : Set) (d : Exp v) \u2192 Exp v"
     },
     {
       "access": "public",
@@ -1911,11 +1986,13 @@
       "type": "Nat \u2192 Nat"
     },
     {
+      "access": "public",
       "id": 55,
-      "kind": "other",
+      "kind": "function",
       "module": "Test",
       "name": "Test.Plus-0",
-      "state": "D"
+      "state": "D",
+      "type": "(v : Set) (d : Exp v) \u2192 Exp v"
     },
     {
       "access": "public",

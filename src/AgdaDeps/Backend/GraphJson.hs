@@ -40,6 +40,7 @@ import Control.DeepSeq ( NFData(..) )
 import Data.Char ( isAlphaNum, toLower )
 import Data.Int ( Int32, Int8 )
 import Data.List ( foldl', intercalate, sort, sortBy, sortOn )
+import Data.Maybe ( isJust )
 import Data.Word ( Word64 )
 import qualified Data.Map.Strict as M
 import qualified Data.IntMap.Strict as IM
@@ -55,7 +56,7 @@ import Agda.Utils.Hash ( hashString )
 
 import AgdaDeps.Csr
   ( buildCsr, reverseCsr
-  , encodeInt32LE, encodeInt8LE, encodeFloat32LE
+  , encodeInt32LE, encodeInt8LE, encodeFloat32LE, encodeWord64LE
   , dedupSortedInt
   )
 import AgdaDeps.Deps    ( ADDef(..), DefKind(..), DefAccess(..)
@@ -183,6 +184,12 @@ data GraphInput = GraphInput
     -- @--no-externals@; carried in both packed and expanded output.
     -- 'Nothing' when @--no-externals@ wasn't passed, in which case the
     -- field is omitted from the JSON.
+  , giPackedAnalytical :: !Bool
+    -- ^ @--packed-analytical@: augment the packed @defs@ object with the
+    -- per-definition analytical arrays (kind / line / access / type /
+    -- subterm hashes) so the compact form carries everything the
+    -- expanded form does. Only consulted on the packed (non-lazy) path;
+    -- 'False' leaves packed output byte-identical to before.
   }
 
 -- | Output of the v2 emitter, ready for the backend to write to disk.
@@ -193,9 +200,16 @@ data GraphJsonOutput = GraphJsonOutput
   }
 
 -- | One per-module detail file in lazy mode.
+--
+-- 'mdjEpoch' is a content fingerprint of the file, computed /cheaply/
+-- from the structured inputs (no base64, no JSON assembly) so the
+-- incremental-serialise path can decide whether to rewrite the file
+-- without forcing the (lazy) 'mdjContent' thunk. It is strict; the
+-- content thunk stays lazy so a skipped file never renders.
 data ModuleDetailJson = ModuleDetailJson
   { mdjModuleName :: String
   , mdjFileName   :: FilePath
+  , mdjEpoch      :: !Word64
   , mdjContent    :: String
   }
 
@@ -535,9 +549,13 @@ buildGraphJson GraphInput{..} =
         | otherwise = []
 
       -- (13) Assemble graph.json --------------------------------------
+      analyticalSuffix
+        | giPackedAnalytical = packedAnalyticalJson defsList giDefs
+        | otherwise          = ""
+
       defsJson = case mode of
         EmitInline ->
-          ",\"defs\":" ++ defsObjectJson defNames defModuleIdxs defStateBytes defXs defYs
+          ",\"defs\":" ++ defsObjectJson defNames defModuleIdxs defStateBytes defXs defYs analyticalSuffix
         EmitLazy   -> ""
 
       edgesJson = case mode of
@@ -671,8 +689,11 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
         Just qn -> moduleOfQ qn
         Nothing -> -1
 
-      renderOne :: String -> [Int] -> String
-      renderOne _modName giList =
+      -- The structured inputs to a real module's detail file. Shared by
+      -- the content renderer and the (cheap) epoch, so the epoch is a
+      -- faithful fingerprint of exactly what gets written.
+      realInputs :: [Int] -> ([String], [Int8], [Float], [Float], [(Int, Int, Int)])
+      realInputs giList =
         let sortedGis = sort giList
             names  = [ nodeKey (defsArr IM.! gi) | gi <- sortedGis ]
             stsM   = [ statesArr IM.! gi | gi <- sortedGis ]
@@ -684,19 +705,41 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
                 ]
               | (li, srcGi) <- zip [0..] sortedGis
               ]
-        in "{\"defs\":" ++ defsObjectJsonModule names stsM xsM ysM
+        in (names, stsM, xsM, ysM, outEs)
+
+      renderReal :: ([String], [Int8], [Float], [Float], [(Int, Int, Int)]) -> String
+      renderReal (names, stsM, xsM, ysM, outEs) =
+        "{\"defs\":" ++ defsObjectJsonModule names stsM xsM ysM
         ++ ",\"outEdges\":" ++ outEdgesJson outEs
         ++ "}"
+
+      -- Cheap content fingerprint of a real module's detail file: hashes
+      -- the structured inputs (no base64, no JSON assembly), so the
+      -- incremental-serialise path can decide whether to rewrite without
+      -- forcing the content thunk. Separators keep distinct field
+      -- contents from colliding.
+      realEpoch :: ([String], [Int8], [Float], [Float], [(Int, Int, Int)]) -> Word64
+      realEpoch (names, stsM, xsM, ysM, outEs) =
+        hashString $ concat
+          [ "R\f", intercalate "\f" names
+          , "\v", show stsM, "\v", show xsM, "\v", show ysM
+          , "\v", show outEs ]
+
+      placeholderEpoch :: String -> String -> [String] -> Word64
+      placeholderEpoch m reason ps =
+        hashString $ concat [ "P\f", m, "\v", reason, "\v", intercalate "\f" ps ]
 
       realDetails :: [ModuleDetailJson]
       !realDetails =
         [ ModuleDetailJson
             { mdjModuleName = m
             , mdjFileName   = moduleDetailFilename m
-            , mdjContent    = renderOne m gis
+            , mdjEpoch      = realEpoch ins
+            , mdjContent    = renderReal ins
             }
         | (mi, gis) <- IM.toList defsByModule
         , Just m <- [IM.lookup mi indexToModule]
+        , let ins = realInputs gis
         ]
 
       -- Modules listed in 'moduleIndexMap' with zero kept defs; each
@@ -737,6 +780,7 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
         [ ModuleDetailJson
             { mdjModuleName = m
             , mdjFileName   = moduleDetailFilename m
+            , mdjEpoch      = placeholderEpoch m (classifyEmpty m) (externalPostulatesFor m)
             , mdjContent    = renderPlaceholder m
             }
         | (m, mi) <- M.toAscList moduleIndexMap
@@ -746,14 +790,68 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
 
 -- ** JSON shape helpers
 
-defsObjectJson :: [String] -> [Int32] -> [Int8] -> [Float] -> [Float] -> String
-defsObjectJson names mods states xs ys =
+-- | The packed @defs@ object. @analytical@ is the optional
+-- @--packed-analytical@ suffix (the kind\/line\/access\/type\/subterm
+-- arrays), spliced before the closing brace; @""@ for the default
+-- (byte-identical) form.
+defsObjectJson :: [String] -> [Int32] -> [Int8] -> [Float] -> [Float] -> String -> String
+defsObjectJson names mods states xs ys analytical =
   "{\"names\":"      ++ stringArrayJson names
   ++ ",\"modules\":" ++ jsB64Int32   mods
   ++ ",\"states\":"  ++ jsB64Int8    states
   ++ ",\"x\":"       ++ jsB64Float32 xs
   ++ ",\"y\":"       ++ jsB64Float32 ys
+  ++ analytical
   ++ "}"
+
+-- | The @--packed-analytical@ @defs@ suffix: per-definition kind / line
+-- / access arrays (always), the type array (under @--with-signatures@),
+-- and the CSR-packed subterm hashes\/depths (under @--with-term-hashes@).
+-- Keyed by QName over @defsList@ via the shared 'mkDef*' lookups, so it
+-- agrees with the expanded form node-for-node. @types@ uses @null@ and
+-- @access@ uses @0@ for QNames with no local 'ADDef', matching the
+-- expanded form's omission of those keys.
+packedAnalyticalJson :: [QName] -> [ADDef] -> String
+packedAnalyticalJson defsList defs =
+  ",\"kinds\":"  ++ jsB64Int8  kinds
+  ++ ",\"lines\":"  ++ jsB64Int32 lns
+  ++ ",\"access\":" ++ jsB64Int8  accs
+  ++ typesField
+  ++ subtermFields
+  where
+    defKind   = mkDefKind   defs
+    defLine   = mkDefLine   defs
+    defAccess = mkDefAccess defs
+    defSig    = mkDefSig    defs
+    hashesByQ = mkDefHashes defs
+    depthsByQ = mkDefDepths defs
+
+    kinds = [ encodeDefKind (defKind qn) | qn <- defsList ]
+    lns   = [ maybe (-1) fromIntegral (defLine qn) | qn <- defsList ] :: [Int32]
+    accs  = [ encodeDefAccess (defAccess qn) | qn <- defsList ]
+    sigs  = [ defSig qn | qn <- defsList ]
+
+    typesField
+      | any isJust sigs = ",\"types\":" ++ stringOrNullArrayJson sigs
+      | otherwise       = ""
+
+    subtermFields
+      | M.null hashesByQ = ""
+      | otherwise =
+          let perHashes = [ M.findWithDefault [] qn hashesByQ | qn <- defsList ]
+              perDepths = [ M.findWithDefault [] qn depthsByQ | qn <- defsList ]
+              offs = scanl (+) 0
+                       (map (fromIntegral . length) perHashes) :: [Int32]
+              flatH = concat perHashes :: [Word64]
+              flatD = map fromIntegral (concat perDepths) :: [Int32]
+          in ",\"subtermOffsets\":" ++ jsB64Int32 offs
+          ++ ",\"subtermHashes\":"  ++ jsString (encodeWord64LE flatH)
+          ++ ",\"subtermDepths\":"  ++ jsB64Int32 flatD
+
+-- | JSON array of strings-or-@null@ (one per def, parallel to names).
+stringOrNullArrayJson :: [Maybe String] -> String
+stringOrNullArrayJson xs =
+  "[" ++ intercalate "," (map (maybe "null" jsString) xs) ++ "]"
 
 defsObjectJsonModule :: [String] -> [Int8] -> [Float] -> [Float] -> String
 defsObjectJsonModule names states xs ys =
@@ -811,6 +909,75 @@ encodeDefState Defined   = 0
 encodeDefState Postulate = 1
 encodeDefState Hole      = 2
 encodeDefState Failed    = 3
+
+-- | Wire encoding for 'DefKind' in the packed-analytical @defs.kinds@
+-- array. Mirrors 'AgdaDeps.Backend.Wire.wireKind''s string ordering
+-- (and 'AgdaDeps.FragmentCache''s @kindToInt@): the consumer maps the
+-- byte back to the same @kind@ string the expanded form emits.
+encodeDefKind :: DefKind -> Int8
+encodeDefKind DKFunction    = 0
+encodeDefKind DKProjection  = 1
+encodeDefKind DKDatatype    = 2
+encodeDefKind DKRecord      = 3
+encodeDefKind DKConstructor = 4
+encodeDefKind DKPostulate   = 5
+encodeDefKind DKPrimitive   = 6
+encodeDefKind DKOther       = 7
+
+-- | Wire encoding for @defs.access@ in the packed-analytical form.
+-- Three-valued, because the expanded form *omits* @access@ for QNames
+-- not backed by a local 'ADDef' (external / dependency-only targets);
+-- @0@ round-trips to that omission so a decoded packed-analytical graph
+-- matches expanded node-for-node.
+--
+-- @0 = unknown\/absent, 1 = public, 2 = private@.
+encodeDefAccess :: Maybe DefAccess -> Int8
+encodeDefAccess Nothing          = 0
+encodeDefAccess (Just AccPublic) = 1
+encodeDefAccess (Just AccPrivate) = 2
+
+-- ** Per-QName analytical lookups (shared by packed-analytical + expanded)
+--
+-- Both the expanded form ('toExpandedGraph') and the packed-analytical
+-- arrays ('buildGraphJson') key these by 'QName' over the same
+-- @defsList@, so a QName with no local 'ADDef' (an external /
+-- dependency-only target) gets the same default in both — which is what
+-- makes a decoded packed-analytical graph node-for-node identical to the
+-- expanded one. Single source of truth: do not inline these back.
+
+-- | Structural kind by QName; 'DKOther' for QNames with no 'ADDef'.
+mkDefKind :: [ADDef] -> (QName -> DefKind)
+mkDefKind defs =
+  let !m = M.fromList [ (_name d, _kind d) | d <- defs ]
+  in \qn -> M.findWithDefault DKOther qn m
+
+-- | Source line by QName; 'Nothing' for QNames with no 'ADDef' / no line.
+mkDefLine :: [ADDef] -> (QName -> Maybe Int)
+mkDefLine defs =
+  let !m = M.fromList [ (_name d, ln) | d <- defs, Just ln <- [_line d] ]
+  in (`M.lookup` m)
+
+-- | Access by QName; 'Nothing' for QNames with no 'ADDef'.
+mkDefAccess :: [ADDef] -> (QName -> Maybe DefAccess)
+mkDefAccess defs =
+  let !m = M.fromList [ (_name d, a) | d <- defs, Just a <- [_access d] ]
+  in (`M.lookup` m)
+
+-- | Rendered signature by QName ('--with-signatures'); 'Nothing' otherwise.
+mkDefSig :: [ADDef] -> (QName -> Maybe String)
+mkDefSig defs =
+  let !m = M.fromList [ (_name d, s) | d <- defs, Just s <- [_sig d] ]
+  in (`M.lookup` m)
+
+-- | Subterm-hash map by QName ('--with-term-hashes'); empty when off.
+mkDefHashes :: [ADDef] -> M.Map QName [Word64]
+mkDefHashes defs =
+  M.fromList [ (_name d, hs) | d <- defs, Just hs <- [_subtermHashes d] ]
+
+-- | Subterm-depth map by QName, parallel to 'mkDefHashes'.
+mkDefDepths :: [ADDef] -> M.Map QName [Int]
+mkDefDepths defs =
+  M.fromList [ (_name d, ds) | d <- defs, Just ds <- [_subtermDepths d] ]
 
 -- | Wire encoding for 'EdgeProv' in the packed JSON form. See
 -- 'outTargetsProv' for the documented mapping.
@@ -1220,38 +1387,13 @@ toExpandedGraph GraphInput{..} =
       defState :: QName -> DefState
       defState qn = M.findWithDefault Defined qn giStateMap
 
-      -- Structural kind, keyed by QName. Names that don't have an
-      -- ADDef of their own (external library references) get 'DKOther'.
-      defKindMap :: M.Map QName DefKind
-      defKindMap = M.fromList [ (_name d, _kind d) | d <- giDefs ]
-
-      defKind :: QName -> DefKind
-      defKind qn = M.findWithDefault DKOther qn defKindMap
-
-      -- Source-line + access lookups. Both 'Nothing' for QNames not
-      -- backed by an ADDef in 'giDefs' (e.g. external-library
-      -- references).
-      defLineMap :: M.Map QName Int
-      defLineMap = M.fromList
-        [ (_name d, ln) | d <- giDefs, Just ln <- [_line d] ]
-
-      defLine :: QName -> Maybe Int
-      defLine qn = M.lookup qn defLineMap
-
-      defAccessMap :: M.Map QName DefAccess
-      defAccessMap = M.fromList
-        [ (_name d, a) | d <- giDefs, Just a <- [_access d] ]
-
-      defAccess :: QName -> Maybe DefAccess
-      defAccess qn = M.lookup qn defAccessMap
-
-      -- Rendered type signatures (only populated under --with-signatures).
-      defSigMap :: M.Map QName String
-      defSigMap = M.fromList
-        [ (_name d, s) | d <- giDefs, Just s <- [_sig d] ]
-
-      defSig :: QName -> Maybe String
-      defSig qn = M.lookup qn defSigMap
+      -- Per-QName analytical lookups, shared with the packed-analytical
+      -- path so the two forms agree node-for-node (incl. the default for
+      -- QNames with no local ADDef).
+      defKind   = mkDefKind   giDefs
+      defLine   = mkDefLine   giDefs
+      defAccess = mkDefAccess giDefs
+      defSig    = mkDefSig    giDefs
 
       defModuleOf  = map (prettyShow . qnameModule) defsList
 
@@ -1344,18 +1486,10 @@ toExpandedGraph GraphInput{..} =
       -- field (producer not run with @--with-term-hashes@). Emitted
       -- per-defsList qname via rebuilt lookup maps.
       defHashesByQ :: M.Map QName [Word64]
-      defHashesByQ = M.fromList
-        [ (_name d, hs)
-        | d <- giDefs
-        , Just hs <- [_subtermHashes d]
-        ]
+      defHashesByQ = mkDefHashes giDefs
 
       defDepthsByQ :: M.Map QName [Int]
-      defDepthsByQ = M.fromList
-        [ (_name d, ds)
-        | d <- giDefs
-        , Just ds <- [_subtermDepths d]
-        ]
+      defDepthsByQ = mkDefDepths giDefs
 
   -- Assemble the typed wire value; encoding + structural validation are
   -- handled by 'buildExpandedJson' via AgdaDeps.Backend.Wire.

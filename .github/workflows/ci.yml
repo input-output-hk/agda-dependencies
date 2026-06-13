@@ -95,7 +95,12 @@ jobs:
         cabal run agda-deps -- --format=html -i test/ -o ci-out/ test/Test.agda
         cabal run agda-deps -- --format=html --lazy -i test/ -o ci-out/ test/Test.agda
         cabal run agda-deps -- --format=json -i test/ -o ci-out/ test/Test.agda
-        # Expanded JSON, exercising the optional --with-* fields, for schema validation.
+        # Expanded JSON, exercising the optional --with-* fields, for schema
+        # validation and the golden check. MUST run on a cold .agdai cache:
+        # a warm-loaded main module skips the dead-private recovery and
+        # emits a slightly poorer graph (the "warm-.agdai edge loss"), and
+        # the committed golden is the cold (complete) variant.
+        rm -rf test/*.agdai test/_build
         cabal run agda-deps -- --format=json --json-mode=expanded --with-signatures \
           --with-term-hashes -i test/ -o ci-out/expanded test/Test.agda
         ls -la ci-out/
@@ -132,6 +137,110 @@ jobs:
       run: |
         python3 schema/golden_check.py check ci-out/expanded/deps.json \
           test/golden/expanded.golden.json
+
+    - name: packed-analytical carries the same fidelity as expanded
+      # Locks the packed-complete acceptance gate: a decoded
+      # --packed-analytical graph must equal the expanded form
+      # node-for-node (kind/line/access/type/subterm hashes). Both runs
+      # start cold so the main module's dead-private recovery is the
+      # complete variant in both (a warm .agdai would degrade only one
+      # side and produce a spurious mismatch).
+      run: |
+        rm -rf test/*.agdai test/_build
+        cabal run -v0 agda-deps -- --format=json --json-mode=packed \
+          --packed-analytical --with-signatures --with-term-hashes \
+          -i test/ -o ci-out/packed test/Test.agda
+        rm -rf test/*.agdai test/_build
+        cabal run -v0 agda-deps -- --format=json --json-mode=expanded \
+          --with-signatures --with-term-hashes \
+          -i test/ -o ci-out/expanded-cmp test/Test.agda
+        python3 schema/packed_analytical_check.py \
+          ci-out/packed/deps.json ci-out/expanded-cmp/deps.json
+
+    - name: keep-going emits a graph on a broken corpus
+      # Locks the --keep-going best-effort guarantee: one module whose
+      # type-check fails (instance-resolution error leaving unsolved
+      # metas — the class that used to kill the partial pass with a bare
+      # exit 120 via __IMPOSSIBLE__ in reification) must still produce a
+      # deps.json with the healthy siblings' defs/edges/signatures and
+      # the broken module in failedModules[]. Uses the full flag set the
+      # agda-explore daemon runs with. Corpus: test-keepgoing/ (kept
+      # outside test/ so the main corpus stays type-correct).
+      run: |
+        cabal run -v0 agda-deps -- --format=json --json-mode=expanded \
+          --no-externals --keep-going --with-term-hashes --min-term-depth=3 \
+          --with-signatures -i test-keepgoing -o ci-out/keepgoing \
+          test-keepgoing/Entry.agda
+        python3 - <<'EOF'
+        import json
+        g = json.load(open("ci-out/keepgoing/deps.json"))
+        assert g.get("failedModules") == ["Broken"], g.get("failedModules")
+        defs = {d["name"]: d for d in g["definitions"]}
+        assert "Good.double" in defs and "Good.quadruple" in defs, sorted(defs)
+        assert ["Good.quadruple", "Good.double"] in g["definitionEdges"]
+        assert "type" in defs["Good.quadruple"], "signatures missing in partial pass"
+        print("keep-going fixture OK")
+        EOF
+
+    - name: incremental cache reproduces the golden byte-for-byte
+      # Locks --incremental: a cold run (writes fragments) and a warm
+      # rerun (serves them via preModule Skip) must emit identical JSON,
+      # and both must still match the golden snapshot. Run 1 starts from
+      # a cold .agdai cache so the main module's fragment captures the
+      # complete (fresh-check) variant; run 2 is warm on both the Agda
+      # and the fragment side — the realistic fast path.
+      run: |
+        rm -rf test/*.agdai test/_build
+        cabal run -v0 agda-deps -- --incremental --format=json \
+          --json-mode=expanded --with-signatures --with-term-hashes \
+          -i test/ -o ci-out/inc test/Test.agda
+        cp ci-out/inc/deps.json ci-out/inc/deps.run1.json
+        cabal run -v0 agda-deps -- --incremental --format=json \
+          --json-mode=expanded --with-signatures --with-term-hashes \
+          -i test/ -o ci-out/inc test/Test.agda
+        cmp ci-out/inc/deps.run1.json ci-out/inc/deps.json
+        python3 schema/golden_check.py check ci-out/inc/deps.json \
+          test/golden/expanded.golden.json
+
+    - name: incremental serialise — no-op skip, edit-detect, GC
+      # Locks the P2 serialise cache and the GC. The warm run above
+      # already wrote the manifest; (1) a third no-op run must announce
+      # the skip and stay byte-identical; (2) editing a module must NOT
+      # skip and must reflect the change (no stale output); (3) a planted
+      # stale fragment must be pruned; (4) lazy mode must not rewrite
+      # unchanged per-module files on a no-op rebuild.
+      run: |
+        # (1) no-op skip
+        cabal run -v0 agda-deps -- --incremental --format=json \
+          --json-mode=expanded --with-signatures --with-term-hashes \
+          -i test/ -o ci-out/inc test/Test.agda 2>ci-out/inc.noop.log
+        grep -q "skipped re-emit" ci-out/inc.noop.log
+        cmp ci-out/inc/deps.run1.json ci-out/inc/deps.json
+        # (2) edit-detect: a new def must appear, skip must not fire
+        printf '\nfortyTwo : Nat\nfortyTwo = suc (suc zero)\n' >> test/Nat.agda
+        cabal run -v0 agda-deps -- --incremental --format=json \
+          --json-mode=expanded --with-signatures --with-term-hashes \
+          -i test/ -o ci-out/inc test/Test.agda 2>ci-out/inc.edit.log
+        ! grep -q "skipped re-emit" ci-out/inc.edit.log
+        grep -q '"Nat.fortyTwo"' ci-out/inc/deps.json
+        git checkout test/Nat.agda
+        # (3) GC: plant a stale fragment, rerun, confirm it is pruned
+        touch ci-out/inc/.agda-deps-cache/Zombie-deadbeefdeadbeef.frag
+        rm -rf test/*.agdai test/_build
+        cabal run -v0 agda-deps -- --incremental --format=json \
+          --json-mode=expanded --with-signatures --with-term-hashes \
+          -i test/ -o ci-out/inc test/Test.agda >/dev/null 2>&1
+        test ! -f ci-out/inc/.agda-deps-cache/Zombie-deadbeefdeadbeef.frag
+        # (4) lazy: no module-file rewrites on a no-op rebuild
+        rm -rf test/*.agdai test/_build ci-out/lazyinc
+        cabal run -v0 agda-deps -- --incremental --format=html --lazy \
+          -i test/ -o ci-out/lazyinc test/Test.agda >/dev/null 2>&1
+        find ci-out/lazyinc/modules -name '*.json' -printf '%T@ %p\n' | sort > ci-out/mt.before
+        cabal run -v0 agda-deps -- --incremental --format=html --lazy \
+          -i test/ -o ci-out/lazyinc test/Test.agda >/dev/null 2>&1
+        find ci-out/lazyinc/modules -name '*.json' -printf '%T@ %p\n' | sort > ci-out/mt.after
+        diff ci-out/mt.before ci-out/mt.after
+        echo "incremental serialise + GC OK"
 
     - name: Upload generated artefacts
       uses: actions/upload-artifact@v4

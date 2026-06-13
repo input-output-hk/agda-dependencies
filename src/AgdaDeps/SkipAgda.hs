@@ -158,6 +158,7 @@ emit opts moduleFileMap entryModule externals imports sourceFiles allModules = d
         , giExtraModules    = allModules
         , giReExports       = []
         , giExternalsSummary = Nothing
+        , giPackedAnalytical = False
         }
       gjo = buildGraphJson gi
 
