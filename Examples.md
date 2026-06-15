@@ -165,3 +165,46 @@ At `1` (no filter) the cluster ranking is dominated by trivial
 `Var`/`Lit`/`Sort` shapes; depth-3 cuts the hash volume ~3× (13.8M
 → 4.6M on the reference corpus) and pushes meaningful clusters to the top.
 `--min-term-depth=1` is preserved for the launch behaviour.
+
+### `--incremental` — cache the per-module work across rebuilds
+
+```bash
+# First run: full work, writes the cache under out/.agda-deps-cache/.
+cabal run agda-deps -- --incremental --format=json --json-mode=expanded \
+  -i path/to/your-project/ \
+  -o out/ path/to/your-project/Main.lagda.md
+
+# Later runs: unchanged modules are served from the cache (only the
+# changed cone is re-walked), and a no-op rebuild skips re-emitting the
+# output entirely.
+cabal run agda-deps -- --incremental --format=json --json-mode=expanded \
+  -i path/to/your-project/ \
+  -o out/ path/to/your-project/Main.lagda.md
+```
+
+Two cache layers, both keyed on the module's interface hash: a
+**fragment cache** skips the per-definition walk for unchanged modules,
+and an **incremental-serialise** layer skips rewriting unchanged output
+(the whole monolithic file on a no-op; in `--lazy` mode, only the
+changed `modules/<M>.json` files). Output is byte-identical to a
+non-cached run. Requires Agda ≥ 2.9; disabled under `--keep-going`.
+Stale fragments for deleted modules are pruned automatically;
+`--cache-dir=DIR` relocates the cache. The dominant cost of a warm
+rebuild is Agda's own interface load, which a backend can't avoid — this
+removes our walk and the re-emit on top of it.
+
+### `--packed-analytical` — compact JSON without losing fidelity
+
+```bash
+cabal run agda-deps -- --format=json --json-mode=packed --packed-analytical \
+  --with-signatures --with-term-hashes \
+  -i path/to/your-project/ \
+  -o out/ path/to/your-project/Main.lagda.md
+```
+
+Packed JSON is ~3-5× smaller than expanded, but by default its `defs`
+object drops the per-definition analytical fields (kind, line, access,
+type, subterm hashes). `--packed-analytical` adds them back as compact
+base64 typed arrays, so a downstream tool keeps the size win *and* the
+fidelity — a decoded packed-analytical graph is node-for-node identical
+to the expanded form. Off by default; only affects `--json-mode=packed`.
