@@ -94,7 +94,7 @@ import Agda.TypeChecking.Monad
   , stBackends
 #endif
   , setCurrentRange, defName
-  , modifyTCLens, setTCLens'
+  , modifyTCLens, modifyTCLens', setTCLens'
   )
 import Agda.TypeChecking.Monad.Base
   ( stCurrentModule, eActiveBackendName
@@ -323,7 +323,6 @@ partialCompilerMain backend isMain =
     decoded <- getDecodedModules
     let mis    = Map.elems decoded
         ifaces = map miInterface mis
-        nMods  = length ifaces
     -- Seed stVisitedModules from the persistent stDecodedModules, which
     -- the backend's 'postCompile' hook reads to derive module-level
     -- import edges.
@@ -344,7 +343,7 @@ partialCompilerMain backend isMain =
     modResults <- foldM (perModule env) Map.empty ifaces
     liftIO $ info $
       "agda-deps: --keep-going: emitted def-level data for "
-      ++ show (Map.size modResults) ++ "/" ++ show nMods
+      ++ show (Map.size modResults) ++ "/" ++ show (Map.size decoded)
       ++ " loaded module(s)."
     orDiagnose "postCompile (no output written)" $
       postCompile backend env isMain modResults
@@ -392,11 +391,11 @@ mergeIfaceState iface = do
             Builtin t                  -> Right (k, Builtin t)
             BuiltinRewriteRelations xs -> Right (k, BuiltinRewriteRelations xs)
         | (k, b) <- Map.toAscList (iBuiltin iface) ]
-  modifyTCLens stImportedBuiltins
+  modifyTCLens' stImportedBuiltins
     (`Map.union` Map.fromDistinctAscList plain)
-  modifyTCLens stImportedMetaStore   (`HMap.union` iMetaBindings iface)
-  modifyTCLens stPatternSynImports   (`Map.union` iPatternSyns iface)
-  modifyTCLens stImportedDisplayForms $ \ imp ->
+  modifyTCLens' stImportedMetaStore   (`HMap.union` iMetaBindings iface)
+  modifyTCLens' stPatternSynImports   (`Map.union` iPatternSyns iface)
+  modifyTCLens' stImportedDisplayForms $ \ imp ->
     HMap.unionWith (<>) imp (iDisplayForms iface)
   -- Each rebind individually guarded: 'lookupPrimitiveFunction' can
   -- throw for primitives gated behind a language option that isn't
@@ -405,7 +404,7 @@ mergeIfaceState iface = do
   -- so the breadcrumb goes to the info channel, not stderr.
   forM_ prims $ \ (x, q) ->
     ( do PrimImpl _ pf <- lookupPrimitiveFunction x
-         modifyTCLens stImportedBuiltins $
+         modifyTCLens' stImportedBuiltins $
            Map.insert (someBuiltin x) (Prim pf{ primFunName = q })
     ) `catchAllTCM` \ ex ->
       info $
@@ -419,7 +418,7 @@ mergeIfaceSig :: Interface -> TCM ()
 mergeIfaceSig iface = do
   let sig = iSignature iface
       defs = sig ^. sigDefinitions
-  modifyTCLens stImports $ over sigDefinitions (HMap.union defs)
+  modifyTCLens' stImports $ over sigDefinitions (HMap.union defs)
 
 reportSkippedModule :: TopLevelModuleName -> String -> TCM ()
 reportSkippedModule tlmn reason =

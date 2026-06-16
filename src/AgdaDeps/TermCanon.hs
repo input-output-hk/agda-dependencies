@@ -38,6 +38,14 @@ import           Agda.Syntax.Internal
 import           Agda.Syntax.Common.Pretty ( prettyShow )
 import           Agda.Utils.Hash ( hashString )
 
+-- | Difference list of @(hash, depth)@ pairs. Threaded through the walk
+-- so every parent\/child concatenation is an O(1) function composition
+-- instead of a left-nested @(++)@ — the latter is quadratic on the deep
+-- single-elim application spines (@Def f [Apply (Def g …)]@) that
+-- dominate elaborated terms. The final list is recovered by applying the
+-- endo to @[]@, preserving the pre-order element sequence.
+type HashDList = [(Word64, Int)] -> [(Word64, Int)]
+
 -- | Hash every subterm of @t@ whose AST depth is at least @minDepth@,
 -- including @t@ itself if it qualifies. Order is the depth-first
 -- pre-order traversal of 'Term' nodes.
@@ -62,13 +70,13 @@ import           Agda.Utils.Hash ( hashString )
 -- Walks once bottom-up: each subterm's canonical encoding and depth
 -- are built together and the emit decision made at each node.
 subtermHashes :: Int -> Term -> [(Word64, Int)]
-subtermHashes !minD t = case canonAndSubs minD t of (_, _, hs) -> hs
+subtermHashes !minD t = case canonAndSubs minD t of (_, _, hs) -> hs []
 
 -- | Bottom-up traversal returning (canonical encoding, AST depth,
 -- accumulated (hash, depth) pairs for qualifying subterms). The
 -- encoding is reused by the parent; the depth drives the filter; the
 -- pairs are the return value.
-canonAndSubs :: Int -> Term -> (ShowS, Int, [(Word64, Int)])
+canonAndSubs :: Int -> Term -> (ShowS, Int, HashDList)
 canonAndSubs !minD t0 = case t0 of
   Var n es ->
     let (esEnc, esD, esHs) = canonElimsSubs minD es
@@ -82,7 +90,7 @@ canonAndSubs !minD t0 = case t0 of
     in (enc, d, emit minD d enc bHs)
   Lit l ->
     let enc = ('I':) . encStr (prettyShow l)
-    in (enc, 1, emit minD 1 enc [])
+    in (enc, 1, emit minD 1 enc id)
   Def qn es ->
     let (esEnc, esD, esHs) = canonElimsSubs minD es
         !d  = if null es then 1 else esD + 1
@@ -98,13 +106,13 @@ canonAndSubs !minD t0 = case t0 of
         (bEnc, bD, bHs) = canonAndSubs minD (unEl (unAbs bod))
         !d  = max dD bD + 1
         enc = ('P':) . dEnc . bEnc
-    in (enc, d, emit minD d enc (dHs ++ bHs))
+    in (enc, d, emit minD d enc (dHs . bHs))
   Sort s ->
     let enc = ('S':) . encStr (prettyShow s)
-    in (enc, 1, emit minD 1 enc [])
+    in (enc, 1, emit minD 1 enc id)
   Level l ->
     let enc = ('Z':) . encStr (prettyShow l)
-    in (enc, 1, emit minD 1 enc [])
+    in (enc, 1, emit minD 1 enc id)
   MetaV _ es ->
     -- MetaId wildcarded — only the eliminations carry shape information.
     let (esEnc, esD, esHs) = canonElimsSubs minD es
@@ -124,41 +132,42 @@ canonAndSubs !minD t0 = case t0 of
         enc = ('Y':) . encStr (show k) . esEnc
     in (enc, d, emit minD d enc esHs)
 
--- | Cons the current node's (hash, depth) pair onto the children's
--- list only when the node's depth qualifies.
-emit :: Int -> Int -> ShowS -> [(Word64, Int)] -> [(Word64, Int)]
+-- | Prepend the current node's (hash, depth) pair to the children's
+-- difference list only when the node's depth qualifies. The result is
+-- still an endo, so the cons is O(1) regardless of subtree size.
+emit :: Int -> Int -> ShowS -> HashDList -> HashDList
 emit !threshold !d enc childHs
-  | d >= threshold = (mkHash enc, d) : childHs
+  | d >= threshold = ((mkHash enc, d) :) . childHs
   | otherwise      = childHs
 
-canonAndSubsDom :: Int -> Dom Type -> (ShowS, Int, [(Word64, Int)])
+canonAndSubsDom :: Int -> Dom Type -> (ShowS, Int, HashDList)
 canonAndSubsDom !minD d =
   let (tEnc, tD, tHs) = canonAndSubs minD (unEl (unDom d))
   in (('p':) . tEnc, tD, tHs)
 
-canonElimsSubs :: Int -> Elims -> (ShowS, Int, [(Word64, Int)])
+canonElimsSubs :: Int -> Elims -> (ShowS, Int, HashDList)
 canonElimsSubs !minD es =
-  let n = length es
-      triples = map (canonElimSubs minD) es
-      encs = [ e | (e, _, _) <- triples ]
-      ds   = [ d | (_, d, _) <- triples ]
-      hss  = [ h | (_, _, h) <- triples ]
-  in ( ('[':) . shows n . foldr (\f g -> ('|':) . f . g) id encs . (']':)
-     , foldr max 0 ds
-     , concat hss )
+  let !n = length es
+      -- Single right fold over the elims: thread encoder, max depth, and
+      -- the (composed) hash difference list together rather than mapping
+      -- once and projecting the triple three more times.
+      step (eEnc, eD, eHs) (encAcc, dAcc, hsAcc) =
+        ( ('|':) . eEnc . encAcc, max eD dAcc, eHs . hsAcc )
+      (encs, maxD, hss) = foldr (step . canonElimSubs minD) (id, 0, id) es
+  in ( ('[':) . shows n . encs . (']':), maxD, hss )
 
-canonElimSubs :: Int -> Elim -> (ShowS, Int, [(Word64, Int)])
+canonElimSubs :: Int -> Elim -> (ShowS, Int, HashDList)
 canonElimSubs !minD (Apply a) =
   let h            = getHiding a
       (uEnc, uD, uHs) = canonAndSubs minD (unArg a)
   in ( ('A':) . encHiding h . uEnc , uD , uHs )
 canonElimSubs !_minD (Proj _ qn) =
-  ( ('R':) . encStr (prettyShow qn) , 1 , [] )
+  ( ('R':) . encStr (prettyShow qn) , 1 , id )
 canonElimSubs !minD (IApply u v w) =
   let (uEnc, uD, uHs) = canonAndSubs minD u
       (vEnc, vD, vHs) = canonAndSubs minD v
       (wEnc, wD, wHs) = canonAndSubs minD w
-  in ( ('J':) . uEnc . vEnc . wEnc , maximum [uD, vD, wD] , uHs ++ vHs ++ wHs )
+  in ( ('J':) . uEnc . vEnc . wEnc , maximum [uD, vD, wD] , uHs . vHs . wHs )
 
 encHiding :: Hiding -> ShowS
 encHiding Hidden     = ('h':)

@@ -69,8 +69,13 @@ buildDotGraph palette stateMap failed defs =
     failedNodes =
       [ (failedModuleId m, DotFailedModule m) | m <- S.toAscList failed ]
 
+    -- One LNode per distinct node id. 'concatMap mkNodes'' lists every
+    -- dependency target once per referencing def (O(V+E)); the label is a
+    -- pure function of the id, so collapsing to a Map keyed by id leaves
+    -- the resulting graph unchanged while handing 'mkGraph' only O(V)
+    -- nodes. Failed-module ids are namespaced and never collide.
     lnodeList :: [LNode DotLabel]
-    lnodeList = concatMap mkNodes' defs ++ failedNodes
+    lnodeList = M.toList (M.fromList (concatMap mkNodes' defs)) ++ failedNodes
 
     mkEdges' :: ADDef -> [UEdge]
     mkEdges' ADDef{..} =
@@ -79,20 +84,29 @@ buildDotGraph palette stateMap failed defs =
     ledgeList :: [UEdge]
     ledgeList = concatMap mkEdges' defs
 
-    failedAttrs :: [Attribute]
-    failedAttrs =
-      let (r, g, b) = parseHexColor (colorFor palette Failed)
+    -- Fill-colour attributes per 'DefState', parsed once (the palette is
+    -- fixed for the whole render). 'stateAttrs' indexes into these rather
+    -- than re-parsing the hex colour for every one of the up-to-100k+
+    -- nodes.
+    attrsFor :: DefState -> [Attribute]
+    attrsFor st =
+      let (r, g, b) = parseHexColor (colorFor palette st)
       in  [ FillColor [toWC (RGB r g b)], Style [SItem Filled []] ]
+
+    definedAttrs, postulateAttrs, holeAttrs, failedAttrs :: [Attribute]
+    definedAttrs   = attrsFor Defined
+    postulateAttrs = attrsFor Postulate
+    holeAttrs      = attrsFor Hole
+    failedAttrs    = attrsFor Failed
 
     -- DOT fill-colour attributes for a node, based on its 'DefState'.
     stateAttrs :: DotLabel -> [Attribute]
     stateAttrs (DotFailedModule _) = failedAttrs
-    stateAttrs (DotQ qn) =
-      let st       = M.findWithDefault Defined qn stateMap
-          (r,g,b)  = parseHexColor (colorFor palette st)
-      in [ FillColor [toWC (RGB r g b)]
-         , Style [SItem Filled []]
-         ]
+    stateAttrs (DotQ qn) = case M.findWithDefault Defined qn stateMap of
+      Defined   -> definedAttrs
+      Postulate -> postulateAttrs
+      Hole      -> holeAttrs
+      Failed    -> failedAttrs
 
     graphVizParams :: GraphvizParams Node DotLabel () ModuleName DotLabel
     graphVizParams = defaultParams

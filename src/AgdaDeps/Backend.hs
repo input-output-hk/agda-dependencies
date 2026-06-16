@@ -496,16 +496,27 @@ postCompileAD opts _ defMap = do
   -- root) are still classified as external.
   precomputed <- liftIO $ readIORef precomputedGraphRef
   visited <- getVisitedModules
-  let visitedImportEndpoints :: [String]
-      visitedImportEndpoints =
-        concat
-          [ [prettyShow src, prettyShow tgt]
-          | (src, mi) <- M.toList visited
-          , (tgt, _hash) <- iImportedModules (miInterface mi)
-          ]
+  let -- Raw (source-module, target-module) pairs for every import edge
+      -- across all visited interfaces, computed once. The endpoint pool
+      -- below and 'visitedImportEdges' (which layers the '--no-externals'
+      -- 'keep' filter) both consume this, so each 'iImportedModules' walk
+      -- and 'prettyShow' happens once rather than twice.
+      importPairs :: [(String, String)]
+      importPairs =
+        [ (prettyShow src, prettyShow tgt)
+        | (src, mi) <- M.toList visited
+        , (tgt, _hash) <- iImportedModules (miInterface mi)
+        ]
+      visitedImportEndpoints :: [String]
+      visitedImportEndpoints = concat [ [s, t] | (s, t) <- importPairs ]
       precomputeImportEndpoints :: [String]
       precomputeImportEndpoints =
         concat [ [s, t] | (s, t) <- precomputedImports precomputed ]
+      -- (host, source, qname) re-export triples across all visited
+      -- interfaces, computed once and shared with 'reExportRows' below so
+      -- 'collectReExports' walks each interface once.
+      reExportRaw :: [(String, String, String)]
+      reExportRaw = concatMap (collectReExports . miInterface) (M.elems visited)
       -- Re-export hubs: a module that only @open … public@s names from
       -- elsewhere contributes no QName of its own to 'allQNames0', so
       -- without this it slips past classification entirely and survives
@@ -515,12 +526,7 @@ postCompileAD opts _ defMap = do
       -- carry True via the QName / precompute signals, and 'M.insertWith
       -- (||)' keeps it.
       reExportEndpoints :: [String]
-      reExportEndpoints =
-        concat
-          [ [h, t]
-          | (_src, mi) <- M.toList visited
-          , (h, t, _n) <- collectReExports (miInterface mi)
-          ]
+      reExportEndpoints = concat [ [h, t] | (h, t, _n) <- reExportRaw ]
       allEndpointModules :: [String]
       allEndpointModules =
         visitedImportEndpoints ++ precomputeImportEndpoints ++ reExportEndpoints
@@ -567,12 +573,7 @@ postCompileAD opts _ defMap = do
              && not (optNoExternals opts && S.member m externals0)
       visitedImportEdges :: [(String, String)]
       visitedImportEdges =
-        [ (s, t)
-        | (src, mi) <- M.toList visited
-        , (tgt, _hash) <- iImportedModules (miInterface mi)
-        , let s = prettyShow src, let t = prettyShow tgt
-        , s /= t, keep s, keep t
-        ]
+        [ (s, t) | (s, t) <- importPairs, s /= t, keep s, keep t ]
 
       -- (host-module, source-module, [qualified-names]) rows aggregated
       -- across every visited interface. 'collectReExports' returns one
@@ -580,13 +581,7 @@ postCompileAD opts _ defMap = do
       -- (host, source) and dedup-sorted.
       reExportRows :: [(String, String, [String])]
       reExportRows =
-        let raw =
-              [ row
-              | (_src, mi) <- M.toList visited
-              , row <- collectReExports (miInterface mi)
-              , let (h, t, _) = row
-              , keep h, keep t
-              ]
+        let raw = [ (h, t, n) | (h, t, n) <- reExportRaw, keep h, keep t ]
             grouped :: M.Map (String, String) (S.Set String)
             grouped = M.fromListWith S.union
               [ ((h, t), S.singleton n) | (h, t, n) <- raw ]

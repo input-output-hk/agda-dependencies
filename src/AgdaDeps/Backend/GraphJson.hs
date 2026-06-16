@@ -118,7 +118,7 @@ buildExternalsSummary externals defs =
         | _state d /= Postulate = acc
         | otherwise =
             M.insertWith
-              (\new old -> head new : old)
+              (++)   -- 'new' is always a singleton, so '(++)' == 'head new : old'
               m
               [shortNameOf (prettyShow (_name d))]
               acc
@@ -275,8 +275,14 @@ buildGraphJson GraphInput{..} =
       defState :: QName -> DefState
       defState qn = M.findWithDefault Defined qn giStateMap
 
+      -- Per-def state, looked up once and shared by 'defStateBytes' and
+      -- 'moduleStateCounts' (both walk 'defsList'), rather than hitting
+      -- 'giStateMap' twice per def.
+      defStates :: [DefState]
+      defStates = map defState defsList
+
       defStateBytes :: [Int8]
-      defStateBytes = [ encodeDefState (defState qn) | qn <- defsList ]
+      defStateBytes = map encodeDefState defStates
 
       defPositions :: [(Float, Float)]
       defPositions =
@@ -464,11 +470,10 @@ buildGraphJson GraphInput{..} =
               Postulate -> Counts d       (p + 1) h       f
               Hole      -> Counts d       p       (h + 1) f
               Failed    -> Counts d       p       h       (f + 1)
-            byMod = foldl' addQ M.empty defsList
+            byMod = foldl' addQ M.empty (zip defsList defStates)
               where
-                addQ !acc qn =
-                  let !m  = prettyShow (qnameModule qn)
-                      !st = defState qn
+                addQ !acc (qn, !st) =
+                  let !m = prettyShow (qnameModule qn)
                   in M.insertWith add4 m (bump zero st) acc
                 add4 (Counts a b c d) (Counts e f g h) =
                   Counts (a + e) (b + f) (c + g) (d + h)
@@ -574,8 +579,6 @@ buildGraphJson GraphInput{..} =
         EmitInline ->
           ",\"transitiveEdges\":" ++ jsB64Int32 defTransitivePacked
         EmitLazy   -> ""
-
-      _ = nModules
 
       -- Optional diagnostic field; absent when @--no-externals@ wasn't
       -- passed.

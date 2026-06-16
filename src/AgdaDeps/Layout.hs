@@ -152,10 +152,10 @@ moduleGrouped nodes =
       tileSpacing = 1000.0 :: Float
 
       -- Group nodes back together by module; each value list ends up
-      -- in reverse-insertion order.
+      -- in reverse-insertion order (each combined value is a singleton,
+      -- so '(++)' is exactly the old 'head new : old').
       byMod :: IM.IntMap [Int]
-      byMod = IM.fromListWith (\new old -> head new : old)
-        [ (m, [nid]) | (nid, m) <- nodes ]
+      byMod = IM.fromListWith (++) [ (m, [nid]) | (nid, m) <- nodes ]
 
       tileCentre m =
         let i = IM.findWithDefault 0 m modIx

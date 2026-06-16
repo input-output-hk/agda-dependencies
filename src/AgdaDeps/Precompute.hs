@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -21,11 +22,11 @@ module AgdaDeps.Precompute
   , precomputeFromArgs
   ) where
 
-import Control.Exception ( catch, IOException )
+import Control.Exception ( catch, evaluate, IOException )
 import Control.Monad ( foldM )
 
 import Data.Char ( isAlphaNum, isSpace )
-import Data.Maybe ( listToMaybe, mapMaybe )
+import Data.List ( foldl' )
 import qualified Data.Set as Set
 
 import System.Directory
@@ -113,7 +114,13 @@ scanFile path = do
                   return (Left e)
     case contentE of
       Left _  -> return Nothing
-      Right c -> return (parseHeader path (stripBlockComments c))
+      Right c -> do
+        -- Force the whole file so lazy 'readFile' closes its handle
+        -- within this action; otherwise one open handle per scanned file
+        -- accumulates ('mapM scanFile' over the corpus) and a big library
+        -- can exhaust the fd limit before the results are drained.
+        _ <- evaluate (length c)
+        return (parseHeader path (stripBlockComments c))
 
 -- Pull @(moduleName, [import])@ out of the file body. Line-based,
 -- over logical Agda lines outside line comments; block comments have
@@ -123,12 +130,22 @@ scanFile path = do
 -- the file's basename, matching Agda's surface behaviour.
 parseHeader :: FilePath -> String -> Maybe (String, [String])
 parseHeader path body =
-  let cleaned  = map stripLineComment (lines body)
-      moduleN  = fmap normaliseAnonymous
-               $ listToMaybe (mapMaybe extractModule cleaned)
-      importsN = Set.toList . Set.fromList $ concatMap extractImport cleaned
-  in fmap (\m -> (m, importsN)) moduleN
+  -- One strict pass over the cleaned lines: tokenise each line once and
+  -- dispatch (first @module@ wins; @import@/@open import@ names
+  -- accumulate into a Set), rather than two independent passes that each
+  -- re-tokenised every line.
+  let (moduleN, importsN) =
+        foldl' step (Nothing, Set.empty) (map stripLineComment (lines body))
+  in fmap (\m -> (normaliseAnonymous m, Set.toList importsN)) moduleN
   where
+    step acc@(mMod, !imps) line =
+      case words (dropWhile isSpace line) of
+        "module" : name : _
+          | Nothing <- mMod -> (Just (sanitiseName name), imps)
+          | otherwise       -> acc
+        "import"          : name : _ -> (mMod, Set.insert (sanitiseName name) imps)
+        "open" : "import" : name : _ -> (mMod, Set.insert (sanitiseName name) imps)
+        _                            -> acc
     normaliseAnonymous "_" = takeBaseName path
     normaliseAnonymous m   = m
 
@@ -151,19 +168,6 @@ stripBlockComments = go 0
     go n ('{':'-':rest) | n > 0 = go (n + 1) rest
     go n (_:cs)         | n > 0 = go n cs
     go _ []             = []
-
-extractModule :: String -> Maybe String
-extractModule line =
-  case words (dropWhile isSpace line) of
-    "module" : name : _ -> Just (sanitiseName name)
-    _                   -> Nothing
-
-extractImport :: String -> [String]
-extractImport line =
-  case words (dropWhile isSpace line) of
-    "import"          : name : _ -> [sanitiseName name]
-    "open" : "import" : name : _ -> [sanitiseName name]
-    _                            -> []
 
 -- Strip trailing punctuation Agda doesn't allow in module names
 -- (semicolons, parentheses, … from compact one-liners). The trim is

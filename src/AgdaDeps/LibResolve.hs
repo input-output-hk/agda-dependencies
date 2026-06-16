@@ -22,8 +22,8 @@ module AgdaDeps.LibResolve
 
 import Control.Exception ( SomeException, try )
 import Data.Char ( isSpace )
-import Data.List ( isPrefixOf, nub )
-import Data.Maybe ( catMaybes, fromMaybe )
+import Data.List ( isPrefixOf )
+import Data.Maybe ( catMaybes, fromMaybe, mapMaybe )
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import System.Directory
@@ -31,6 +31,8 @@ import System.Directory
 import System.Environment ( lookupEnv )
 import System.FilePath ( (</>), takeDirectory, takeExtension, isAbsolute )
 import System.IO ( hPutStrLn, stderr )
+
+import AgdaDeps.Util ( dedupOrd )
 
 -- | True when @--resolve-deps@ appears anywhere in argv.
 wantsResolveDeps :: [String] -> Bool
@@ -161,8 +163,11 @@ resolveAgainst base p
 
 -- ** Registry
 
--- | Map from library name to the path of its @.agda-lib@ file.
-type Registry = Map.Map String FilePath
+-- | Map from library name to its parsed @.agda-lib@ file. Caching the
+-- parsed 'LibFile' (not just its path) lets 'resolveClosure' read each
+-- dependency's @depend:@/@include:@ lists from the copy already parsed
+-- during registry load, instead of re-opening and re-parsing the file.
+type Registry = Map.Map String LibFile
 
 loadRegistry :: IO Registry
 loadRegistry = do
@@ -179,13 +184,13 @@ loadRegistry = do
           entries <- catMaybes <$> mapM readRegistryEntry candidatePaths
           return $ Map.fromList entries
 
-readRegistryEntry :: FilePath -> IO (Maybe (String, FilePath))
+readRegistryEntry :: FilePath -> IO (Maybe (String, LibFile))
 readRegistryEntry libPath = do
   exists <- doesFileExist libPath
   if not exists then return Nothing else do
     eLib <- try (readLibFile libPath) :: IO (Either SomeException LibFile)
     case eLib of
-      Right lf | not (null (libName lf)) -> return (Just (libName lf, libPath))
+      Right lf | not (null (libName lf)) -> return (Just (libName lf, lf))
       _ -> return Nothing
 
 -- | Locate Agda's library registry file: @$AGDA_DIR/libraries@ if
@@ -212,7 +217,7 @@ locateRegistryFile = do
 -- | One library path per line (absolute or @~/...@). Lines starting
 -- with @--@ are comments; blank lines are ignored.
 parseRegistry :: String -> [FilePath]
-parseRegistry = catMaybes . map lineToPath . lines
+parseRegistry = mapMaybe lineToPath . lines
   where
     lineToPath ln =
       let s = trim ln
@@ -227,7 +232,7 @@ parseRegistry = catMaybes . map lineToPath . lines
 -- include directories. Cycles are guarded by a visited set.
 resolveClosure :: Registry -> LibFile -> IO [FilePath]
 resolveClosure registry root =
-  fmap (nub . concat) $ go Set.empty (libDepends root)
+  fmap (dedupOrd . concat) $ go Set.empty (libDepends root)
   where
     go :: Set.Set String -> [String] -> IO [[FilePath]]
     go _ [] = return []
@@ -239,15 +244,8 @@ resolveClosure registry root =
               "agda-deps: --resolve-deps: dependency '" ++ dep
               ++ "' not in registry; skipping."
             go (Set.insert dep seen) rest
-          Just libPath -> do
-            eLf <- try (readLibFile libPath)
-                     :: IO (Either SomeException LibFile)
-            case eLf of
-              Left e -> do
-                hPutStrLn stderr $
-                  "agda-deps: --resolve-deps: cannot read " ++ libPath
-                  ++ " (" ++ show e ++ "); skipping."
-                go (Set.insert dep seen) rest
-              Right lf -> do
-                rs <- go (Set.insert dep seen) (libDepends lf ++ rest)
-                return (libIncludes lf : rs)
+          -- The 'LibFile' was parsed (and the path validated) during
+          -- registry load, so read its deps/includes from the cache.
+          Just lf -> do
+            rs <- go (Set.insert dep seen) (libDepends lf ++ rest)
+            return (libIncludes lf : rs)

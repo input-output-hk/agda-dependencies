@@ -62,7 +62,7 @@ import Control.DeepSeq ( NFData(..) )
 import Control.Monad ( filterM )
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Data.IORef ( IORef, modifyIORef', newIORef, readIORef, writeIORef )
-import Data.List ( foldl', isInfixOf )
+import Data.List ( foldl', isInfixOf, isPrefixOf )
 import Data.Maybe ( isJust, mapMaybe )
 import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as M
@@ -250,7 +250,7 @@ instance Pretty ADDef where
 -- string.
 nodeKey :: QName -> String
 nodeKey qn
-  | isWhereHelperName qn
+  | "._." `isInfixOf` base          -- 'isWhereHelperName', inlined to reuse 'base'
   , Just ln <- bindingLine qn = base ++ "@" ++ show ln
   | otherwise                 = base
   where base = prettyShow qn
@@ -297,17 +297,22 @@ computeDefAD opts def@Defn{..} = do
   let excludes = optExcludeModules opts
       notExcluded qn = not (isExcludedModule excludes (prettyShow (qnameModule qn)))
       -- Walk 'defType' and 'theDef' separately to record which set each
-      -- name came from. Both sides go through the exclude filter; the
-      -- 'ignoreDependency' filter is applied later in
-      -- 'contractIgnoredEdges'.
-      !sigNames  = S.fromList (filter notExcluded (namesIn defType))
-      !bodyNames = S.fromList (filter notExcluded (namesIn theDef))
+      -- name came from. The raw walks are shared with 'classifyDefWith'
+      -- (the hole check) so each tree is traversed once. Both sides go
+      -- through the exclude filter here; the 'ignoreDependency' filter is
+      -- applied later in 'contractIgnoredEdges'.
+      !rawSig    = namesIn defType
+      !rawBody   = namesIn theDef
+      !sigNames  = S.fromList (filter notExcluded rawSig)
+      !bodyNames = S.fromList (filter notExcluded rawBody)
       !deps      = S.union sigNames bodyNames
       !withTarget = case theDef of
         Function { funWith = w } -> isWithFun' w
         _                        -> Nothing
       !depsProv = M.fromSet (tagOne sigNames bodyNames withTarget) deps
-  st <- classifyDef def
+  -- Reuse the raw (pre-exclude) name walks: a synthetic @unsolved#meta.*@
+  -- name in an excluded module must still flip the Hole classification.
+  st <- classifyDefWith rawSig rawBody def
   let !kd      = classifyKind def
       !lineMb  = bindingLine defName
       !termPairs = if optWithTermHashes opts
@@ -598,15 +603,26 @@ contractIgnoredEdges :: [ADDef] -> TCM [ADDef]
 contractIgnoredEdges defs = do
   hidden <- liftIO $ readIORef ignoredEdgesRef
   let memo = buildIgnoredClosure hidden
-  mapM (rewriteOne hidden memo) defs
+      -- Expand each kept def's raw dep map through the hidden chain once
+      -- (pure). 'expandeds' is shared between the distinct-target scan and
+      -- the per-def rewrite, so 'contractWith' runs exactly once per def.
+      expandeds  = map (contractWith hidden memo . _depsProv) defs
+      allTargets = S.unions (map M.keysSet expandeds)
+  -- 'ignoreDependency' is a stable pure function of its 'QName' (a
+  -- signature lookup), so run it once per *distinct* contracted target
+  -- instead of once per (def, target) pair: a popular lemma referenced by
+  -- N kept defs was previously re-checked N times.
+  ignored <- filterM ignoreDependency (S.toList allTargets)
+  let !ignoredSet = S.fromList ignored
+  pure (zipWith (rewrite ignoredSet) defs expandeds)
   where
-    rewriteOne
-      :: IgnoredEdgeMap -> Map QName (Set QName) -> ADDef -> TCM ADDef
-    rewriteOne hidden memo d = do
-      let !expanded = contractWith hidden memo (_depsProv d)
-      keptList <- filterM (fmap not . ignoreDependency) (M.keys expanded)
-      let !keptProv = M.restrictKeys expanded (S.fromList keptList)
-      pure d { _deps = M.keysSet keptProv, _depsProv = keptProv }
+    -- Drop the ignored targets from a contracted dep map. 'withoutKeys'
+    -- over the precomputed set yields exactly the keys
+    -- { qn in keys expanded : not (ignoreDependency qn) } that the old
+    -- per-def 'filterM' produced, with identical 'EdgeProv' values.
+    rewrite ignoredSet d expanded =
+      let !keptProv = M.withoutKeys expanded ignoredSet
+      in d { _deps = M.keysSet keptProv, _depsProv = keptProv }
 
     -- One-shot expansion of a kept def's raw dep map: every QName that
     -- is an ignored-def key is replaced by its cached closure of real
@@ -761,9 +777,7 @@ buildIgnoredClosure hidden = withCycles
 -- postulates Agda generates under @--allow-unsolved-metas@ (via
 -- @openMetasToPostulates@).
 isUnsolvedMetaName :: QName -> Bool
-isUnsolvedMetaName qn = "unsolved#meta." `isPrefixOf'` prettyShow (qnameName qn)
-  where
-    isPrefixOf' p s = take (length p) s == p
+isUnsolvedMetaName qn = "unsolved#meta." `isPrefixOf` prettyShow (qnameName qn)
 
 -- | Structural classification from 'theDef'. In Agda 2.9 'funProjection'
 -- is @Either ProjectionLikenessMissing Projection@; a 'Right' carrying a
@@ -791,13 +805,20 @@ classifyKind Defn{ theDef = d } = case d of
 -- A definition whose *own* name starts with @"unsolved#meta."@ is itself
 -- a hole-marker.
 classifyDef :: Definition -> TCM DefState
-classifyDef def@Defn{..}
+classifyDef def@Defn{..} = classifyDefWith (namesIn defType) (namesIn theDef) def
+
+-- | 'classifyDef' with the @defType@/@theDef@ name walks supplied by the
+-- caller, so 'computeDefAD' (which already walks both) does not pay for a
+-- second traversal of the same term trees. The lists must be the *raw*
+-- (pre-exclude-filter) names.
+classifyDefWith :: [QName] -> [QName] -> Definition -> TCM DefState
+classifyDefWith sigRaw bodyRaw def@Defn{..}
   | isUnsolvedMetaName defName = return Hole
   | otherwise = case theDef of
       Axiom{} -> return Postulate
       _ -> do
         let metas = allMetasList defType ++ metasInDefn theDef
-            referencedNames = namesIn defType ++ namesIn theDef :: [QName]
+            referencedNames = sigRaw ++ bodyRaw
             referencesUnsolvedMeta = any isUnsolvedMetaName referencedNames
         if referencesUnsolvedMeta
           then return Hole

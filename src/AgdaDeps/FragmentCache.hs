@@ -43,6 +43,7 @@ import qualified Control.Exception as E
 import Control.Monad ( filterM )
 import Control.Monad.IO.Class ( MonadIO, liftIO )
 import Data.Word ( Word64 )
+import Numeric ( showHex )
 import qualified Data.Set as S
 import System.Directory
   ( doesDirectoryExist, listDirectory, removeFile )
@@ -123,16 +124,12 @@ fragmentFileFor cacheDir modName =
     prefix = take 60 (map sanitise modName)
     sanitise c | c `elem` ("/\\:*?\"<>| " :: String) = '_'
                | otherwise                           = c
-    hex w = pad (showHexW w)
+    -- 'Numeric.showHex' is lowercase, has no leading zeros, and gives
+    -- "0" for 0 — identical to the old hand-rolled converter, so the
+    -- @.frag@ filenames are unchanged.
+    hex :: Word64 -> String
+    hex w = pad (showHex w "")
     pad s = replicate (16 - length s) '0' ++ s
-    showHexW :: Word64 -> String
-    showHexW 0 = "0"
-    showHexW n = go n ""
-      where
-        go 0 acc = acc
-        go m acc =
-          let (q, r) = m `divMod` 16
-          in go q ("0123456789abcdef" !! fromIntegral r : acc)
 
 -- | Garbage-collect stale fragment files: delete every @*.frag@ in
 -- @cacheDir@ whose module name is not in @liveModules@ (modules no

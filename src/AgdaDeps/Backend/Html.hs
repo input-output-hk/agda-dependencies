@@ -135,7 +135,18 @@ renderLazyHtml
   -> [ADDef]
   -> LazyOutput
 renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFile positions externalsSummary defs =
-  let snippetModules = snippetModulesOf snippetMap
+  let -- Group snippets by their module ONCE — 'prettyShow (qnameModule)'
+      -- per snippet computed a single time. The old
+      -- snippetModulesOf + per-module snippetsForModule pair re-scanned the
+      -- whole snippet map for every module (O(modules × snippets)).
+      -- 'foldr' over the ascending 'M.toAscList' with 'insertWith (++)'
+      -- keeps each module's entries in ascending-QName order, matching the
+      -- old per-module filter exactly.
+      snippetsByModule :: Map String [(QName, Snippet)]
+      snippetsByModule =
+        foldr (\(qn, sn) -> M.insertWith (++) (prettyShow (qnameModule qn)) [(qn, sn)])
+              M.empty (M.toAscList snippetMap)
+      snippetModules = M.keys snippetsByModule
       gi = GraphInput
         { giDefs            = defs
         , giStateMap        = stateMap
@@ -164,8 +175,7 @@ renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap external
           , snippetBundleEpoch entries
           , renderBundleJson entries
           )
-        | m <- snippetModules
-        , let entries = snippetsForModule snippetMap m
+        | (m, entries) <- M.toAscList snippetsByModule
         ]
 
       withSourceJs = if M.null snippetMap then "false" else "true"
@@ -182,11 +192,6 @@ snippetModulesOf :: Map QName Snippet -> [String]
 snippetModulesOf snippetMap =
   S.toAscList . S.fromList $
     [ prettyShow (qnameModule qn) | qn <- M.keys snippetMap ]
-
-snippetsForModule :: Map QName Snippet -> String -> [(QName, Snippet)]
-snippetsForModule snippetMap modName =
-  [ (qn, sn) | (qn, sn) <- M.toList snippetMap
-             , prettyShow (qnameModule qn) == modName ]
 
 -- | Serialise one module's snippets as a JSON object keyed by the
 -- node's 'hashQName'.

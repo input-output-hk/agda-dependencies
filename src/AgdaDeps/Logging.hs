@@ -7,7 +7,6 @@
 -- 'hPutStrLn stderr' directly so they are never muted.
 module AgdaDeps.Logging
   ( setQuiet
-  , isQuiet
   , info
   ) where
 
