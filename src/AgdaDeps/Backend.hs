@@ -23,6 +23,7 @@ module AgdaDeps.Backend
 
 import Control.Monad ( when )
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
+import Control.DeepSeq ( force )
 
 import Data.IORef ( IORef, newIORef, readIORef, writeIORef )
 import Data.Map ( Map )
@@ -629,7 +630,11 @@ postCompileAD opts _ defMap = do
   -- unchanged produces byte-identical monolithic output, so the
   -- re-emit can be skipped. 'anyRecompiled' guards the def /content/;
   -- 'monoToken' guards everything else.
-  let liveModules = map prettyShow (M.keys defMap)
+  -- Force to full NF so this lazy thunk stops pinning the whole @defMap@
+  -- (and every imported module's @[Maybe ADDef]@ value spine) alive
+  -- through the render. In a non-@--incremental@ run nothing else forces
+  -- @liveModules@, so without the bang the map survives to end-of-do.
+  let !liveModules = force (map prettyShow (M.keys defMap))
       cacheDir    = cacheDirFor opts
       monoToken   = outputToken opts liveModules
   anyRecompiled <- liftIO $ readIORef recompiledRef

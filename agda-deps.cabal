@@ -29,7 +29,10 @@ source-repository head
 
 -- agda-deps is the Agda compiler backend that emits graph.json.
 executable agda-deps
-  ghc-options: -O2 -threaded
+  -- -with-rtsopts=-F1.2 caps old-gen heap growth at 1.2x live data (GHC
+  -- default is 2.0x) to trim peak residency on large corpora (~11% measured);
+  -- -rtsopts lets callers override at runtime via +RTS -F.
+  ghc-options: -O2 -threaded -rtsopts -with-rtsopts=-F1.2
   hs-source-dirs:      src
   main-is:             Main.hs
   other-modules:       Paths_agda_deps

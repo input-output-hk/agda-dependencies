@@ -200,11 +200,11 @@ provTag EUnknown   = "unknown"
 -- 'EdgeProv' tag.
 data ADDef = ADDef
   { _name   :: QName            -- ^ name of the definition
-  , _deps   :: Set QName        -- ^ its dependencies (named free variables)
+  , _deps   :: !(Set QName)     -- ^ its dependencies (named free variables)
   , _depsProv :: !(Map QName EdgeProv)
                                 -- ^ per-dep provenance tag.
                                 -- Invariant: @M.keysSet _depsProv == _deps@.
-  , _state  :: DefState         -- ^ classification used for node colouring
+  , _state  :: !DefState        -- ^ classification used for node colouring
   , _kind   :: !DefKind         -- ^ structural shape from Agda's 'Defn'
   , _line   :: !(Maybe Int)     -- ^ 1-indexed start line of the binding site
   , _access :: !(Maybe DefAccess)

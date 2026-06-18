@@ -7,6 +7,45 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-06-18 — `agda-deps` — rebuild-memory reductions (GC growth factor, strict `ADDef` fields, drop a render-time `defMap` pin)
+
+Memory pass on the producer's rebuild path (follow-up to the G10 scaling
+audit), measured on warm Jolteon targets. The dominant peak-RSS term is
+Agda's own interface-load floor (~720 MB live on an 811-def closure,
+~1.5 GB on 2587 defs) and is irreducible in a whole-program backend; of
+the part above it, copying-GC slack was the largest *removable* chunk
+(29–40 % of RSS) and our own live contribution was small and flat
+(~120–160 MB). Three changes attack the removable parts; **output is
+byte-identical** (cold golden + schema + packed-analytical gates).
+
+- **`-rtsopts -with-rtsopts=-F1.2`** (`agda-deps.cabal`). The shipped
+  binary previously had no `-rtsopts`, so `+RTS` / `GHCRTS` were ignored
+  and the GC could not be tuned at all. `-F1.2` caps old-gen heap growth
+  at 1.2× live (GHC default 2.0×), firing major GC earlier: **~11 %
+  lower peak RSS at no measurable wall cost** on both targets, with no
+  hard ceiling (so it can't OOM-abort). `-rtsopts` lets callers override
+  at runtime (`+RTS -F…`). Rejected: a hard `-M` cap (Agda's
+  type-checker spikes far above steady-state live, so any fixed cap
+  aborts real corpora), `--nonmoving-gc` (segfaults on real targets),
+  `-c` compacting (~0–2 %; the slack is generational headroom, not
+  fragmentation).
+- **Strict `_deps` / `_state` in `ADDef`** (`Deps.hs`) — the only two
+  fields that lacked the `!` every neighbour already carries. A lazy
+  `_state` thunk closed over the whole Agda `Definition`; forcing the
+  field to WHNF (the state is computed eagerly in `TCM` regardless)
+  drops that retained reference per kept def.
+- **Force `liveModules`** (`Backend.hs`) — `map prettyShow (M.keys
+  defMap)` was a lazy `[String]` that, in a non-`--incremental` run
+  (nothing else forces it), pinned the entire `defMap` and every
+  imported module's `[Maybe ADDef]` value spine alive through the
+  render. `force`d to NF so the map is collectable once its one
+  legitimate early consumer (`rawDefs0`) is done.
+
+Not addressed (irreducible / out of scope): Agda's interface-load floor
+(mitigate only by smaller import closures — split entry points — or
+`--skip-agda`); `--incremental` is a wall-time win, not a memory one (it
+holds ~52 MB *more* live).
+
 ## 2026-06-13 — `agda-deps` — `--packed-analytical` (consumer-usable packed form)
 
 The packed `graph.json` is ~5× smaller than expanded but, built for the
