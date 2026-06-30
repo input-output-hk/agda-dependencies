@@ -256,6 +256,12 @@ consumer/MCP items live in `agda-graph-explorer/Backlog.md`.
   `useA ⇝ QED@20 ⇝ targetA` and `useB ⇝ QED@26 ⇝ targetB` both
   survive. See [Changelog.md](Changelog.md) (2026-06-05) and the
   `nodeKey` gotcha in [CLAUDE.md](CLAUDE.md). Do not re-implement.
+  **Superseded 2026-06-30 (`nodeKeyVersion` 3):** `nodeKey` now also
+  *lifts* the anonymous `._.` segments, so these helpers serialise as
+  `Collision.QED@20` (the `@<binding-line>` disambiguator is kept) and
+  re-home to their named parent module; the `where` edge-provenance tag
+  was renamed `module-local`. The Collision regression is unchanged
+  (only the rendered names shift); see the Changelog 2026-06-30 entry.
 
 - **Inliner gap, producer side — investigated 2026-06-12, deferred with
   evidence.** Agda inlines every call to an `{-# INLINE #-}` function

@@ -349,16 +349,16 @@ intToKind 7 = Just DKOther
 intToKind _ = Nothing
 
 provToInt :: EdgeProv -> Int
-provToInt ESignature = 0
-provToInt EBody      = 1
-provToInt EWhere     = 2
-provToInt EWith      = 3
-provToInt EUnknown   = 4
+provToInt ESignature   = 0
+provToInt EBody        = 1
+provToInt EModuleLocal = 2
+provToInt EWith        = 3
+provToInt EUnknown     = 4
 
 intToProv :: Int -> Maybe EdgeProv
 intToProv 0 = Just ESignature
 intToProv 1 = Just EBody
-intToProv 2 = Just EWhere
+intToProv 2 = Just EModuleLocal
 intToProv 3 = Just EWith
 intToProv 4 = Just EUnknown
 intToProv _ = Nothing

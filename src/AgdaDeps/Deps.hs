@@ -21,6 +21,7 @@ module AgdaDeps.Deps
 
     -- * Hashing & QName collection
   , nodeKey
+  , moduleKey
   , nodeKeyVersion
   , hashQName
   , collectAllQNames
@@ -117,7 +118,7 @@ import Agda.Compiler.Backend ( IsMain )
 
 import AgdaDeps.Options ( Options(..), DefState(..), isExcludedModule )
 import AgdaDeps.TermCanon ( subtermHashes )
-import AgdaDeps.Util ( isWithFun, isWithFun' )
+import AgdaDeps.Util ( isWithFun, isWithFun', liftAnonSegments )
 
 -- | Structural classification of a definition, derived from its
 -- 'Defn' shape (e.g. record-field projections vs. regular functions).
@@ -152,12 +153,18 @@ instance NFData DefAccess where
 -- "AgdaDeps.Backend.GraphJson".
 --
 -- Precedence (high to low when several apply to the same @(src, dst)@):
--- 'ESignature' > 'EWith' > 'EWhere' > 'EBody' > 'EUnknown'.
+-- 'ESignature' > 'EWith' > 'EModuleLocal' > 'EBody' > 'EUnknown'.
 data EdgeProv
   = ESignature  -- ^ Target appears in @defType@.
   | EBody       -- ^ Target appears in @theDef@ only (not in @defType@,
-                -- not a with-/where-helper).
-  | EWhere      -- ^ Target is a where-block helper of the source.
+                -- not a with-/anonymous-module helper).
+  | EModuleLocal -- ^ Target is a definition that was lexically nested in
+                -- an anonymous module — a @where@-block helper /or/ a
+                -- @module _ (…) where@ parameterised-section member
+                -- (Agda represents both identically). Does /not/ imply
+                -- the target is owned by this specific source; it only
+                -- flags that the target is a locally-scoped helper rather
+                -- than a top-level declared name. Wire tag: @module-local@.
   | EWith       -- ^ Target is the with-helper named by @funWith@.
   | EUnknown    -- ^ Catch-all: instance-method provider edges, or
                 -- contracted edges whose chain's source provenance was
@@ -175,22 +182,22 @@ provPrec a b
   | precRank a >= precRank b = a
   | otherwise                = b
   where
-    -- Precedence: ESignature > EWith > EWhere > EBody > EUnknown.
+    -- Precedence: ESignature > EWith > EModuleLocal > EBody > EUnknown.
     precRank :: EdgeProv -> Int
-    precRank ESignature = 4
-    precRank EWith      = 3
-    precRank EWhere     = 2
-    precRank EBody      = 1
-    precRank EUnknown   = 0
+    precRank ESignature   = 4
+    precRank EWith        = 3
+    precRank EModuleLocal = 2
+    precRank EBody        = 1
+    precRank EUnknown     = 0
 
 -- | Wire tag for 'EdgeProv', emitted in expanded JSON's
 -- @definitionEdgesProvenance@ array.
 provTag :: EdgeProv -> String
-provTag ESignature = "signature"
-provTag EBody      = "body"
-provTag EWhere     = "where"
-provTag EWith      = "with"
-provTag EUnknown   = "unknown"
+provTag ESignature   = "signature"
+provTag EBody        = "body"
+provTag EModuleLocal = "module-local"
+provTag EWith        = "with"
+provTag EUnknown     = "unknown"
 
 -- | One node in the dependency graph: a 'QName' plus its direct
 -- dependencies and its classification.
@@ -239,21 +246,40 @@ instance Pretty ADDef where
                           , pshow "DepsProv:" <+> pshow (M.toAscList _depsProv) ]
 
 -- | Canonical node-identity string for a 'QName' as it appears in the
--- graph. Top-level names use their 'prettyShow'. /where/-block and
--- anonymous-module helpers reify to @Module._.simpleName@ (same-named
--- helpers in one module print identically), so they are disambiguated
--- by their binding-site line; a helper with no recorded binding site
--- falls back to bare 'prettyShow'.
+-- graph. Anonymous-module path segments (@where@-block helpers and
+-- @module _ (…) where@ section members, which Agda renders with the
+-- @._.@ marker) are /lifted/ into their nearest named ancestor module
+-- via 'liftAnonSegments' — @Mod._.helper@ becomes @Mod.helper@,
+-- @Mod._._.deep@ becomes @Mod.deep@ — so a section/where definition reads
+-- as the parent-module member it logically is. Because lifting collapses
+-- the per-section @_@ qualifier, same-named helpers in one module would
+-- print identically, so they are disambiguated by their binding-site
+-- line (@Mod.helper\@15@); a helper with no recorded binding site falls
+-- back to the bare lifted name. Top-level names have no anonymous
+-- segment, so 'liftAnonSegments' leaves them unchanged.
 --
 -- Single source of truth for node identity: 'hashQName' is its hash,
 -- and the JSON wire @"name"@ field and edge endpoints are this exact
--- string.
+-- string. 'moduleKey' is the matching module-attribution function.
 nodeKey :: QName -> String
 nodeKey qn
-  | "._." `isInfixOf` base          -- 'isWhereHelperName', inlined to reuse 'base'
-  , Just ln <- bindingLine qn = base ++ "@" ++ show ln
-  | otherwise                 = base
-  where base = prettyShow qn
+  | "._." `isInfixOf` raw     -- 'isWhereHelperName', inlined to reuse 'raw'
+  , Just ln <- bindingLine qn = lifted ++ "@" ++ show ln
+  | otherwise                 = lifted
+  where
+    raw    = prettyShow qn
+    lifted = liftAnonSegments raw
+
+-- | Canonical owning-module string for a 'QName', with anonymous
+-- (@where@-block \/ parameterised-section) sub-modules lifted away via
+-- 'liftAnonSegments' so attribution lands on the nearest /named/ module
+-- (@Mod._@ ↦ @Mod@, @Mod._._@ ↦ @Mod@). The module-level companion to
+-- 'nodeKey': every place that derives a module name from a 'QName' for
+-- the graph (module DAG, pods, @moduleFiles@, externals classification,
+-- @--exclude@ matching) routes through this so phantom @Mod._@ module
+-- nodes never surface and set / index / membership all agree.
+moduleKey :: QName -> String
+moduleKey = liftAnonSegments . prettyShow . qnameModule
 
 -- | Version of the on-disk node-key convention emitted by 'nodeKey'.
 -- Stamped into @graph.json@ as @"nodeKeyVersion"@ so a consumer can
@@ -262,9 +288,12 @@ nodeKey qn
 --
 --   * v1 — bare 'prettyShow';
 --   * v2 — the @\@\<binding-line\>@ disambiguator on @where@/anonymous
---     helpers.
+--     helpers;
+--   * v3 — anonymous-module segments lifted into the nearest named
+--     ancestor ('liftAnonSegments'): @Mod._.helper\@15@ ↦
+--     @Mod.helper\@15@, attribution re-homed to @Mod@.
 nodeKeyVersion :: Int
-nodeKeyVersion = 2
+nodeKeyVersion = 3
 
 -- | Stable integer ID for a 'QName', shared by every renderer. The hash
 -- of 'nodeKey', so distinct same-named @where@/anonymous-module helpers
@@ -295,7 +324,7 @@ collectAllQNames defs = IM.elems (foldl' addDef IM.empty defs)
 computeDefAD :: Options -> Definition -> TCM ADDef
 computeDefAD opts def@Defn{..} = do
   let excludes = optExcludeModules opts
-      notExcluded qn = not (isExcludedModule excludes (prettyShow (qnameModule qn)))
+      notExcluded qn = not (isExcludedModule excludes (moduleKey qn))
       -- Walk 'defType' and 'theDef' separately to record which set each
       -- name came from. The raw walks are shared with 'classifyDefWith'
       -- (the hole check) so each tree is traversed once. Both sides go
@@ -360,7 +389,7 @@ definitionTerms Defn{..} = unEl defType : bodyTerms theDef
     bodyTerms _                                  = []
 
 -- | Tag a single outgoing edge by precedence:
--- signature > with > where > body > unknown.
+-- signature > with > module-local > body > unknown.
 tagOne
   :: S.Set QName        -- ^ names from @defType@
   -> S.Set QName        -- ^ names from @theDef@
@@ -370,7 +399,7 @@ tagOne
 tagOne sigNames bodyNames withTarget qn
   | qn `S.member` sigNames        = ESignature
   | Just qn == withTarget         = EWith
-  | isWhereHelperName qn          = EWhere
+  | isWhereHelperName qn          = EModuleLocal
   | qn `S.member` bodyNames       = EBody
   | otherwise                     = EUnknown
 
@@ -409,7 +438,7 @@ compileDefAD opts _ _ def@Defn{..}
       -- 'ignoreDependency' (references to other ignored defs are kept
       -- so the closure pass can chain through). Module-exclusion still
       -- applies.
-      let notExcluded qn = not (isExcludedModule excludes (prettyShow (qnameModule qn)))
+      let notExcluded qn = not (isExcludedModule excludes (moduleKey qn))
           !sigNames  = S.fromList (filter notExcluded (namesIn defType))
           !bodyNames = S.fromList (filter notExcluded (namesIn theDef))
           !raw       = S.union sigNames bodyNames
@@ -419,7 +448,7 @@ compileDefAD opts _ _ def@Defn{..}
           !rawProv = M.fromSet (tagOne sigNames bodyNames withTarget) raw
       recordIgnoredDef defName rawProv
       return Nothing
-  | isExcludedModule excludes (prettyShow (qnameModule defName)) = return Nothing
+  | isExcludedModule excludes (moduleKey defName) = return Nothing
   | otherwise = do
       recordInstanceMethods def
       Just <$> computeDefAD opts def

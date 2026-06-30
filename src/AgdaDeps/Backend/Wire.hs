@@ -284,7 +284,7 @@ defsRegistry =
                                   , "record", "constructor", "postulate"
                                   , "primitive", "other" ]))
   , ("access",     SString (Just ["private", "public"]))
-  , ("provenance", SString (Just [ "signature", "body", "where"
+  , ("provenance", SString (Just [ "signature", "body", "module-local"
                                   , "with", "unknown" ]))
   , ("definition",       objectSchemaOf definitionFields)
   , ("reexport",         objectSchemaOf reexportFields)

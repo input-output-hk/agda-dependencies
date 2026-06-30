@@ -243,31 +243,53 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges (topsort DP)
   contraction pass to expand them. Reverting this loses edges
   through `with-`helpers / inliner copies.
 
-- **`hashQName = hashString . nodeKey`, and `nodeKey` is `prettyShow`
-  *plus a `@<binding-line>` suffix for `._.` helpers* — not bare
-  `prettyShow`, and *never* derived `show`.** Derived `Show` includes
-  `NameId` metadata that diverges between QNames sourced from
-  `iSignature` vs `stSignature`, so it can't key nodes. `prettyShow`
-  alone fixes that but over-collapses: every same-named
+- **`hashQName = hashString . nodeKey`, and `nodeKey` is
+  `liftAnonSegments . prettyShow` *plus a `@<binding-line>` suffix for
+  `._.` helpers* — not bare `prettyShow`, and *never* derived `show`.**
+  Derived `Show` includes `NameId` metadata that diverges between QNames
+  sourced from `iSignature` vs `stSignature`, so it can't key nodes.
+  `prettyShow` alone fixes that but over-collapses: every same-named
   `where`/anonymous-module helper in a module renders identically as
   `Mod._.simpleName`, so they merged onto one node and the rest's edges
   vanished (battle-test E1). `nodeKey` keeps the `prettyShow` stability
-  for top-level names (unchanged, globally unique) and disambiguates
-  `._.` helpers by their `nameBindingSite` line — the one per-helper
-  coordinate that *is* stable across signature sources. This is the
-  single source of truth for node identity: the wire `"name"` (expanded
-  + packed) and edge endpoints derive from `nodeKey`, and the
+  for top-level names and disambiguates `._.` helpers by their
+  `nameBindingSite` line — the one per-helper coordinate that *is* stable
+  across signature sources. **It also lifts anonymous-module segments
+  (the `_` that Agda renders for both `where` blocks and `module _ (…)
+  where` sections) out of the name via `AgdaDeps.Util.liftAnonSegments`:
+  `Mod._.helper@15` ↦ `Mod.helper@15`, `Mod._._.deep` ↦ `Mod.deep`
+  (nodeKeyVersion 3).** Agda desugars *both* `where` and parameterised
+  sections into anonymous `Mod._` sub-modules and lifts the enclosing
+  vars into each def's `defType`, so the dependency edges are already
+  correct — the blind spot was *naming/attribution* only. Don't try to
+  distinguish `where` from section here: post-scope-check they are
+  identical (`h` in a `where`-block and `amHelper` in a section both home
+  to `Mod._`); only `liftAnonSegments` re-homes them, and the matching
+  `moduleKey` (= `liftAnonSegments . prettyShow . qnameModule`) is the
+  single source of *module attribution* (kills phantom `Mod._` module
+  nodes + their false `Mod ⇄ Mod._` cycles). **Every site that derives a
+  module string from a QName must route through `moduleKey`** (externals
+  classification, `--exclude` matching, module DAG, snippet/bundle
+  manifests, DOT clusters) or set/index/membership drift apart. This is
+  the single source of truth for node identity: the wire `"name"`
+  (expanded + packed) and edge endpoints derive from `nodeKey`, and the
   expanded-edge filter resolves by the canonical string, **not** `QName`
   `Ord` (which distinguishes same-`nodeKey` helpers and would re-drop
-  their edges). Don't revert to bare `prettyShow`; the regression lives
-  in `test/Collision.agda` (imported by `test/Test.agda`).
+  their edges). Don't revert to bare `prettyShow`; the regressions live
+  in `test/Collision.agda` (E1, same-named `where` helpers) and
+  `test/AnonSection.agda` (parameterised + nested sections), both
+  imported by `test/Test.agda`.
 
 - **`nodeKeyVersion` tracks the node-naming convention.**
   `AgdaDeps.Deps.nodeKeyVersion` is stamped into `graph.json` so a
   downstream consumer of the wire format can detect a stale-format
   cached graph (same wire shape, different node names) and rebuild
   rather than silently serving results keyed by an older convention.
-  Whenever `nodeKey` changes shape, bump it.
+  Whenever `nodeKey` changes shape, bump it. Currently **3** (1 = bare
+  `prettyShow`; 2 = `@<line>` disambiguator on `._.` helpers; 3 =
+  anonymous-module segments lifted into the named ancestor). The sibling
+  consumer repo `agda-graph-explorer` reads this same constant — a bump
+  is a cross-repo coordination point.
 
 - **`BuildInfo` is split across two modules for the TH stage
   restriction.** The git-revision splice generator lives in
@@ -392,9 +414,17 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges (topsort DP)
   walks `defType` and `theDef` separately (`AgdaDeps.Deps.tagOne`):
   names in `defType` become `Signature`; names in `theDef` become
   `Body`, refined to `With` when the parent's `funWith` points at the
-  target and `Where` when the qname's `prettyShow` contains the `._.`
-  anonymous-module marker. Precedence on collision is
-  `Signature > With > Where > Body > Unknown`. The side-channel
+  target and `ModuleLocal` (wire tag `module-local`) when the qname's
+  `prettyShow` contains the `._.` anonymous-module marker. **`module-local`
+  is a property of the *target*, not the (src, dst) pair**: it says the
+  target is an anonymous-module-local helper (a `where`-block helper *or*
+  a parameterised-section member — Agda represents both identically, see
+  the `nodeKey` gotcha), and does *not* claim the target is owned by this
+  specific source. It was named `where` before nodeKeyVersion 3; that was
+  a lie for section siblings/consumers, since the marker fires for any
+  `._.` target regardless of ownership, and post-scope-check ownership is
+  unrecoverable. Precedence on collision is
+  `Signature > With > ModuleLocal > Body > Unknown`. The side-channel
   `IgnoredEdgeMap` carries provenance through `contractIgnoredEdges`
   — contracted edges inherit the **source** side's provenance
   toward the hidden helper (not the helper's internal tag);
@@ -609,9 +639,10 @@ consumers:
     `kind` per definition and the `reexports[]` array. Round 4
     added an optional `definitionEdgesProvenance :: [Provenance]`
     array parallel to `definitionEdges`, where `Provenance` is
-    `signature | body | where | with | unknown`; older JSON without
-    it parses cleanly (consumer treats the absence as "every edge
-    is `unknown`"). `agda-deps` now emits this array on every
+    `signature | body | module-local | with | unknown` (the
+    `module-local` value was `where` before nodeKeyVersion 3 — see the
+    Edge-provenance gotcha); older JSON without it parses cleanly
+    (consumer treats the absence as "every edge is `unknown`"). `agda-deps` now emits this array on every
     expanded-mode output, so consumers can rely on its presence in
     fresh JSON; only legacy fixtures still hit the absence path.
     See `buildExpandedJson` for the emission, `AgdaDeps.Deps.tagOne`

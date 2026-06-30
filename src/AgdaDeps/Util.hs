@@ -18,6 +18,9 @@ module AgdaDeps.Util
     -- * List helpers
   , dedupOrd
 
+    -- * Qualified-name helpers
+  , liftAnonSegments
+
     -- * JSON helpers
   , jsString
 
@@ -27,7 +30,7 @@ module AgdaDeps.Util
   ) where
 
 import Data.Char ( isHexDigit )
-import Data.List ( isSuffixOf )
+import Data.List ( intercalate, isSuffixOf )
 import qualified Data.Set as Set
 import Data.Word ( Word8 )
 import Numeric ( readHex, showHex )
@@ -90,6 +93,31 @@ dedupOrd = go Set.empty
     go seen (x:xs)
       | Set.member x seen = go seen xs
       | otherwise         = x : go (Set.insert x seen) xs
+
+-- | Strip anonymous-module path segments (the ones 'prettyShow' renders
+-- as a bare @_@) from a dotted qualified name, lifting where-block and
+-- parameterised-section definitions into their nearest /named/ ancestor
+-- module. Agda desugars both @where@ blocks and @module _ (…) where@
+-- sections into anonymous internal sub-modules (@Parent._@, nested
+-- @Parent._._@), so this is what turns the internal name back into the
+-- module a reader thinks of as the owner:
+--
+--   * @"M._"@   ↦ @"M"@
+--   * @"M._._"@ ↦ @"M"@
+--   * @"M._.N"@ ↦ @"M.N"@
+--   * @"M.f"@   ↦ @"M.f"@   (no anonymous segment — unchanged)
+--   * @"M._+_"@ ↦ @"M._+_"@ (mixfix segment, not a bare @_@ — preserved)
+--
+-- Only whole dot-segments equal to @"_"@ are dropped, so mixfix names
+-- such as @_+_@ \/ @_⊔_@ survive untouched. Shared by 'AgdaDeps.Deps.nodeKey'
+-- (node identity) and 'AgdaDeps.Deps.moduleKey' (module attribution).
+liftAnonSegments :: String -> String
+liftAnonSegments = intercalate "." . filter (/= "_") . splitDots
+  where
+    splitDots :: String -> [String]
+    splitDots s = case break (== '.') s of
+      (seg, [])       -> [seg]
+      (seg, _ : rest) -> seg : splitDots rest
 
 -- | JSON-escape a Haskell 'String' and wrap it in double quotes. The
 -- escapes (including @<@ \/ @>@ \/ @&@) make the result safe inside

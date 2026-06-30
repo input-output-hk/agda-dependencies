@@ -156,8 +156,8 @@
     },
     "provenance": {
       "type": "string",
-      "enum": ["signature", "body", "where", "with", "unknown"],
-      "description": "How an edge was discovered: defType (signature), theDef body, where-helper, with-auxiliary, or unclassified."
+      "enum": ["signature", "body", "module-local", "with", "unknown"],
+      "description": "How an edge was discovered: defType (signature), theDef body, anonymous-module-local helper (where-block helper or parameterised-section member; does not imply ownership by this source), with-auxiliary, or unclassified."
     },
     "definition": {
       "type": "object",

@@ -20,13 +20,13 @@ import Data.GraphViz.Attributes.Colors ( Color(RGB), toWC )
 import Data.GraphViz.Attributes.Complete
   ( Attribute(FillColor, Style), StyleItem(SItem), StyleName(Filled) )
 
-import Agda.Syntax.Abstract.Name ( ModuleName, QName )
-import Agda.Syntax.Internal ( qnameName, qnameModule )
+import Agda.Syntax.Abstract.Name ( QName )
+import Agda.Syntax.Internal ( qnameName )
 import Agda.Syntax.Common.Pretty ( prettyShow )
 
 import Data.Graph.Inductive.Graph ( Node, UEdge )
 
-import AgdaDeps.Deps    ( ADDef(..), hashQName )
+import AgdaDeps.Deps    ( ADDef(..), hashQName, moduleKey )
 import AgdaDeps.Options ( ColorPalette, DefState(..), colorFor )
 import AgdaDeps.Util    ( parseHexColor )
 
@@ -47,8 +47,11 @@ dotLabelText :: DotLabel -> String
 dotLabelText (DotQ qn)             = prettyShow (qnameName qn)
 dotLabelText (DotFailedModule mod_) = mod_
 
-dotLabelModule :: DotLabel -> Maybe ModuleName
-dotLabelModule (DotQ qn)             = Just (qnameModule qn)
+-- | Cluster key: the lifted owning-module string ('moduleKey'), so
+-- anonymous @where@ \/ section sub-modules group under their named
+-- ancestor instead of forming phantom @Mod._@ clusters.
+dotLabelModule :: DotLabel -> Maybe String
+dotLabelModule (DotQ qn)             = Just (moduleKey qn)
 dotLabelModule (DotFailedModule _)   = Nothing
 
 -- | Stable, namespaced node IDs for failed-module synthetic nodes so
@@ -108,14 +111,14 @@ buildDotGraph palette stateMap failed defs =
       Hole      -> holeAttrs
       Failed    -> failedAttrs
 
-    graphVizParams :: GraphvizParams Node DotLabel () ModuleName DotLabel
+    graphVizParams :: GraphvizParams Node DotLabel () String DotLabel
     graphVizParams = defaultParams
       { fmtNode = \(_, l) -> toLabel (dotLabelText l) : stateAttrs l
       , clusterBy = \(n, l) -> case dotLabelModule l of
           Just m  -> C m (N (n, l))
           Nothing -> N (n, l)
-      , clusterID = Str . TL.pack . prettyShow
-      , fmtCluster = \mn -> [ GraphAttrs [toLabel $ prettyShow mn] ]
+      , clusterID = Str . TL.pack
+      , fmtCluster = \mn -> [ GraphAttrs [toLabel mn] ]
       }
 
     depGraph :: Gr DotLabel ()

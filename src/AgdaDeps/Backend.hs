@@ -88,7 +88,7 @@ import System.IO.Unsafe ( unsafePerformIO )
 
 import AgdaDeps.Deps
   ( ADDef(..), DefAccess(..)
-  , compileDefAD, collectAllQNames, nodeKey, hashQName
+  , compileDefAD, collectAllQNames, nodeKey, moduleKey, hashQName
   , resetIgnoredEdges, contractIgnoredEdges
   , resetMethodProviders, addInstanceMethodEdges
   , IgnoredEdgeMap, readIgnoredEdges, mergeIgnoredEdges
@@ -605,7 +605,7 @@ postCompileAD opts _ defMap = do
       moduleFileMap = M.fromListWith (\_old new -> new)
         [ (modName, p)
         | qn <- allQNames
-        , let modName = prettyShow (qnameModule qn)
+        , let modName = moduleKey qn
         , keep modName
         , Just (p, _line) <- [srcLocOf qn]
         ]
@@ -707,11 +707,11 @@ computeQNamePositions :: [QName] -> [ADDef] -> IO (Map QName Position)
 computeQNamePositions allQNames defs = do
   let moduleNamesSet :: S.Set String
       moduleNamesSet =
-        S.fromList [ prettyShow (qnameModule qn) | qn <- allQNames ]
+        S.fromList [ moduleKey qn | qn <- allQNames ]
       -- Ascending module order keeps the grid layout deterministic.
       moduleIx :: M.Map String Int
       moduleIx = M.fromList (zip (S.toAscList moduleNamesSet) [(0 :: Int)..])
-      moduleIdOf qn = M.findWithDefault 0 (prettyShow (qnameModule qn)) moduleIx
+      moduleIdOf qn = M.findWithDefault 0 (moduleKey qn) moduleIx
       nodesByMod = [ (hashQName qn, moduleIdOf qn) | qn <- allQNames ]
       qnameById :: IM.IntMap QName
       qnameById = IM.fromList (zip (map fst nodesByMod) allQNames)
@@ -900,7 +900,7 @@ classifyExternalModules qns precomputedMF endpointModules = do
       seedFromQNames = foldl' bumpQ M.empty qns
         where
           bumpQ !acc qn =
-            let !modName = prettyShow (qnameModule qn) :: String
+            let !modName = moduleKey qn :: String
                 !inRoot  = case srcLocOf qn of
                   Just (p, _) -> isUnderRoot p
                   Nothing     -> False
@@ -922,7 +922,7 @@ classifyExternalModules qns precomputedMF endpointModules = do
 -- invariant.
 dropExternalDefs :: Set String -> [ADDef] -> [ADDef]
 dropExternalDefs externals defs =
-  let isExt qn = S.member (prettyShow (qnameModule qn)) externals
+  let isExt qn = S.member (moduleKey qn) externals
   in [ d { _deps = S.filter (not . isExt) (_deps d)
          , _depsProv = M.filterWithKey (\qn _ -> not (isExt qn)) (_depsProv d)
          }
@@ -1003,7 +1003,7 @@ collectReExports :: Interface -> [(String, String, String)]
 collectReExports i =
   let hostMod  = prettyShow (iTopLevelModuleName i)
       thisModN = iModuleName i
-  in [ (hostMod, prettyShow (qnameModule qn), nodeKey qn)
+  in [ (hostMod, srcMod, nodeKey qn)
      | scope <- M.elems (iScope i)
      , ns <- [ ImportedNS, PublicNS ]
      , let nsBag = scopeNameSpace ns scope
@@ -1017,4 +1017,11 @@ collectReExports i =
      , let qn = anameName an
 #endif
      , qnameModule qn /= thisModN  -- skip own definitions
+       -- Source module, with anonymous (where/section) sub-modules lifted
+       -- to the named owner ('moduleKey') so the re-export points at the
+       -- definition site as a reader sees it.
+     , let srcMod = moduleKey qn
+       -- Lifting can collapse a host-owned section onto the host itself;
+       -- such an edge is not a re-export from elsewhere, so drop it.
+     , srcMod /= hostMod
      ]

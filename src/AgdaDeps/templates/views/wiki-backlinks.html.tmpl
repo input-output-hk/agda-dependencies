@@ -646,7 +646,9 @@ var modImportedBy = new Map(); // moduleIdx → Set<moduleIdx>
 var searchIndex = null;
 
 var showExt = true;
-var history = [], histIdx = -1;
+// 'navHistory' (not 'history'): a global 'var history' silently aliases the
+// read-only window.history, so '.slice'/'.push' on it throw.
+var navHistory = [], histIdx = -1;
 
 // snippet cache: modName → {hashKey: {source, sourceLine}}
 var snippetCache = Object.create(null);
@@ -994,9 +996,9 @@ function isExtMod(mi)  { return externalSet.has(mi); }
 function navigate(entry, push) {
   if (push === undefined) push = true;
   if (push) {
-    history = history.slice(0, histIdx + 1);
-    history.push(entry);
-    histIdx = history.length - 1;
+    navHistory = navHistory.slice(0, histIdx + 1);
+    navHistory.push(entry);
+    histIdx = navHistory.length - 1;
   }
   updateNavBtns();
   var page = document.getElementById('wb-page');
@@ -1010,14 +1012,14 @@ function navigate(entry, push) {
 
 function updateNavBtns() {
   document.getElementById('wb-back').disabled    = histIdx <= 0;
-  document.getElementById('wb-forward').disabled = histIdx >= history.length - 1;
+  document.getElementById('wb-forward').disabled = histIdx >= navHistory.length - 1;
 }
 
 document.getElementById('wb-back').onclick = function() {
-  if (histIdx > 0) { histIdx--; navigate(history[histIdx], false); }
+  if (histIdx > 0) { histIdx--; navigate(navHistory[histIdx], false); }
 };
 document.getElementById('wb-forward').onclick = function() {
-  if (histIdx < history.length - 1) { histIdx++; navigate(history[histIdx], false); }
+  if (histIdx < navHistory.length - 1) { histIdx++; navigate(navHistory[histIdx], false); }
 };
 
 document.addEventListener('keydown', function(e) {
@@ -1458,7 +1460,7 @@ document.addEventListener('click', function(e) {
 document.getElementById('wb-ext-toggle').onclick = function() {
   showExt = !showExt;
   document.getElementById('wb-toggle-sw').classList.toggle('on', showExt);
-  if (history[histIdx]) navigate(history[histIdx], false);
+  if (navHistory[histIdx]) navigate(navHistory[histIdx], false);
 };
 
 // ─── ERROR DISPLAY ───────────────────────────────────────────────────────────

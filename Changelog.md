@@ -7,6 +7,66 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-06-30 — `agda-deps` — fix: `wiki-backlinks` view back/forward navigation
+
+The `wiki-backlinks` view declared its navigation stack as a global
+`var history = []`. At global script scope that name aliases the
+read-only `window.history` property rather than creating a fresh
+binding, so the assignment was a no-op and `history` stayed the browser
+`History` object — the first `navigate(…, push)` then threw
+`history.slice is not a function`, breaking the view's back/forward
+navigation entirely (pre-existing; surfaced during the nodeKeyVersion 3
+HTML render audit, but independent of it — reproduces on any corpus).
+Renamed the stack to `navHistory`. Verified with a headless-Chrome
+render: 0 uncaught exceptions, the stack is a real array, and push/back
+update `histIdx` correctly. HTML-only change; JSON gates unaffected.
+
+## 2026-06-30 — `agda-deps` — lift anonymous-module definitions into their parent (nodeKeyVersion 3)
+
+Fixes the "anonymous-module blind spot": definitions inside `where`
+blocks and `module _ (…) where` sections produced false results in the
+*module-level* view and in edge provenance. Agda desugars both
+constructs into anonymous internal sub-modules (`Mod._`, nested
+`Mod._._`) and lifts the enclosing variables/parameters into each
+definition's `defType`, so the **dependency edges were already correct**
+— the defect was naming / attribution / provenance only. Before this
+change: phantom `Mod._` module nodes polluted the module DAG (with a
+false `Mod ⇄ Mod._` self-cycle), multiple unrelated sections collapsed
+onto one `Mod._` blob, node names read `Mod._.helper@15`, and every edge
+into such a def was mislabeled provenance `where` even for plain
+sibling/consumer calls.
+
+- **`nodeKey` lifts anonymous segments** (`Deps.hs` +
+  `Util.liftAnonSegments`): `Mod._.helper@15` ↦ `Mod.helper@15`,
+  `Mod._._.deep` ↦ `Mod.deep`. The `@<line>` disambiguator (E1) is
+  preserved; mixfix names (`_+_`, `_⊔_`) are untouched (only whole `_`
+  dot-segments are dropped). `nodeKeyVersion` bumped **2 → 3**.
+- **`moduleKey` re-homes module attribution** to the nearest *named*
+  ancestor. Every QName→module-string site now routes through it
+  (module DAG / pods / `moduleFiles` / externals classification /
+  `--exclude` matching / snippet+bundle manifests / DOT clusters), so
+  phantom `Mod._` nodes and their false cycles disappear and
+  set/index/membership stay coherent.
+- **Provenance `where` → `module-local`** (`EWhere` → `EModuleLocal`).
+  The tag honestly describes the *target* ("an anonymous-module-local
+  helper — `where`-block helper or section member") rather than falsely
+  claiming a source-ownership relation that is unrecoverable
+  post-scope-check. Packed/fragment int encoding unchanged (still `2`);
+  expanded wire string + schema enum updated.
+- Why not distinguish `where` from section? Post-scope-check they are
+  represented *identically* (`h` in a `where` and `amHelper` in a
+  `module _` both home to `Mod._`); the only separating signal would be
+  source-range containment, deferred as too fragile.
+
+Wire/schema: `schema/graph-v2-expanded.schema.json` provenance enum
+updated; cold golden regenerated; **gates green** — schema drift check,
+golden snapshot, packed-analytical parity (70 defs), incremental
+cold+warm reproduction. New regression `test/AnonSection.agda`
+(parameterised + nested sections) imported by `test/Test.agda`;
+`test/Collision.agda` continues to lock the `where` case. Consumer note:
+`agda-graph-explorer` reads `nodeKeyVersion` and the `module-local` tag —
+coordinate the bump there.
+
 ## 2026-06-18 — `agda-deps` — rebuild-memory reductions (GC growth factor, strict `ADDef` fields, drop a render-time `defMap` pin)
 
 Memory pass on the producer's rebuild path (follow-up to the G10 scaling

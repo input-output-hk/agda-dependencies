@@ -50,7 +50,6 @@ import Data.Set ( Set )
 import qualified Data.Set as S
 
 import Agda.Syntax.Abstract.Name ( QName )
-import Agda.Syntax.Internal ( qnameModule )
 import Agda.Syntax.Common.Pretty ( prettyShow )
 import Agda.Utils.Hash ( hashString )
 
@@ -61,7 +60,7 @@ import AgdaDeps.Csr
   )
 import AgdaDeps.Deps    ( ADDef(..), DefKind(..), DefAccess(..)
                         , EdgeProv(..)
-                        , nodeKey, nodeKeyVersion, hashQName, collectAllQNames )
+                        , nodeKey, moduleKey, nodeKeyVersion, hashQName, collectAllQNames )
 import BuildInfo        ( buildFingerprint )
 import AgdaDeps.Layout  ( Position(..) )
 import AgdaDeps.Options ( DefState(..) )
@@ -123,7 +122,7 @@ buildExternalsSummary externals defs =
               [shortNameOf (prettyShow (_name d))]
               acc
         where
-          !m     = prettyShow (qnameModule (_name d))
+          !m     = moduleKey (_name d)
           isExt  = S.member m externals
       !rawByMod = foldl' bumpDef M.empty defs
       -- Dedup + ascending-sort each list for deterministic wire order.
@@ -239,7 +238,7 @@ buildGraphJson GraphInput{..} =
       defNames     = map nodeKey defsList
 
       defModuleNames :: [String]
-      defModuleNames = map (prettyShow . qnameModule) defsList
+      defModuleNames = map moduleKey defsList
 
       -- (2) Module list -------------------------------------------------
       -- Union of def modules, import-edge endpoints, the entry module,
@@ -264,7 +263,7 @@ buildGraphJson GraphInput{..} =
       nModules = length modules
 
       moduleOf :: QName -> Int
-      moduleOf qn = case M.lookup (prettyShow (qnameModule qn)) moduleIndexMap of
+      moduleOf qn = case M.lookup (moduleKey qn) moduleIndexMap of
         Just i  -> i
         Nothing -> -1
 
@@ -349,11 +348,11 @@ buildGraphJson GraphInput{..} =
       -- byte array aligned to 'outTargets'. Encoding:
       --
       -- @
-      --   0 = signature  (ESignature)
-      --   1 = body       (EBody)
-      --   2 = where      (EWhere)
-      --   3 = with       (EWith)
-      --   4 = unknown    (EUnknown)
+      --   0 = signature    (ESignature)
+      --   1 = body         (EBody)
+      --   2 = module-local (EModuleLocal)
+      --   3 = with         (EWith)
+      --   4 = unknown      (EUnknown)
       -- @
       defProvByPair :: IM.IntMap (IM.IntMap Int8)
       defProvByPair = foldl' addDefEdges IM.empty giDefs
@@ -473,7 +472,7 @@ buildGraphJson GraphInput{..} =
             byMod = foldl' addQ M.empty (zip defsList defStates)
               where
                 addQ !acc (qn, !st) =
-                  let !m = prettyShow (qnameModule qn)
+                  let !m = moduleKey qn
                   in M.insertWith add4 m (bump zero st) acc
                 add4 (Counts a b c d) (Counts e f g h) =
                   Counts (a + e) (b + f) (c + g) (d + h)
@@ -985,11 +984,11 @@ mkDefDepths defs =
 -- | Wire encoding for 'EdgeProv' in the packed JSON form. See
 -- 'outTargetsProv' for the documented mapping.
 encodeEdgeProv :: EdgeProv -> Int8
-encodeEdgeProv ESignature = 0
-encodeEdgeProv EBody      = 1
-encodeEdgeProv EWhere     = 2
-encodeEdgeProv EWith      = 3
-encodeEdgeProv EUnknown   = 4
+encodeEdgeProv ESignature   = 0
+encodeEdgeProv EBody        = 1
+encodeEdgeProv EModuleLocal = 2
+encodeEdgeProv EWith        = 3
+encodeEdgeProv EUnknown     = 4
 
 -- ** File tree
 
@@ -1398,7 +1397,7 @@ toExpandedGraph GraphInput{..} =
       defAccess = mkDefAccess giDefs
       defSig    = mkDefSig    giDefs
 
-      defModuleOf  = map (prettyShow . qnameModule) defsList
+      defModuleOf  = map moduleKey defsList
 
       -- modules: same union as buildGraphJson so the two shapes agree.
       modulesSet :: S.Set String
@@ -1441,9 +1440,9 @@ toExpandedGraph GraphInput{..} =
         let leafEdges =
               [ (sMod, tMod)
               | d <- giDefs
-              , let sMod = prettyShow (qnameModule (_name d))
+              , let sMod = moduleKey (_name d)
               , t <- S.toAscList (_deps d)
-              , let tMod = prettyShow (qnameModule t)
+              , let tMod = moduleKey t
               , sMod /= tMod
               ]
             impEdges =
@@ -1468,7 +1467,7 @@ toExpandedGraph GraphInput{..} =
       mkWireDef qn = WireDef
         { wdId     = M.findWithDefault (-1) qn defIndexMap
         , wdName   = nodeKey qn
-        , wdModule = prettyShow (qnameModule qn)
+        , wdModule = moduleKey qn
         , wdState  = defState qn
         , wdKind   = defKind qn
         , wdLine   = defLine qn

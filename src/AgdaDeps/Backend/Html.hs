@@ -29,11 +29,9 @@ import Data.Word ( Word64 )
 import Data.FileEmbed ( embedStringFile )
 
 import Agda.Syntax.Abstract.Name ( QName )
-import Agda.Syntax.Internal ( qnameModule )
-import Agda.Syntax.Common.Pretty ( prettyShow )
 import Agda.Utils.Hash ( hashString )
 
-import AgdaDeps.Deps    ( ADDef(..), hashQName )
+import AgdaDeps.Deps    ( ADDef(..), hashQName, moduleKey )
 import AgdaDeps.Layout  ( Position )
 import AgdaDeps.Options ( ColorPalette(..), DefState(..), View(..) )
 import AgdaDeps.Source  ( Snippet(..) )
@@ -135,8 +133,9 @@ renderLazyHtml
   -> [ADDef]
   -> LazyOutput
 renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFile positions externalsSummary defs =
-  let -- Group snippets by their module ONCE — 'prettyShow (qnameModule)'
-      -- per snippet computed a single time. The old
+  let -- Group snippets by their module ONCE — 'moduleKey' (lifted owning
+      -- module) per snippet computed a single time, so the bundle manifest
+      -- keys match the graph.json module names. The old
       -- snippetModulesOf + per-module snippetsForModule pair re-scanned the
       -- whole snippet map for every module (O(modules × snippets)).
       -- 'foldr' over the ascending 'M.toAscList' with 'insertWith (++)'
@@ -144,7 +143,7 @@ renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap external
       -- old per-module filter exactly.
       snippetsByModule :: Map String [(QName, Snippet)]
       snippetsByModule =
-        foldr (\(qn, sn) -> M.insertWith (++) (prettyShow (qnameModule qn)) [(qn, sn)])
+        foldr (\(qn, sn) -> M.insertWith (++) (moduleKey qn) [(qn, sn)])
               M.empty (M.toAscList snippetMap)
       snippetModules = M.keys snippetsByModule
       gi = GraphInput
@@ -191,7 +190,7 @@ renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap external
 snippetModulesOf :: Map QName Snippet -> [String]
 snippetModulesOf snippetMap =
   S.toAscList . S.fromList $
-    [ prettyShow (qnameModule qn) | qn <- M.keys snippetMap ]
+    [ moduleKey qn | qn <- M.keys snippetMap ]
 
 -- | Serialise one module's snippets as a JSON object keyed by the
 -- node's 'hashQName'.
