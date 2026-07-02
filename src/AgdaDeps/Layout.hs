@@ -151,9 +151,7 @@ moduleGrouped nodes =
       -- Tile spacing between module centres.
       tileSpacing = 1000.0 :: Float
 
-      -- Group nodes back together by module; each value list ends up
-      -- in reverse-insertion order (each combined value is a singleton,
-      -- so '(++)' is exactly the old 'head new : old').
+      -- Group nodes back together by module.
       byMod :: IM.IntMap [Int]
       byMod = IM.fromListWith (++) [ (m, [nid]) | (nid, m) <- nodes ]
 

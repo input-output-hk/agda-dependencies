@@ -3,32 +3,26 @@
 -- | @--incremental@: a per-module fragment cache for the expensive
 -- per-definition backend walk.
 --
--- A /fragment/ is the value 'AgdaDeps.Backend.postModuleAD' returns
--- for one module — its final @[ADDef]@ /including/ the recovered
--- dead-private extras — plus the module's contributions to the two
--- compile-time side-channels ('IgnoredEdgeMap', 'MethodProviderMap'),
--- which a @Skip@ped module would otherwise never populate (its
--- @compileDef@ hooks don't run).
+-- A /fragment/ is the @[ADDef]@ 'AgdaDeps.Backend.postModuleAD' returns
+-- for one module (dead-private extras included) plus the module's slices
+-- of the two compile-time side-channels ('IgnoredEdgeMap',
+-- 'MethodProviderMap') — a @Skip@ped module's @compileDef@ hooks don't
+-- run, so the slices must be cached or its helper edges are lost.
 --
 -- Cache key: @(fragment format version, content-option fingerprint,
--- iFullHash, nodeKeyVersion)@. Agda's 'iFullHash' folds in the
--- transitive imported-interface hashes — the same mechanism that
--- decides @.agdai@ validity — so a fragment is invalidated exactly
--- when a dependency change can alter this module's elaborated defs.
+-- iFullHash, nodeKeyVersion)@. 'iFullHash' folds in the transitive
+-- imported-interface hashes (the @.agdai@ validity mechanism), so a
+-- fragment is invalidated exactly when a change can alter this module's
+-- elaborated defs.
 --
--- Fragments are only ever written from a /fresh/ type-check (see the
--- write-side gate in 'AgdaDeps.Backend.postModuleAD'): a warm
--- interface load exposes a dead-code-pruned signature and loses a few
--- edges, so caching the fresh fragment makes output cache-state
--- /independent/ rather than inheriting that non-determinism.
+-- Fragments are only written from a fresh type-check: a warm interface
+-- load exposes a dead-code-pruned signature and loses edges, so caching
+-- the fresh fragment keeps output cache-state independent.
 --
--- Serialisation rides Agda's own 'EmbPrj' machinery (the @.agdai@
--- encoder), so 'QName's — 'NameId's, binding-site ranges and all —
--- round-trip exactly; downstream TCM lookups ('getConstInfo') on
--- decoded names behave as if the defs had been compiled this run.
--- The byte-level layer ('Agda.Utils.Serialize') is only exposed by
--- Agda >= 2.9; on 2.8 the cache degrades to "always miss, never
--- write" ('fragmentCacheSupported').
+-- Serialisation rides Agda's 'EmbPrj' machinery so 'QName's round-trip
+-- with exact 'NameId's (required for downstream 'getConstInfo' lookups).
+-- The byte layer ('Agda.Utils.Serialize') is Agda >= 2.9 only; on 2.8
+-- the cache degrades to "always miss, never write".
 module AgdaDeps.FragmentCache
   ( fragmentCacheSupported
   , FragmentData(..)
@@ -66,9 +60,9 @@ import System.Directory ( createDirectoryIfMissing )
 import System.FilePath ( takeDirectory )
 
 import Agda.Syntax.Abstract.Name ( QName )
--- 'EmbPrj' lives in Serialise.Base (the umbrella module doesn't
--- re-export it in 2.9); 'encode' / 'decode' are the generic
--- hash-consing layer; 'serialize' / 'deserialize' the byte layer.
+-- 'EmbPrj' lives in Serialise.Base (not re-exported by the umbrella in
+-- 2.9); 'encode'/'decode' are the hash-consing layer, 'serialize'/
+-- 'deserialize' the byte layer.
 import Agda.TypeChecking.Serialise.Base ( EmbPrj )
 import qualified Agda.TypeChecking.Serialise as Ser
 import Agda.Utils.Serialize ( Serialize, serialize, deserialize )
@@ -92,11 +86,9 @@ data FragmentData = FragmentData
   }
 
 -- | Bump whenever the fragment payload shape (or the meaning of any
--- encoded field) changes.
---
---   * v1 — initial; side-channel slices were name-prefix filtered
---     (lost anonymous-module entries — do not honour).
---   * v2 — side-channel slices are exact before/after deltas.
+-- encoded field) changes. The side-channel slices must be exact
+-- before/after deltas, not name-prefix filters (a filter drops
+-- anonymous-module entries whose QNames no module name prefixes).
 fragmentFormatVersion :: Word64
 fragmentFormatVersion = 2
 
@@ -124,9 +116,6 @@ fragmentFileFor cacheDir modName =
     prefix = take 60 (map sanitise modName)
     sanitise c | c `elem` ("/\\:*?\"<>| " :: String) = '_'
                | otherwise                           = c
-    -- 'Numeric.showHex' is lowercase, has no leading zeros, and gives
-    -- "0" for 0 — identical to the old hand-rolled converter, so the
-    -- @.frag@ filenames are unchanged.
     hex :: Word64 -> String
     hex w = pad (showHex w "")
     pad s = replicate (16 - length s) '0' ++ s
@@ -161,17 +150,14 @@ gcFragments cacheDir liveModules = liftIO $ do
 
 #if MIN_VERSION_Agda(2,9,0)
 
--- Real implementation: Agda >= 2.9 exposes the byte-level
--- serialisation layer ('Agda.Utils.Serialize') and a generic
--- 'encode' to its hash-consed 'Encoded' form.
+-- Agda >= 2.9: real implementation via the byte-level serialisation
+-- layer ('Agda.Utils.Serialize') and generic 'encode'.
 
 #else
 
--- Agda 2.8: 'Agda.TypeChecking.Serialise' does not export a
--- byte-level path for arbitrary 'EmbPrj' values ('Encoded' is
--- abstract), so the cache degrades to a no-op: every lookup misses
--- and nothing is written. 'AgdaDeps.Backend' warns once when
--- @--incremental@ is requested on a 2.8 build.
+-- Agda 2.8: no byte-level path for arbitrary 'EmbPrj' values, so the
+-- cache is a no-op (every lookup misses, nothing is written).
+-- 'AgdaDeps.Backend' warns once when @--incremental@ is requested.
 
 #endif
 
@@ -217,9 +203,8 @@ readFragment path fingerprint fullHash = do
             _ -> pure Nothing
 
 writeFragment path fingerprint fullHash frag = do
-  -- 'encode' runs in TCM (a 'TCErr' is conceivable); the file write
-  -- can throw IO exceptions. Both degrade to a breadcrumb — a broken
-  -- cache write must never fail the build.
+  -- Both the TCM 'encode' and the file write can throw; both degrade to
+  -- a breadcrumb — a broken cache write must never fail the build.
   mBody <- (Just <$> encodeBytes (toWire frag))
              `catchError` \ _ -> pure Nothing
   ok <- case mBody of
@@ -256,11 +241,10 @@ tryDeserialize bs =
 
 -- ** EmbPrj-friendly wire form
 --
--- 'EmbPrj' ships instances for pairs/triples, lists, 'Maybe', 'Int',
--- 'Word64', 'Char' and 'QName', so the payload is expressed in those
--- and the enums ('DefState' / 'DefKind' / 'EdgeProv') become tagged
--- 'Int's. Decoding is total-with-Maybe: an out-of-range tag fails the
--- whole fragment (treated as a miss).
+-- Payload is expressed in the types 'EmbPrj' ships instances for
+-- (pairs/triples, lists, 'Maybe', 'Int', 'Word64', 'Char', 'QName');
+-- the enums become tagged 'Int's. An out-of-range tag fails the whole
+-- fragment (treated as a miss).
 
 type WireProv    = (QName, Int)
 type WireDef     =

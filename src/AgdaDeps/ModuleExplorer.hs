@@ -3,31 +3,24 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | Partial-compilation support: walks Agda's loaded-module table on
--- behalf of a backend.
+-- behalf of a backend to emit a partial graph rather than no output.
 --
--- 'partialBackendInteraction' replaces Agda's standard
--- 'Agda.Compiler.Backend.backendInteraction': it catches a failure
--- from @check mainFile@ — a 'TCErr' /or/ any other synchronous
--- exception ('Impossible', IO errors, …) — reports the failing
--- module's name via the @reportFailed@ callback, and drives each
--- backend's hooks manually over whatever modules Agda did load. The
--- result is a partial dependency graph rather than no output.
+-- 'partialBackendInteraction' replaces 'backendInteraction': it catches
+-- a failure from @check mainFile@ (a 'TCErr' or any other synchronous
+-- exception), reports the failing module via @reportFailed@, and drives
+-- each backend's hooks over whatever modules Agda did load.
 --
--- 'partialCompilerMain' re-seeds @stVisitedModules@ from the
--- persistent @stDecodedModules@ and re-merges each decoded
--- interface's import state ('mergeIfaceState'), then runs
--- @preModule@ \/ @compileDef@ \/ @postModule@ per module and hands
--- the results to @postCompile@.
+-- 'partialCompilerMain' re-seeds @stVisitedModules@ from
+-- @stDecodedModules@, re-merges each decoded interface's import state
+-- ('mergeIfaceState'), then runs @preModule@ \/ @compileDef@ \/
+-- @postModule@ per module and hands the results to @postCompile@.
 --
--- Every stage is guarded ('catchAllTCM'): a single broken definition
--- drops that definition, a broken module drops that module, a broken
--- interface merge drops that interface's extras — and @postCompile@
--- runs regardless, so a graph is always emitted. Stages that cannot
--- be skipped print a diagnostic naming the stage before re-throwing,
--- so an abort is never a bare exit code.
+-- Every stage is guarded ('catchAllTCM'): a broken definition/module/
+-- interface-merge is dropped and @postCompile@ runs regardless, so a
+-- graph is always emitted. Unskippable stages print a diagnostic before
+-- re-throwing, so an abort is never a bare exit code.
 --
--- The module knows nothing about argv, options, or @agda-deps@ itself;
--- its only side effect is the @reportFailed@ callback.
+-- The module's only side effect is the @reportFailed@ callback.
 module AgdaDeps.ModuleExplorer
   ( -- * Driver entry point
     runPartial
@@ -50,8 +43,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe ( catMaybes, fromMaybe )
 import qualified Agda.Utils.Maybe.Strict as SM
 #if MIN_VERSION_Agda(2,9,0)
--- Brings the strict-pair constructor (':!:') used to destructure
--- @stCurrentModule@; Agda 2.8 stores a lazy @Maybe (_, _)@ instead.
+-- Strict-pair (':!:') to destructure @stCurrentModule@; 2.8 uses a lazy @Maybe@.
 import Agda.Utils.Tuple.Strict ( Pair(..) )
 #endif
 
@@ -164,19 +156,15 @@ runPartial reportFailed backends = do
 
 -- | Catch-everything guard for the best-effort partial pass.
 --
--- TCM's 'catchError' only catches 'TCErr'. Agda internals can also
--- throw GHC exceptions — most notably 'Agda.Utils.Impossible'
--- (@__IMPOSSIBLE__@, surfacing as a bare exit 120): e.g. reification
--- under @--with-signatures@ hits @infallibleSortKit@'s
--- @fromMaybe __IMPOSSIBLE__@ when the builtin bindings are missing.
--- This helper catches both classes (a 'TCErr' is itself thrown as a
--- GHC exception), re-throwing only 'ExitCode' and asynchronous
--- exceptions.
+-- Do not simplify back to 'catchError': that only catches 'TCErr', but
+-- Agda internals also throw GHC exceptions (e.g. @__IMPOSSIBLE__@, exit
+-- 120). This catches both (a 'TCErr' is itself a GHC exception),
+-- re-throwing only 'ExitCode' and asynchronous exceptions.
 --
--- Unlike TCM's 'catchError', the state is NOT rolled back: the
--- handler continues from whatever state the failed action left
--- behind, which is what a skip-and-continue driver wants (the next
--- module's 'setInterface' re-establishes the per-module state).
+-- Unlike 'catchError', the state is NOT rolled back: the handler
+-- continues from wherever the failed action left off, which is what a
+-- skip-and-continue driver wants (the next module's 'setInterface'
+-- re-establishes the per-module state).
 catchAllTCM :: TCM a -> (E.SomeException -> TCM a) -> TCM a
 catchAllTCM m h = TCM $ \ r e ->
   unTCM m r e `E.catches`
@@ -220,12 +208,10 @@ partialBackendInteraction
   -> AbsolutePath -> [Backend]
   -> TCM () -> (AbsolutePath -> TCM ACB.CheckResult) -> TCM ()
 partialBackendInteraction reportFailed mainFile backends setup check = do
-  -- Wrap both 'setup' and 'check mainFile' so that library / pragma /
-  -- option errors firing before 'check mainFile' starts are caught
-  -- too. 'catchError' handles 'TCErr' (and rolls the TCState back —
-  -- see 'mergeIfaceState'); 'catchAllTCM' picks up everything else
-  -- ('Impossible' & co.), which previously aborted the process with a
-  -- bare exit 120 and no output.
+  -- Wrap both 'setup' and 'check mainFile' so library / pragma / option
+  -- errors firing before 'check mainFile' starts are caught too.
+  -- 'catchError' handles 'TCErr' (and rolls the TCState back — see
+  -- 'mergeIfaceState'); 'catchAllTCM' picks up everything else.
   let guarded :: TCM a -> TCM (Either () a)
       guarded act =
         ((Right <$> act)
@@ -309,13 +295,10 @@ moduleFromRange err =
 
 -- | Like 'ACB.compilerMain' but doesn't require a 'CheckResult'.
 --
--- Walks every loaded interface and calls the backend's per-module
--- hooks ('preModule' → 'compileDef' → 'postModule') in turn. Each
--- definition, each module, and each interface merge is wrapped in
--- 'catchAllTCM', so a single broken piece is skipped (with a stderr
--- breadcrumb) rather than aborting the rest of the partial pass —
--- 'postCompile' runs and writes output no matter how much def-level
--- recovery succeeded.
+-- Walks every loaded interface and runs the backend's per-module hooks
+-- ('preModule' → 'compileDef' → 'postModule'). Each definition, module,
+-- and interface merge is 'catchAllTCM'-guarded, so a broken piece is
+-- skipped rather than aborting the pass — 'postCompile' always runs.
 partialCompilerMain
   :: Backend' opts env menv mod def -> IsMain -> TCM ()
 partialCompilerMain backend isMain =
@@ -323,16 +306,13 @@ partialCompilerMain backend isMain =
     decoded <- getDecodedModules
     let mis    = Map.elems decoded
         ifaces = map miInterface mis
-    -- Seed stVisitedModules from the persistent stDecodedModules, which
-    -- the backend's 'postCompile' hook reads to derive module-level
-    -- import edges.
+    -- Seed stVisitedModules from stDecodedModules; 'postCompile' reads it
+    -- to derive module-level import edges.
     bestEffort "re-seeding visited modules" () $
       mapM_ visitModule mis
-    -- Rebuild the import state (the normal pipeline builds it
-    -- incrementally per import; the rollback wiped it), and clear
-    -- 'stSignature' so a qname present in both the stale current
-    -- signature and the merged imports does not trip Agda's
-    -- ambiguous-name check.
+    -- Rebuild the rollback-wiped import state, and clear 'stSignature' so
+    -- a qname present in both the stale current signature and the merged
+    -- imports doesn't trip Agda's ambiguous-name check.
     setTCLens' stSignature emptySignature
     forM_ ifaces $ \ iface ->
       bestEffort
@@ -350,13 +330,11 @@ partialCompilerMain backend isMain =
   where
     perModule env acc iface = do
       let tlmn = iTopLevelModuleName iface
-      -- Per-module hooks run with NotMain: the partial pass walks
-      -- decoded interfaces with no way to tell which (if any) is the
-      -- requested entry point — the entry module's own check usually
-      -- never finished. Passing the global flag here made every
-      -- module claim IsMain, so the backend's entry-module capture
-      -- recorded whichever module happened to be processed last.
-      -- Better an absent entryModule than a wrong one.
+      -- Always NotMain: the pass can't tell which decoded interface is
+      -- the entry point (its check usually never finished). Passing the
+      -- global flag would make every module claim IsMain, so entry-module
+      -- capture records the last one processed — an absent entryModule is
+      -- better than a wrong one.
       mRes <- (Just <$> compileOneModule backend env NotMain iface)
                 `catchAllTCM` \ ex -> do
                   reportSkippedModule tlmn (exceptionLine ex)
@@ -367,24 +345,20 @@ partialCompilerMain backend isMain =
 
 -- | Re-create what importing a module normally adds to the TCM state.
 --
--- TCM's 'catchError' instance rolls the /entire/ 'TCState' back to its
--- pre-@check@ snapshot (only the persistent part — @stDecodedModules@ —
--- survives), so the partial pass must rebuild the import state from
--- the decoded interfaces. The signature alone is NOT enough:
--- reification under @--with-signatures@ needs the builtin bindings
--- (@infallibleSortKit@ dies with @__IMPOSSIBLE__@ \/ exit 120 without
--- them), @prettyTCM@ consults display forms and pattern synonyms, and
--- hole classification reads the remote meta store. Mirrors the
--- non-exported @Agda.Interaction.Imports.mergeInterface@ \/
--- @addImportedThings@, minus the duplicate-builtin check (existing
--- entries win) and the confluence re-check.
+-- 'catchError' rolls the whole 'TCState' back (only @stDecodedModules@
+-- survives), so we rebuild the import state from the decoded interfaces.
+-- The signature alone is NOT enough: builtin bindings (else
+-- @infallibleSortKit@ dies with @__IMPOSSIBLE__@ under
+-- @--with-signatures@), display forms + pattern synonyms (for
+-- @prettyTCM@), and the remote meta store (for hole classification) all
+-- matter. Mirrors the non-exported @mergeInterface@ \/
+-- @addImportedThings@, minus the duplicate-builtin and confluence checks.
 mergeIfaceState :: Interface -> TCM ()
 mergeIfaceState iface = do
   mergeIfaceSig iface
-  -- 'iBuiltin' stores 'Prim' entries as (PrimitiveId, QName);
-  -- 'stImportedBuiltins' wants the looked-up 'PrimFun' (with the
-  -- name rebound to the interface's QName), exactly as Agda's
-  -- 'mergeInterface' rebinds them.
+  -- 'iBuiltin' stores 'Prim' as (PrimitiveId, QName); 'stImportedBuiltins'
+  -- wants the looked-up 'PrimFun' with the name rebound to the interface's
+  -- QName, as 'mergeInterface' does.
   let (prims, plain) = partitionEithers
         [ case b of
             Prim x                     -> Left x
@@ -397,11 +371,9 @@ mergeIfaceState iface = do
   modifyTCLens' stPatternSynImports   (`Map.union` iPatternSyns iface)
   modifyTCLens' stImportedDisplayForms $ \ imp ->
     HMap.unionWith (<>) imp (iDisplayForms iface)
-  -- Each rebind individually guarded: 'lookupPrimitiveFunction' can
-  -- throw for primitives gated behind a language option that isn't
-  -- active outside the defining module's pragmas (e.g.
-  -- NeedOptionCubical for Agda.Primitive.Cubical's prims). Routine,
-  -- so the breadcrumb goes to the info channel, not stderr.
+  -- Each rebind guarded: 'lookupPrimitiveFunction' can throw for prims
+  -- gated behind a language option inactive outside the defining module's
+  -- pragmas (e.g. NeedOptionCubical). Routine, so breadcrumb to info.
   forM_ prims $ \ (x, q) ->
     ( do PrimImpl _ pf <- lookupPrimitiveFunction x
          modifyTCLens' stImportedBuiltins $
@@ -428,14 +400,11 @@ reportSkippedModule tlmn reason =
 
 -- | Per-module driver: replicates 'Agda.Compiler.Backend.compileModule'
 -- without the 'inCompilerEnv' wrapper (its output-dir \/ scope setup is
--- unneeded for a backend that emits no compiled artifacts).
--- 'setInterface' establishes 'stCurrentModule', merges the module's
--- pragma options, and re-seeds 'stImportedModules' so 'preModule' hooks
--- reading 'curIF' see the right interface.
---
--- Each definition is individually guarded: one definition whose
--- compilation throws (e.g. a reification \'__IMPOSSIBLE__\') is
--- dropped with a breadcrumb instead of losing the whole module.
+-- unneeded for a backend emitting no artifacts). 'setInterface'
+-- establishes 'stCurrentModule', merges pragma options, and re-seeds
+-- 'stImportedModules' so 'preModule' hooks reading 'curIF' see the right
+-- interface. Each definition is individually guarded, so one that throws
+-- is dropped with a breadcrumb instead of losing the whole module.
 compileOneModule
   :: Backend' opts env menv mod def
   -> env -> IsMain -> Interface -> TCM mod

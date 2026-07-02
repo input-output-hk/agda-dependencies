@@ -1,8 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
--- | v2 graph.json schema emitter — single source of truth for the
--- wire shape.
+-- | v2 graph.json schema emitter.
 --
 -- 'buildGraphJson' emits the packed form (CSR adjacency, base64 typed
 -- arrays) consumed by the HTML viewer; 'buildExpandedJson' emits the
@@ -10,9 +9,6 @@
 -- produces the per-module detail files for lazy mode. The lazy-ingest
 -- filename scheme ('moduleDetailFilename', 'snippetBundleFilename') is
 -- shared with "AgdaDeps.Backend.Html".
---
--- See @CLAUDE.md@'s "v2 graph.json schema" section for the full
--- field-by-field documentation.
 module AgdaDeps.Backend.GraphJson
   ( -- * Inputs gathered from the backend
     GraphInput(..)
@@ -79,11 +75,9 @@ data EmitMode
 data Counts = Counts !Int !Int !Int !Int
 
 -- | Diagnostic summary of the external modules that @--no-externals@
--- stripped from the graph.
---
--- Emitted at the top level as @externals_summary@ only when the
--- producer was run with @--no-externals@; absent otherwise. Carried by
--- both @packed@ and @expanded@ JSON modes.
+-- stripped from the graph. Emitted at the top level as
+-- @externals_summary@ only under @--no-externals@; carried by both
+-- @packed@ and @expanded@ modes.
 --
 -- JSON shape:
 --
@@ -104,11 +98,8 @@ instance NFData ExternalsSummary where
   rnf (ExternalsSummary ms pm) = rnf ms `seq` rnf pm
 
 -- | Build the externals summary from the def list and the classified
--- external module set. One strict 'Map' fold over 'giDefs', keyed by
--- 'qnameModule'. Unqualified postulate names are 'shortNameOf'.
---
--- Called from 'postCompileAD' before 'dropExternalDefs', while the
--- postulate defs are still in scope.
+-- external module set. Called from 'postCompileAD' before
+-- 'dropExternalDefs', while the postulate defs are still in scope.
 buildExternalsSummary :: Set String -> [ADDef] -> ExternalsSummary
 buildExternalsSummary externals defs =
   let -- Per external module, accumulate the postulate short-names.
@@ -138,12 +129,9 @@ buildExternalsSummary externals defs =
       (revLast, "")        -> reverse revLast
       (revLast, _revDotty) -> reverse revLast
 
--- | JSON for 'ExternalsSummary'. Snake-case keys ('modules',
--- 'postulates_by_module'). Used by the packed / @--lazy@ @graph.json@;
--- the expanded path emits the same shape via
--- @AgdaDeps.Backend.Wire.externalsSummaryFields@, so keep the two byte-
--- coherent if this shape ever changes (until the lazy path also routes
--- through Wire).
+-- | JSON for 'ExternalsSummary' (packed / @--lazy@ path). The expanded
+-- path emits the same shape via @AgdaDeps.Backend.Wire@ — keep the two
+-- byte-coherent if this shape changes.
 externalsSummaryJson :: ExternalsSummary -> String
 externalsSummaryJson (ExternalsSummary mods byMod) =
   "{\"modules\":" ++ stringArrayJson (S.toAscList mods)
@@ -186,9 +174,8 @@ data GraphInput = GraphInput
   , giPackedAnalytical :: !Bool
     -- ^ @--packed-analytical@: augment the packed @defs@ object with the
     -- per-definition analytical arrays (kind / line / access / type /
-    -- subterm hashes) so the compact form carries everything the
-    -- expanded form does. Only consulted on the packed (non-lazy) path;
-    -- 'False' leaves packed output byte-identical to before.
+    -- subterm hashes). Packed (non-lazy) path only; 'False' leaves
+    -- packed output byte-identical.
   }
 
 -- | Output of the v2 emitter, ready for the backend to write to disk.
@@ -200,11 +187,10 @@ data GraphJsonOutput = GraphJsonOutput
 
 -- | One per-module detail file in lazy mode.
 --
--- 'mdjEpoch' is a content fingerprint of the file, computed /cheaply/
--- from the structured inputs (no base64, no JSON assembly) so the
--- incremental-serialise path can decide whether to rewrite the file
--- without forcing the (lazy) 'mdjContent' thunk. It is strict; the
--- content thunk stays lazy so a skipped file never renders.
+-- 'mdjEpoch' is a cheap content fingerprint (no base64, no JSON
+-- assembly) so the incremental-serialise path can skip rewriting a file
+-- without forcing the lazy 'mdjContent' thunk. Keep it strict and the
+-- content thunk lazy so a skipped file never renders.
 data ModuleDetailJson = ModuleDetailJson
   { mdjModuleName :: String
   , mdjFileName   :: FilePath
@@ -226,8 +212,8 @@ buildGraphJson GraphInput{..} =
       defsList :: [QName]
       defsList = sortOn hashQName allQNames
 
-      -- Edge endpoints index by canonical 'nodeKey' string (so deps
-      -- resolve by the same key the consumer uses, not by 'QName' 'Ord').
+      -- Edge endpoints index by canonical 'nodeKey' string, not 'QName'
+      -- 'Ord' (which distinguishes same-key helpers and re-drops edges).
       defKeyIndexMap :: M.Map String Int
       defKeyIndexMap = M.fromList (zip (map nodeKey defsList) [0..])
 
@@ -345,15 +331,7 @@ buildGraphJson GraphInput{..} =
       (inOffsets,  inTargets)  = reverseCsr nDefs adjList
 
       -- Per-edge provenance, keyed @(srcGi, tgtGi) -> Int8@, for the
-      -- byte array aligned to 'outTargets'. Encoding:
-      --
-      -- @
-      --   0 = signature    (ESignature)
-      --   1 = body         (EBody)
-      --   2 = module-local (EModuleLocal)
-      --   3 = with         (EWith)
-      --   4 = unknown      (EUnknown)
-      -- @
+      -- byte array aligned to 'outTargets'. Byte encoding: 'encodeEdgeProv'.
       defProvByPair :: IM.IntMap (IM.IntMap Int8)
       defProvByPair = foldl' addDefEdges IM.empty giDefs
         where
@@ -371,10 +349,9 @@ buildGraphJson GraphInput{..} =
                    then acc
                    else IM.insert srcGi inner acc
 
-      -- Per-edge provenance bytes aligned to 'outTargets'. Streams
-      -- through 'outTargets' once, recovering each source bucket from
-      -- the per-source bucket-size list and emitting the provenance
-      -- byte per (srcGi, tgtGi) pair; 'EUnknown' (4) for any miss.
+      -- Per-edge provenance bytes aligned to 'outTargets'. One pass over
+      -- 'outTargets', recovering each source bucket from the bucket-size
+      -- list; 'EUnknown' for any miss.
       outTargetsProv :: [Int8]
       outTargetsProv = goBucket 0 bucketSizes outTargets
         where
@@ -403,10 +380,9 @@ buildGraphJson GraphInput{..} =
                 (here, after) = go sz [] tgts
             in here ++ goBucket (srcGi + 1) szs after
 
-      -- Skip the def-level transitive reduction above this size
-      -- threshold (it's O(V·(V+E))). The JS viewer treats an empty
-      -- 'transitiveEdges' array as "no reduction precomputed" and shows
-      -- every edge.
+      -- Skip the def-level transitive reduction (O(V·(V+E))) above this
+      -- size. The JS viewer treats an empty 'transitiveEdges' array as
+      -- "no reduction precomputed" and shows every edge.
       defTransitiveThreshold :: Int
       defTransitiveThreshold = 3000
 
@@ -622,28 +598,21 @@ buildGraphJson GraphInput{..} =
 
 -- ** Per-module detail emission
 
--- | Build per-module detail JSON files for lazy mode. Emits one
--- 'ModuleDetailJson' per /real/ module (at least one kept def in
--- 'defsList') plus a /placeholder/ detail file for every module
--- declared in 'moduleFiles' with no kept defs (so lazy-mode fetches
--- don't 404).
+-- | Build per-module detail JSON files for lazy mode. One
+-- 'ModuleDetailJson' per /real/ module (>=1 kept def) plus a
+-- /placeholder/ file for every module with no kept defs (so lazy-mode
+-- fetches don't 404).
 --
--- The placeholder shape matches a normal detail file but additionally
--- carries:
+-- A placeholder matches a normal detail file plus:
 --
 -- * @"placeholder": true@ — discriminator the consumer JS reads.
 -- * @"module": "<name>"@ — for display.
--- * @"reason": "external" | "failed" | "filtered"@ — why the module
---   has no kept defs:
---     - @"external"@: module sits outside the project root (in
---       'externalMods').
---     - @"failed"@:   module's type-check raised @TCErr@ under
---       @--keep-going@ ('failedMods').
---     - @"filtered"@: module is inside the project but every def was
---       dropped by 'ignoreDef' / privacy filtering.
--- * @"externalPostulates": [\"true\",\"false\",…]@ — for
---   @"external"@ modules that 'ExternalsSummary' tagged. Absent
---   otherwise.
+-- * @"reason": "external" | "failed" | "filtered"@ — why no kept defs:
+--   external = outside the project root; failed = type-check raised
+--   @TCErr@ under @--keep-going@; filtered = every def dropped by
+--   'ignoreDef' / privacy filtering.
+-- * @"externalPostulates": […]@ — for @"external"@ modules that
+--   'ExternalsSummary' tagged. Absent otherwise.
 buildModuleDetails
   :: [QName]
   -> (QName -> Int)
@@ -691,9 +660,9 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
         Just qn -> moduleOfQ qn
         Nothing -> -1
 
-      -- The structured inputs to a real module's detail file. Shared by
-      -- the content renderer and the (cheap) epoch, so the epoch is a
-      -- faithful fingerprint of exactly what gets written.
+      -- Structured inputs to a real module's detail file, shared by the
+      -- content renderer and the cheap epoch so the epoch fingerprints
+      -- exactly what gets written.
       realInputs :: [Int] -> ([String], [Int8], [Float], [Float], [(Int, Int, Int)])
       realInputs giList =
         let sortedGis = sort giList
@@ -715,11 +684,9 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
         ++ ",\"outEdges\":" ++ outEdgesJson outEs
         ++ "}"
 
-      -- Cheap content fingerprint of a real module's detail file: hashes
-      -- the structured inputs (no base64, no JSON assembly), so the
-      -- incremental-serialise path can decide whether to rewrite without
-      -- forcing the content thunk. Separators keep distinct field
-      -- contents from colliding.
+      -- Cheap content fingerprint of a real module's detail file (hashes
+      -- the structured inputs, no base64/JSON assembly). Separators keep
+      -- distinct field contents from colliding.
       realEpoch :: ([String], [Int8], [Float], [Float], [(Int, Int, Int)]) -> Word64
       realEpoch (names, stsM, xsM, ysM, outEs) =
         hashString $ concat
@@ -793,9 +760,8 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
 -- ** JSON shape helpers
 
 -- | The packed @defs@ object. @analytical@ is the optional
--- @--packed-analytical@ suffix (the kind\/line\/access\/type\/subterm
--- arrays), spliced before the closing brace; @""@ for the default
--- (byte-identical) form.
+-- @--packed-analytical@ suffix, spliced before the closing brace; @""@
+-- for the default (byte-identical) form.
 defsObjectJson :: [String] -> [Int32] -> [Int8] -> [Float] -> [Float] -> String -> String
 defsObjectJson names mods states xs ys analytical =
   "{\"names\":"      ++ stringArrayJson names
@@ -809,10 +775,10 @@ defsObjectJson names mods states xs ys analytical =
 -- | The @--packed-analytical@ @defs@ suffix: per-definition kind / line
 -- / access arrays (always), the type array (under @--with-signatures@),
 -- and the CSR-packed subterm hashes\/depths (under @--with-term-hashes@).
--- Keyed by QName over @defsList@ via the shared 'mkDef*' lookups, so it
--- agrees with the expanded form node-for-node. @types@ uses @null@ and
--- @access@ uses @0@ for QNames with no local 'ADDef', matching the
--- expanded form's omission of those keys.
+-- Keyed by QName over @defsList@ via the shared 'mkDef*' lookups so it
+-- agrees with the expanded form node-for-node; @types@=@null@ /
+-- @access@=@0@ for QNames with no local 'ADDef' match expanded's
+-- omission of those keys.
 packedAnalyticalJson :: [QName] -> [ADDef] -> String
 packedAnalyticalJson defsList defs =
   ",\"kinds\":"  ++ jsB64Int8  kinds
@@ -913,9 +879,9 @@ encodeDefState Hole      = 2
 encodeDefState Failed    = 3
 
 -- | Wire encoding for 'DefKind' in the packed-analytical @defs.kinds@
--- array. Mirrors 'AgdaDeps.Backend.Wire.wireKind''s string ordering
--- (and 'AgdaDeps.FragmentCache''s @kindToInt@): the consumer maps the
--- byte back to the same @kind@ string the expanded form emits.
+-- array. Must mirror 'AgdaDeps.Backend.Wire.wireKind''s string ordering
+-- so the consumer maps the byte back to the same @kind@ the expanded
+-- form emits.
 encodeDefKind :: DefKind -> Int8
 encodeDefKind DKFunction    = 0
 encodeDefKind DKProjection  = 1
@@ -926,13 +892,10 @@ encodeDefKind DKPostulate   = 5
 encodeDefKind DKPrimitive   = 6
 encodeDefKind DKOther       = 7
 
--- | Wire encoding for @defs.access@ in the packed-analytical form.
--- Three-valued, because the expanded form *omits* @access@ for QNames
--- not backed by a local 'ADDef' (external / dependency-only targets);
--- @0@ round-trips to that omission so a decoded packed-analytical graph
--- matches expanded node-for-node.
---
--- @0 = unknown\/absent, 1 = public, 2 = private@.
+-- | Wire encoding for @defs.access@. MUST stay 3-valued
+-- (0 unknown\/absent, 1 public, 2 private): @0@ round-trips to
+-- expanded's omission of @access@ for QNames with no local 'ADDef', so
+-- external nodes match node-for-node.
 encodeDefAccess :: Maybe DefAccess -> Int8
 encodeDefAccess Nothing          = 0
 encodeDefAccess (Just AccPublic) = 1
@@ -940,12 +903,10 @@ encodeDefAccess (Just AccPrivate) = 2
 
 -- ** Per-QName analytical lookups (shared by packed-analytical + expanded)
 --
--- Both the expanded form ('toExpandedGraph') and the packed-analytical
--- arrays ('buildGraphJson') key these by 'QName' over the same
--- @defsList@, so a QName with no local 'ADDef' (an external /
--- dependency-only target) gets the same default in both — which is what
--- makes a decoded packed-analytical graph node-for-node identical to the
--- expanded one. Single source of truth: do not inline these back.
+-- Both forms key these by 'QName' over the same @defsList@, so a QName
+-- with no local 'ADDef' gets the same default in both — this is what
+-- keeps packed-analytical node-for-node identical to expanded. Do not
+-- inline these back per-form.
 
 -- | Structural kind by QName; 'DKOther' for QNames with no 'ADDef'.
 mkDefKind :: [ADDef] -> (QName -> DefKind)
@@ -981,8 +942,7 @@ mkDefDepths :: [ADDef] -> M.Map QName [Int]
 mkDefDepths defs =
   M.fromList [ (_name d, ds) | d <- defs, Just ds <- [_subtermDepths d] ]
 
--- | Wire encoding for 'EdgeProv' in the packed JSON form. See
--- 'outTargetsProv' for the documented mapping.
+-- | Wire encoding for 'EdgeProv' in the packed JSON form.
 encodeEdgeProv :: EdgeProv -> Int8
 encodeEdgeProv ESignature   = 0
 encodeEdgeProv EBody        = 1
@@ -1347,18 +1307,14 @@ kahnRanks nMods adjOut inDeg0 =
 -- ** Expanded JSON shape
 
 -- The expanded JSON object: arrays of records keyed by qname /
--- module-name, no base64-encoded typed arrays, no CSR adjacency.
--- Directly readable with @JSON.parse@, at a size cost versus the packed
--- form on large projects. The exact field set and shape are defined once
--- in "AgdaDeps.Backend.Wire" ('expandedFields' + the @$defs@), which
--- also generates the JSON Schema (@agda-deps --emit-schema@, CI-checked
--- against @schema/graph-v2-expanded.schema.json@); this module only
--- assembles the typed 'ExpandedGraph' value ('toExpandedGraph').
+-- module-name, no base64 typed arrays, no CSR adjacency. The field set
+-- and shape are defined once in "AgdaDeps.Backend.Wire" (which also
+-- generates the JSON Schema); this module only assembles the typed
+-- 'ExpandedGraph' value ('toExpandedGraph').
 
 -- | Validate-then-encode the expanded graph. Aborts on a wire-shape
--- invariant violation ('validateExpanded') rather than shipping a
--- malformed graph; the invariants hold by construction, so this is a
--- regression assertion.
+-- invariant violation ('validateExpanded') — a regression assertion,
+-- since the invariants hold by construction.
 buildExpandedJson :: GraphInput -> String
 buildExpandedJson gi =
   case validateExpanded eg of
@@ -1481,12 +1437,9 @@ toExpandedGraph GraphInput{..} =
       toWireExternals (ExternalsSummary mods byMod) =
         WireExternals (S.toAscList mods) (M.toAscList byMod)
 
-      -- @"definitionSubtermHashes"@ and the parallel
-      -- @"definitionSubtermDepths"@, both arrays parallel to
-      -- @"definitions"@. Each entry is the @[Word64]@ / @[Int]@ for
-      -- that def's walked subterms. Both absent when no def carries the
-      -- field (producer not run with @--with-term-hashes@). Emitted
-      -- per-defsList qname via rebuilt lookup maps.
+      -- @"definitionSubtermHashes"@ / @"definitionSubtermDepths"@:
+      -- arrays parallel to @"definitions"@, one @[Word64]@ / @[Int]@ per
+      -- def's walked subterms. Both absent under no @--with-term-hashes@.
       defHashesByQ :: M.Map QName [Word64]
       defHashesByQ = mkDefHashes giDefs
 

@@ -164,9 +164,8 @@ resolveAgainst base p
 -- ** Registry
 
 -- | Map from library name to its parsed @.agda-lib@ file. Caching the
--- parsed 'LibFile' (not just its path) lets 'resolveClosure' read each
--- dependency's @depend:@/@include:@ lists from the copy already parsed
--- during registry load, instead of re-opening and re-parsing the file.
+-- parsed 'LibFile' lets 'resolveClosure' read each dependency's
+-- @depend:@/@include:@ lists without re-parsing the file.
 type Registry = Map.Map String LibFile
 
 loadRegistry :: IO Registry
@@ -244,8 +243,7 @@ resolveClosure registry root =
               "agda-deps: --resolve-deps: dependency '" ++ dep
               ++ "' not in registry; skipping."
             go (Set.insert dep seen) rest
-          -- The 'LibFile' was parsed (and the path validated) during
-          -- registry load, so read its deps/includes from the cache.
+          -- Read deps/includes from the LibFile parsed during registry load.
           Just lf -> do
             rs <- go (Set.insert dep seen) (libDepends lf ++ rest)
             return (libIncludes lf : rs)

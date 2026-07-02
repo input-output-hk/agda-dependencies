@@ -133,9 +133,9 @@ import AgdaDeps.Backend.Json ( renderJson )
 -- | Per-module state captured during 'moduleSetup', threaded to
 -- 'postModuleAD': the in-scope names, plus pre-module snapshots of the
 -- two compile-time side-channels so the fragment cache can attribute
--- each module's contributions exactly (as a before/after delta —
--- name-based slicing fails for defs Agda homes in anonymous modules,
--- e.g. @_.IsMajority@ copies from a @module _ ⦃ asm ⦄@ block).
+-- each module's contributions exactly as a before/after delta. Must be
+-- a delta, not a name-prefix slice: prefix slicing misses defs Agda
+-- homes in anonymous modules (bare @_.…@ copies).
 data ModuleEnv = ModuleEnv
   { namesInScope       :: Set QName
   , envIgnoredBefore   :: IgnoredEdgeMap
@@ -284,20 +284,17 @@ cacheDirFor opts = case optCacheDir opts of
   Nothing  -> fromMaybe "." (optOutDir opts) </> ".agda-deps-cache"
 
 -- | Whether the @--incremental@ serialise cache is active. Independent
--- of 'fragmentCacheSupported' (the manifest is plain text + a
--- version-stable hash, so it works on 2.8 too) — but the monolithic
--- no-op skip additionally needs the fragment cache to detect \"nothing
--- recompiled\", so on 2.8 (no fragments) every module recompiles and
--- that skip never fires. Disabled under @--keep-going@.
+-- of 'fragmentCacheSupported' (the manifest is plain text, so it works
+-- on 2.8), though the monolithic no-op skip also needs the fragment
+-- cache to detect \"nothing recompiled\". Disabled under @--keep-going@.
 useSerialiseCache :: Options -> Bool
 useSerialiseCache opts = optIncremental opts && not (optKeepGoing opts)
 
 -- | Output-context token for the monolithic no-op skip: a fingerprint
--- of everything other than per-definition /content/ that the output
--- depends on — the live module set, the output-affecting options, the
--- build identity, and the node-key convention. Combined with \"nothing
--- recompiled this run\" (per 'recompiledRef', which guards the def
--- content), an unchanged token means the on-disk output is byte-identical.
+-- of everything other than per-definition /content/ the output depends
+-- on — live module set, output-affecting options, build identity,
+-- node-key convention. Combined with \"nothing recompiled\" (per
+-- 'recompiledRef'), an unchanged token means the output is byte-identical.
 outputToken :: Options -> [String] -> Epoch
 outputToken opts modules = combineEpochs
   [ hashEpoch buildFingerprint
@@ -306,9 +303,9 @@ outputToken opts modules = combineEpochs
   , hashEpoch (unwords modules)
   ]
   where
-    -- One 'show' per output-affecting option (a single 16-tuple would
-    -- exceed GHC's tuple 'Show' limit). Add any new output-affecting
-    -- option here, or the no-op skip could serve stale output.
+    -- One 'show' per output-affecting option (a single tuple would
+    -- exceed GHC's tuple 'Show' limit). Every new output-affecting
+    -- option must be added here, or the no-op skip serves stale output.
     optStrings =
       [ show (optFormat opts), show (optJsonMode opts), show (optView opts)
       , show (optColors opts), show (optGzip opts), show (optAgdaHtmlDir opts)
@@ -333,11 +330,10 @@ moduleSetup opts isMain tlmn _ = do
       else return Nothing
   case mCached of
     Just frag -> do
-      -- The Skip path bypasses compileDef + postModule entirely:
-      -- re-inject the module's side-channel slices (otherwise
-      -- contraction loses every edge routed through this module's
-      -- ignored helpers) and the entry-module capture postModuleAD
-      -- would have done.
+      -- Skip bypasses compileDef + postModule: re-inject the module's
+      -- side-channel slices (else contraction loses every edge through
+      -- this module's ignored helpers) and the entry-module capture
+      -- postModuleAD would have done.
       mergeIgnoredEdges (fragIgnored frag)
       mergeMethodProviders (fragProviders frag)
       case isMain of
@@ -370,10 +366,9 @@ precomputedGraphRef :: IORef PrecomputedGraph
 precomputedGraphRef = unsafePerformIO $ newIORef emptyGraph
 
 -- | Set 'True' whenever a module is (re)compiled this run rather than
--- served from the fragment cache. 'postCompileAD' reads it: an
--- all-cache-hit run (this stays 'False') with an unchanged output
--- context means the on-disk monolithic output is already byte-identical
--- and the serialise can be skipped. Reset in 'preCompileAD'.
+-- served from the fragment cache. An all-cache-hit run (stays 'False')
+-- with an unchanged output context can skip the serialise. Reset in
+-- 'preCompileAD'.
 {-# NOINLINE recompiledRef #-}
 recompiledRef :: IORef Bool
 recompiledRef = unsafePerformIO $ newIORef False
@@ -390,19 +385,13 @@ postModuleAD opts env isMain tlmn defs = do
       liftIO $ writeIORef mainModuleRef (Just (tlmn, imports))
     NotMain -> return ()
 
-  -- Private-namespace QNames are not captured from the scope here;
-  -- access is classified at 'postCompileAD' time via a source-level
-  -- pre-scan of each .agda file (see 'findPrivateRanges').
-
   -- Recover dead-end private definitions that Agda's compileDef hook
-  -- skips. 'buildInterface' runs 'eliminateDeadCode' before producing
-  -- the interface, so private definitions no live code transitively
-  -- calls never appear in 'iSignature' (and never reach 'compileDef').
-  -- The TCM state signature ('getSignature') is the pre-prune source of
-  -- truth (every checked definition, this module's + every import's):
-  -- filter by the current module's name to recover its missed top-level
-  -- private defs and run them through 'compileDefAD' so they pass the
-  -- same ignore/exclude filters as visited defs.
+  -- skips: 'eliminateDeadCode' prunes private defs no live code calls
+  -- from 'iSignature' before the interface is built. 'getSignature' is
+  -- the pre-prune source of truth (every checked def, this module's +
+  -- imports'); filter to this module and run the missed top-level
+  -- private defs through 'compileDefAD' so they pass the same filters.
+  -- (Access is classified later in 'postCompileAD' via a source pre-scan.)
   fullSig <- getSignature
   let thisModule  = iModuleName iface
       sigDefs     = [ (qn, def)
@@ -414,18 +403,12 @@ postModuleAD opts env isMain tlmn defs = do
   extras <- mapM (compileDefAD opts env isMain) missing
   let result = defs ++ extras
 
-  -- '--incremental' write path.
-  --
-  -- For an IMPORTED module the emitted fragment is a pure function of
-  -- its (always dead-code-pruned) interface — identical whether the
-  -- module was fresh-checked or warm-loaded — so it is cached
-  -- unconditionally. Only the MAIN module's output is enriched by the
-  -- 'getSignature' dead-private recovery above, and 'stSignature'
-  -- holds its defs only when it was actually type-checked this run
-  -- ('sigDefs' non-empty): caching a warm-loaded main module would
-  -- freeze the degraded warm variant (the "warm-.agdai edge loss",
-  -- see TODO.md) into the cache, so the main module is cached only
-  -- from a fresh check.
+  -- '--incremental' write path. An IMPORTED module's fragment is a pure
+  -- function of its dead-code-pruned interface, so cache it
+  -- unconditionally. The MAIN module is enriched by the dead-private
+  -- recovery above, present in 'stSignature' only on a fresh check
+  -- ('sigDefs' non-empty); caching a warm-loaded main module would
+  -- freeze the degraded warm-.agdai variant, so cache it only fresh.
   when (useFragmentCache opts) $ do
     let cacheable = case isMain of
           NotMain -> True
@@ -433,12 +416,11 @@ postModuleAD opts env isMain tlmn defs = do
     when cacheable $ do
       ignoredAll   <- readIgnoredEdges
       providersAll <- readMethodProviders
-      -- This module's contributions = what was added to the
-      -- side-channels since 'moduleSetup' snapshotted them. Exact by
-      -- construction: a name-prefix slice misses defs Agda homes in
-      -- anonymous modules (bare '_.…' / prefixless copies), whose
-      -- chains then silently lose their contracted edges on an
-      -- all-cache-hit run.
+      -- This module's contributions = the delta added to the
+      -- side-channels since 'moduleSetup' snapshotted them. Must be a
+      -- delta, not a name-prefix slice: prefix slicing misses defs Agda
+      -- homes in anonymous modules (bare '_.…' copies), losing their
+      -- contracted edges on an all-cache-hit run.
       let ignoredFrag = M.difference ignoredAll (envIgnoredBefore env)
           -- Providers grow by *prepending* binders per method key, so
           -- the delta on a shared key is the new list's prefix.
@@ -462,19 +444,17 @@ postCompileAD opts _ defMap = do
       rawDefs0 = concat . M.elems $ fmap catMaybes defMap
 
   -- Contract dep edges through ignored helpers (with-functions, inlined
-  -- module-instantiation copies, etc.) using the side-channel populated
-  -- during 'compileDefAD'. Running in 'postCompile' guarantees the
-  -- side-channel is complete.
+  -- module-instantiation copies, etc.). Runs in 'postCompile' so the
+  -- side-channel populated during 'compileDefAD' is complete.
   defsContracted <- contractIgnoredEdges rawDefs0
 
   -- Append edges from each kept def's deps to any registered instance
   -- binders. After contraction, so the providers chased are still real.
   defsWithInstances <- addInstanceMethodEdges defsContracted
 
-  -- Back-fill '_access' on each def by scanning each .agda source file
-  -- once for top-level @private@-block line ranges, then matching each
-  -- def's binding-site line against those ranges (see 'backfillAccess'
-  -- and 'findPrivateRanges').
+  -- Back-fill '_access' by scanning each .agda file once for top-level
+  -- @private@-block line ranges and matching each def's binding-site
+  -- line against them (see 'backfillAccess', 'findPrivateRanges').
   let defFile :: Map QName FilePath
       defFile = M.fromList
         [ (_name d, fp)
@@ -492,16 +472,13 @@ postCompileAD opts _ defMap = do
       allQNames0 = collectAllQNames defs0
 
   -- Pool every module-name signal before classification so modules
-  -- visible only as import-edge endpoints (e.g. stdlib reached via
-  -- transitive imports, with no surviving QName and no source under
-  -- root) are still classified as external.
+  -- visible only as import-edge endpoints (no surviving QName, no
+  -- source under root) are still classified as external.
   precomputed <- liftIO $ readIORef precomputedGraphRef
   visited <- getVisitedModules
   let -- Raw (source-module, target-module) pairs for every import edge
-      -- across all visited interfaces, computed once. The endpoint pool
-      -- below and 'visitedImportEdges' (which layers the '--no-externals'
-      -- 'keep' filter) both consume this, so each 'iImportedModules' walk
-      -- and 'prettyShow' happens once rather than twice.
+      -- across all visited interfaces, computed once and shared by the
+      -- endpoint pool and 'visitedImportEdges' below.
       importPairs :: [(String, String)]
       importPairs =
         [ (prettyShow src, prettyShow tgt)
@@ -514,18 +491,15 @@ postCompileAD opts _ defMap = do
       precomputeImportEndpoints =
         concat [ [s, t] | (s, t) <- precomputedImports precomputed ]
       -- (host, source, qname) re-export triples across all visited
-      -- interfaces, computed once and shared with 'reExportRows' below so
-      -- 'collectReExports' walks each interface once.
+      -- interfaces, computed once and shared with 'reExportRows' below.
       reExportRaw :: [(String, String, String)]
       reExportRaw = concatMap (collectReExports . miInterface) (M.elems visited)
       -- Re-export hubs: a module that only @open … public@s names from
-      -- elsewhere contributes no QName of its own to 'allQNames0', so
-      -- without this it slips past classification entirely and survives
-      -- @--no-externals@. Pool both the re-export host and the source it
-      -- re-exports from, so a stdlib hub like @Data.List@ gets seen and
-      -- (being out-of-root) classified external. In-root hubs already
-      -- carry True via the QName / precompute signals, and 'M.insertWith
-      -- (||)' keeps it.
+      -- elsewhere contributes no QName of its own to 'allQNames0', so it
+      -- would slip past classification and survive @--no-externals@.
+      -- Pool both the host and the re-exported source so an out-of-root
+      -- hub like @Data.List@ is seen and classified external. In-root
+      -- hubs already carry True via other signals ('M.insertWith (||)').
       reExportEndpoints :: [String]
       reExportEndpoints = concat [ [h, t] | (h, t, _n) <- reExportRaw ]
       allEndpointModules :: [String]
@@ -540,10 +514,8 @@ postCompileAD opts _ defMap = do
 
   -- '--no-externals': drop every external module from the rendered
   -- graph (no nodes, no edges into them). The 'keep' predicate below
-  -- carries the same filter through to the module-level wire outputs
-  -- (import edges, re-exports). A diagnostic summary of the stripped
-  -- externals is attached to the wire output only under
-  -- @--no-externals@.
+  -- carries the same filter through to the module-level wire outputs;
+  -- a diagnostic summary of the stripped externals is attached too.
   let externalsSummary :: Maybe ExternalsSummary
       !externalsSummary
         | optNoExternals opts = Just $! buildExternalsSummary externals0 defs0
@@ -626,14 +598,12 @@ postCompileAD opts _ defMap = do
     Nothing  -> return ()
 
   -- '--incremental' serialise skip: an all-cache-hit run (nothing
-  -- recompiled) whose output context (module set + options + build) is
-  -- unchanged produces byte-identical monolithic output, so the
-  -- re-emit can be skipped. 'anyRecompiled' guards the def /content/;
-  -- 'monoToken' guards everything else.
-  -- Force to full NF so this lazy thunk stops pinning the whole @defMap@
-  -- (and every imported module's @[Maybe ADDef]@ value spine) alive
-  -- through the render. In a non-@--incremental@ run nothing else forces
-  -- @liveModules@, so without the bang the map survives to end-of-do.
+  -- recompiled) whose output context is unchanged produces
+  -- byte-identical monolithic output, so the re-emit can be skipped.
+  -- 'anyRecompiled' guards the def /content/; 'monoToken' guards the rest.
+  -- Force to full NF so this thunk stops pinning @defMap@ (and every
+  -- module's @[Maybe ADDef]@ spine) alive through the render — nothing
+  -- else forces @liveModules@ in a non-@--incremental@ run.
   let !liveModules = force (map prettyShow (M.keys defMap))
       cacheDir    = cacheDirFor opts
       monoToken   = outputToken opts liveModules
@@ -673,16 +643,14 @@ postCompileAD opts _ defMap = do
           hPutStrLn stderr "agda-deps: --format=html requires -o/--out-dir to be set."
           exitFailure
         Just dir -> do
-          -- Snippet embedding only exists in the --lazy path
-          -- (snippets/<module>.json, fetched on demand). Without --lazy,
-          -- skip collecting snippets and emit a notice.
+          -- Snippet embedding only exists in the --lazy path. Without
+          -- --lazy, skip collecting snippets and emit a notice.
           snippetMap <-
             if optWithSource opts && optLazy opts
               then collectHighlightedSnippets (optNoSourceFor opts) dir allQNames
               else do
                 when (optWithSource opts) $
-                  -- NB: plain '++' concatenation, not a backslash string gap —
-                  -- this module enables CPP, which collapses '\'-newline.
+                  -- CPP module: use '++', not a backslash string gap (CPP collapses '\'-newline).
                   info ("agda-deps: --with-source has no effect without --lazy "
                      ++ "(self-contained inline source was removed); rendering "
                      ++ "without embedded snippets. Use --with-source --lazy, or "
@@ -691,9 +659,8 @@ postCompileAD opts _ defMap = do
           liftIO $ writeHtmlOutput dir opts (SerialiseCtx (useSerialiseCache opts) cacheDir monoSkippable monoToken) snippetMap stateMap externalModules failedModules entryModule importEdges sourceFiles moduleFileMap positions externalsSummary defs
 
   -- '--incremental': prune fragment files for modules no longer in the
-  -- graph (deleted / renamed source) so the cache doesn't grow without
-  -- bound. Live set = every module Agda processed this run (the keys of
-  -- the def map, hit or recompiled).
+  -- graph (deleted / renamed source). Live set = every module Agda
+  -- processed this run (def-map keys, hit or recompiled).
   when (useFragmentCache opts) $ do
     removed <- gcFragments cacheDir liveModules
     when (removed > 0) $
@@ -748,9 +715,9 @@ data SerialiseCtx = SerialiseCtx
 -- files, and per-module snippet files.
 --
 -- Under @--incremental@ the lazy per-module + snippet files are
--- rewritten only when their content epoch changed since the last run
--- (skipped files never even force their content thunk); the non-lazy
--- single @deps.html@ uses the monolithic no-op skip.
+-- rewritten only when their content epoch changed (skipped files never
+-- force their content thunk); the non-lazy @deps.html@ uses the
+-- monolithic no-op skip.
 writeHtmlOutput
   :: FilePath -> Options -> SerialiseCtx
   -> Map QName Snippet -> Map QName DefState
@@ -867,24 +834,18 @@ writeJsonMaybeGz gz path content = do
     then BL.writeFile (path ++ ".gz") (GZip.compress (BLC.pack content))
     else return ()
 
--- | Classify modules whose source files live outside the project root
--- (the working directory after the .agda-lib discovery in 'Main').
+-- | Classify modules whose source lives outside the project root (the
+-- working directory after 'Main''s .agda-lib discovery). A module is
+-- "external" when no signal places its source under root. Three signals
+-- are pooled:
 --
--- A module is "external" when no signal places its source under the
--- project root. Three signals are pooled:
+--   * 'srcLocOf' for every known QName (def names + dep targets); a
+--     QName with @rangeFile = Nothing@ (builtins) gives no evidence.
+--   * The pre-compute @module → file@ map ('precomputedModuleFiles').
+--   * Module names appearing as import-edge endpoints, so endpoint-only
+--     modules with no surviving QName are still classified.
 --
---   * 'srcLocOf' for every QName known (def names + dep targets). A
---     QName with @rangeFile = Nothing@ (compiler builtins:
---     @Agda.Primitive@, @Agda.Builtin.*@) gives no in-root evidence.
---   * The pre-compute scan's @module → file@ map
---     ('precomputedModuleFiles'), covering every @.agda@ / @.lagda*@
---     file under the @-i@ paths.
---   * Module names appearing as import-edge endpoints (visited
---     interfaces + pre-compute scan), so endpoint-only modules with no
---     surviving QName are still classified.
---
--- Returns the complement: every seen module name with no known in-root
--- path.
+-- Returns the complement: every seen module with no in-root path.
 classifyExternalModules
   :: [QName]                  -- ^ every QName referenced in the graph
   -> [(String, FilePath)]     -- ^ module → file map from precompute
@@ -916,10 +877,9 @@ classifyExternalModules qns precomputedMF endpointModules = do
     [ m | (m, inRoot) <- M.toList inRootByModule, not inRoot ]
 
 -- | '--no-externals': drop every definition homed in an external
--- module and strip dependency edges into one. Module names are matched
--- against @externals@ as 'prettyShow' of 'qnameModule'. Filters both
--- '_deps' and '_depsProv' to keep the @M.keysSet _depsProv == _deps@
--- invariant.
+-- module and strip dependency edges into one. Module names matched via
+-- 'moduleKey'. Filters both '_deps' and '_depsProv' to keep the
+-- @M.keysSet _depsProv == _deps@ invariant.
 dropExternalDefs :: Set String -> [ADDef] -> [ADDef]
 dropExternalDefs externals defs =
   let isExt qn = S.member (moduleKey qn) externals
@@ -989,16 +949,14 @@ findPrivateRanges fp = do
 
 -- | Walk every (sub-)scope in an 'Interface' and extract the public
 -- re-exports: names in 'ImportedNS' (@open public@ from another module)
--- and 'PublicNS' (@open … public@ of a child module). Both namespaces
--- are checked because Agda's 'openModule' uses 'PublicNS' for opens of
--- a child module and 'ImportedNS' otherwise.
+-- and 'PublicNS' (@open … public@ of a child module). Both are checked
+-- because Agda's 'openModule' uses 'PublicNS' for child-module opens
+-- and 'ImportedNS' otherwise.
 --
 -- Returns @(host, source, qname)@ triples (caller aggregates and
--- dedups). The host is the interface's top-level module name; the
--- source is the original @QName@'s @qnameModule@, so chained
--- re-exports collapse to the definition site. Self-edges (the host's
--- own definitions via PublicNS) are filtered by comparing @qnameModule@
--- to @iModuleName@.
+-- dedups). Host = the interface's top-level module; source = the
+-- 'QName''s 'qnameModule', so chained re-exports collapse to the
+-- definition site. Self-edges filtered by comparing to 'iModuleName'.
 collectReExports :: Interface -> [(String, String, String)]
 collectReExports i =
   let hostMod  = prettyShow (iTopLevelModuleName i)
@@ -1009,19 +967,17 @@ collectReExports i =
      , let nsBag = scopeNameSpace ns scope
      , (_concrete, anames) <- M.toList (nsNames nsBag)
      , an <- List1.toList anames
-       -- 2.9 moved 'AbstractName' to Agda.Syntax.Abstract.Name; 2.8 keeps
-       -- it (and 'anameName') in Agda.Syntax.Scope.Base (imported above).
+       -- 2.9: 'anameName' from Agda.Syntax.Abstract.Name; 2.8: from Agda.Syntax.Scope.Base.
 #if MIN_VERSION_Agda(2,9,0)
      , let qn = A.anameName an
 #else
      , let qn = anameName an
 #endif
      , qnameModule qn /= thisModN  -- skip own definitions
-       -- Source module, with anonymous (where/section) sub-modules lifted
-       -- to the named owner ('moduleKey') so the re-export points at the
-       -- definition site as a reader sees it.
+       -- 'moduleKey' lifts anonymous (where/section) sub-modules to the
+       -- named owner, so the re-export points at the definition site.
      , let srcMod = moduleKey qn
-       -- Lifting can collapse a host-owned section onto the host itself;
-       -- such an edge is not a re-export from elsewhere, so drop it.
+       -- Lifting can collapse a host-owned section onto the host; that's
+       -- not a re-export from elsewhere, so drop it.
      , srcMod /= hostMod
      ]

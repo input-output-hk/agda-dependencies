@@ -115,10 +115,9 @@ scanFile path = do
     case contentE of
       Left _  -> return Nothing
       Right c -> do
-        -- Force the whole file so lazy 'readFile' closes its handle
-        -- within this action; otherwise one open handle per scanned file
-        -- accumulates ('mapM scanFile' over the corpus) and a big library
-        -- can exhaust the fd limit before the results are drained.
+        -- Force the whole file so lazy 'readFile' closes its handle now;
+        -- otherwise open handles accumulate across the corpus and exhaust
+        -- the fd limit before the results are drained.
         _ <- evaluate (length c)
         return (parseHeader path (stripBlockComments c))
 
@@ -130,10 +129,8 @@ scanFile path = do
 -- the file's basename, matching Agda's surface behaviour.
 parseHeader :: FilePath -> String -> Maybe (String, [String])
 parseHeader path body =
-  -- One strict pass over the cleaned lines: tokenise each line once and
-  -- dispatch (first @module@ wins; @import@/@open import@ names
-  -- accumulate into a Set), rather than two independent passes that each
-  -- re-tokenised every line.
+  -- One pass: first @module@ wins; @import@/@open import@ names
+  -- accumulate into a Set.
   let (moduleN, importsN) =
         foldl' step (Nothing, Set.empty) (map stripLineComment (lines body))
   in fmap (\m -> (normaliseAnonymous m, Set.toList importsN)) moduleN

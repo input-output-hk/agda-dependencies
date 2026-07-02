@@ -1,20 +1,10 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PatternGuards #-}
--- | Entry point for the @agda-deps@ executable.
---
--- Responsibilities:
---
--- 1. Intercept @--help@ \/ @-h@ \/ @-?@ before Agda sees them and print
---    only this backend's options (see "AgdaDeps.Help"); rewrite
---    @--agda-help@ back to @--help@ for Agda's upstream help.
--- 2. Pre-process @argv@: canonicalise path-bearing flags and @cd@ to
---    the nearest @.agda-lib@ ancestor.
--- 3. Pre-compute the module-level graph and hand off to 'runAgdaArgs',
---    'runAgdaArgsKeepGoing', or 'runSkipAgda'.
---
--- Key functions: 'main', 'canonicalizePathArgs', 'discoverProjectRoot',
--- 'rewriteLenientImports'.
+-- | Entry point for the @agda-deps@ executable: intercept @--help@ \/
+-- @--version@ \/ @--emit-schema@, pre-process @argv@ (canonicalise
+-- path-bearing flags, @cd@ to the nearest @.agda-lib@ ancestor), then
+-- hand off to 'runAgdaArgs', 'runAgdaArgsKeepGoing', or 'runSkipAgda'.
 module Main where
 
 import System.Directory
@@ -28,8 +18,7 @@ import Agda.Compiler.Backend ( Backend_boot(Backend) )
 #if MIN_VERSION_Agda(2,9,0)
 import Agda.Main ( runAgdaArgs )
 #else
--- Agda 2.8 has no 'runAgdaArgs'; 'runAgda'' is the no-builtin-backends
--- entrypoint that reads argv via 'getArgs'. See the local shim below.
+-- Agda 2.8 has no 'runAgdaArgs'; shim it below over 'runAgda''.
 import Agda.Main ( runAgda' )
 import System.Environment ( withArgs )
 #endif
@@ -55,10 +44,8 @@ import AgdaDeps.Util ( candidateDirs, looksLikeAgdaSource )
 
 #if !MIN_VERSION_Agda(2,9,0)
 -- | Agda 2.8 shim for 2.9's @runAgdaArgs@: run Agda with an explicit
--- argv. 2.9's @runAgdaArgs@ parses with exactly the given backends (no
--- builtin backends prepended), so we use @runAgda'@ — not @runAgda@ —
--- under a temporary 'withArgs'. (Type inferred from @runAgda'@ to avoid
--- needing the @Backend@ type synonym in scope.)
+-- argv and exactly the given backends. 'runAgda'' (not @runAgda@) skips
+-- the builtin backends; 'withArgs' feeds the argv it reads via 'getArgs'.
 runAgdaArgs backends args = withArgs args (runAgda' backends)
 #endif
 
@@ -75,8 +62,7 @@ main = do
     (v:_) -> printVersion (v == "--numeric-version") >> exitSuccess
     []    -> return ()
   -- --emit-schema prints the generated JSON Schema for expanded JSON
-  -- output and exits (no Agda run, no input file needed). CI checks this
-  -- against the committed schema/graph-v2-expanded.schema.json.
+  -- output and exits (no Agda run, no input file needed).
   if "--emit-schema" `elem` rawArgs
     then putStrLn expandedSchemaJson >> exitSuccess
     else return ()
@@ -114,9 +100,8 @@ main = do
     Nothing -> pure defaultConfig
   let seedOptions = applyConfig cfg defaultOptions
 
-  -- When --resolve-deps was passed (CLI or YAML), replace Agda's
-  -- library resolver with an explicit
-  -- @--no-libraries -i \<dir\> ...@ list derived from the project's
+  -- --resolve-deps (CLI or YAML): replace Agda's library resolver with an
+  -- explicit @--no-libraries -i \<dir\> ...@ list from the project's
   -- @.agda-lib@ @depend:@ closure (see "AgdaDeps.LibResolve").
   let resolveDeps = cliResolveDeps
                  || cfgResolveDeps cfg == Just True
@@ -136,10 +121,9 @@ main = do
           ("--format=" ++ fmt) : args'WithResolve
         _ -> args'WithResolve
 
-  -- Pre-compute the module-level graph from .agda sources before
-  -- handing off to Agda, so the rendered output carries every module
-  -- under the user's -i paths. The result is written to an IORef that
-  -- postCompileAD unions into importEdges.
+  -- Pre-compute the module-level graph from .agda sources so the output
+  -- carries every module under the user's -i paths. Written to an IORef
+  -- that postCompileAD unions into importEdges.
   precomputed <- precomputeFromArgs args''
   writeIORef precomputedGraphRef precomputed
   let runWith = Backend (backendWithSeed seedOptions)

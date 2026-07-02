@@ -94,23 +94,12 @@ dedupOrd = go Set.empty
       | Set.member x seen = go seen xs
       | otherwise         = x : go (Set.insert x seen) xs
 
--- | Strip anonymous-module path segments (the ones 'prettyShow' renders
--- as a bare @_@) from a dotted qualified name, lifting where-block and
--- parameterised-section definitions into their nearest /named/ ancestor
--- module. Agda desugars both @where@ blocks and @module _ (…) where@
--- sections into anonymous internal sub-modules (@Parent._@, nested
--- @Parent._._@), so this is what turns the internal name back into the
--- module a reader thinks of as the owner:
---
---   * @"M._"@   ↦ @"M"@
---   * @"M._._"@ ↦ @"M"@
---   * @"M._.N"@ ↦ @"M.N"@
---   * @"M.f"@   ↦ @"M.f"@   (no anonymous segment — unchanged)
---   * @"M._+_"@ ↦ @"M._+_"@ (mixfix segment, not a bare @_@ — preserved)
---
--- Only whole dot-segments equal to @"_"@ are dropped, so mixfix names
--- such as @_+_@ \/ @_⊔_@ survive untouched. Shared by 'AgdaDeps.Deps.nodeKey'
--- (node identity) and 'AgdaDeps.Deps.moduleKey' (module attribution).
+-- | Drop bare-@_@ dot-segments from a dotted qualified name, lifting
+-- @where@-block and parameterised-section defs (Agda desugars both into
+-- anonymous @Parent._@ sub-modules) into their nearest named ancestor:
+-- @"M._.N"@ ↦ @"M.N"@, @"M._"@ ↦ @"M"@. Only whole @"_"@ segments are
+-- dropped, so mixfix names (@_+_@) survive. Load-bearing for node
+-- identity: shared by 'AgdaDeps.Deps.nodeKey' and 'moduleKey'.
 liftAnonSegments :: String -> String
 liftAnonSegments = intercalate "." . filter (/= "_") . splitDots
   where

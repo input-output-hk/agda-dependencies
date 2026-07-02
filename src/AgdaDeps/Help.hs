@@ -50,10 +50,8 @@ rewriteAgdaHelp = map (\a -> if wantsAgdaHelp a then "--help" else a)
 
 -- | Print the @agda-deps@ build identity. Plain @--version@ \/ @-V@
 -- prints the full 'buildFingerprint' (version + git revision + build
--- date + compiling GHC) so "which build is this?" is answerable from
--- the binary itself, with no @mtime@-vs-@git log@ archaeology;
--- @--numeric-version@ prints just the bare version number for tooling
--- that parses it.
+-- date + compiling GHC); @--numeric-version@ prints just the bare
+-- version number for tooling that parses it.
 printVersion :: Bool -> IO ()
 printVersion numericOnly
   | numericOnly = putStrLn (showVersion version)

@@ -72,11 +72,8 @@ buildDotGraph palette stateMap failed defs =
     failedNodes =
       [ (failedModuleId m, DotFailedModule m) | m <- S.toAscList failed ]
 
-    -- One LNode per distinct node id. 'concatMap mkNodes'' lists every
-    -- dependency target once per referencing def (O(V+E)); the label is a
-    -- pure function of the id, so collapsing to a Map keyed by id leaves
-    -- the resulting graph unchanged while handing 'mkGraph' only O(V)
-    -- nodes. Failed-module ids are namespaced and never collide.
+    -- One LNode per distinct node id. The label is a pure function of the
+    -- id, so collapsing to a Map dedups targets (O(V) nodes to 'mkGraph').
     lnodeList :: [LNode DotLabel]
     lnodeList = M.toList (M.fromList (concatMap mkNodes' defs)) ++ failedNodes
 
@@ -87,10 +84,8 @@ buildDotGraph palette stateMap failed defs =
     ledgeList :: [UEdge]
     ledgeList = concatMap mkEdges' defs
 
-    -- Fill-colour attributes per 'DefState', parsed once (the palette is
-    -- fixed for the whole render). 'stateAttrs' indexes into these rather
-    -- than re-parsing the hex colour for every one of the up-to-100k+
-    -- nodes.
+    -- Fill-colour attributes per 'DefState', parsed once so 'stateAttrs'
+    -- doesn't re-parse the hex colour per node.
     attrsFor :: DefState -> [Attribute]
     attrsFor st =
       let (r, g, b) = parseHexColor (colorFor palette st)

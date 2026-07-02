@@ -1,25 +1,16 @@
--- | Single Haskell source of truth for the v2 *expanded* @graph.json@
--- wire format: both the generated JSON Schema and the byte-level
--- encoder are derived from one set of field tables, so they cannot
--- drift from each other.
+-- | Single source of truth for the v2 *expanded* @graph.json@ wire
+-- format. One set of field tables drives both the generated JSON Schema
+-- and the byte-level encoder, so they cannot drift: a field's wire name,
+-- requiredness, schema fragment, and encoder live together in one row,
+-- and a field can't be emitted without appearing in the schema.
 --
--- * 'expandedSchemaJson' renders the JSON Schema from the field tables
---   (surfaced by @agda-deps --emit-schema@). CI diffs it against the
---   committed @schema/graph-v2-expanded.schema.json@ (frozen oracle)
---   via @schema/check_schema.py@.
--- * 'encodeExpanded' encodes an 'ExpandedGraph' to the wire JSON using
---   the *same* field tables. 'AgdaDeps.Backend.GraphJson.buildExpandedJson'
---   builds an 'ExpandedGraph' ('toExpandedGraph') and calls this.
+-- * 'expandedSchemaJson' renders the schema (@agda-deps --emit-schema@);
+--   CI diffs it against the committed @schema/graph-v2-expanded.schema.json@.
+-- * 'encodeExpanded' encodes an 'ExpandedGraph' to wire JSON from the
+--   *same* tables.
 --
--- Because each field's wire name, requiredness, schema fragment, and
--- encoder live together in one row, a field can't be added to the
--- output without appearing in the generated schema (and vice versa),
--- and the CI oracle check forces the committed schema to be updated in
--- lockstep — closing the silent-drift gap.
---
--- The generated schema is *structural*: no @description@ text (kept
--- curated in the committed file), key/array order insignificant; the
--- checker normalises both sides before comparing.
+-- The generated schema is structural (no @description@ text, order
+-- insignificant); the CI checker normalises both sides before comparing.
 module AgdaDeps.Backend.Wire
   ( -- * Generated schema
     expandedSchemaJson
@@ -54,9 +45,8 @@ import AgdaDeps.Util    ( jsString )
 
 -- * Wire value types
 --
--- A presentation-layer mirror of the expanded shape. 'toExpandedGraph'
--- in "AgdaDeps.Backend.GraphJson" builds these from a @GraphInput@; the
--- field-table encoders turn them into bytes.
+-- Presentation-layer mirror of the expanded shape, built by
+-- 'toExpandedGraph' in "AgdaDeps.Backend.GraphJson".
 
 -- | The whole expanded @graph.json@ document.
 data ExpandedGraph = ExpandedGraph
@@ -96,8 +86,8 @@ data WireDef = WireDef
 -- | A directed edge as a (source, target) wire-name pair.
 newtype WireEdge = WireEdge (String, String)
 
--- | The @externals_summary@ diagnostic; lists pre-decomposed in the
--- ascending order the wire format expects.
+-- | The @externals_summary@ diagnostic; lists pre-sorted ascending as
+-- the wire format expects.
 data WireExternals = WireExternals
   { weModules            :: [String]
   , wePostulatesByModule :: [(String, [String])]
@@ -144,14 +134,12 @@ data SchemaDoc
 
 -- * Field tables: the single source for BOTH schema and encoder.
 
--- | One field of a wire object. Carries its wire name, schema fragment,
--- and encoder. Three flavours distinguish schema-requiredness from
--- emission:
+-- | One field of a wire object: wire name, schema fragment, encoder.
+-- Three flavours distinguish schema-requiredness from emission:
 --
 --   * 'Required' — in the schema @required@ list; always emitted.
---   * 'Additive' — NOT in @required@ (older readers / JSON stay valid)
---     but always emitted by the current producer (e.g. @producer@,
---     @nodeKeyVersion@, @definitionEdgesProvenance@).
+--   * 'Additive' — not @required@ (older readers stay valid) but always
+--     emitted by the current producer.
 --   * 'Optional' — not required; emitted only when the encoder yields
 --     'Just' (flag-gated fields).
 data Field a
@@ -173,17 +161,16 @@ fInRequired :: Field a -> Bool
 fInRequired Required{} = True
 fInRequired _          = False
 
--- | Object schema from a field table: @additionalProperties@ is @true@
--- (a future additive field must not fail v2 validation).
+-- | Object schema from a field table. @additionalProperties@ is @true@
+-- so a future additive field can't fail v2 validation.
 objectSchemaOf :: [Field a] -> SchemaDoc
 objectSchemaOf fs =
   SObject [ fName f | f <- fs, fInRequired f ]
           [ (fName f, fSchema f) | f <- fs ]
           True
 
--- | Encode an object from a field table, in field-table order (which
--- matches the legacy emitter's byte order). 'Optional' fields whose
--- encoder yields 'Nothing' are omitted.
+-- | Encode an object from a field table, in field-table (byte) order.
+-- 'Optional' fields whose encoder yields 'Nothing' are omitted.
 encodeObject :: [Field a] -> a -> String
 encodeObject fs a = "{" ++ intercalate "," (mapMaybe emit fs) ++ "}"
   where
@@ -191,7 +178,7 @@ encodeObject fs a = "{" ++ intercalate "," (mapMaybe emit fs) ++ "}"
     emit (Additive n _ e) = Just (jsString n ++ ":" ++ e a)
     emit (Optional n _ e) = (\v -> jsString n ++ ":" ++ v) <$> e a
 
--- * Encoder helpers (kept byte-identical to the legacy emitter)
+-- * Encoder helpers
 
 jArray :: (a -> String) -> [a] -> String
 jArray f xs = "[" ++ intercalate "," (map f xs) ++ "]"
@@ -340,17 +327,14 @@ expandedSchemaJson = jobj
   , ("$defs", jobj [ (n, renderSchema d) | (n, d) <- defsRegistry ])
   ]
 
--- | Encode an 'ExpandedGraph' to the wire JSON, byte-compatible with the
--- legacy emitter.
+-- | Encode an 'ExpandedGraph' to wire JSON.
 encodeExpanded :: ExpandedGraph -> String
 encodeExpanded = encodeObject expandedFields
 
 -- | Structural invariants the JSON Schema cannot express: the parallel
--- arrays line up, and every edge endpoint names a definition. Returns a
--- list of human-readable violations ('[]' = valid). These hold by
--- construction in the current producer, so a non-empty result is a
--- regression — 'buildExpandedJson' aborts on it rather than emit a
--- malformed graph.
+-- arrays line up, and every edge endpoint names a definition. Returns
+-- human-readable violations ('[]' = valid); 'buildExpandedJson' aborts
+-- on a non-empty result rather than emit a malformed graph.
 validateExpanded :: ExpandedGraph -> [String]
 validateExpanded eg = concat
   [ ck (length (egDefEdgeProv eg) == length (egDefEdges eg))

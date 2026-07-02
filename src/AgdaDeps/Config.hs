@@ -9,12 +9,7 @@
 -- @*.agda-lib@ or one given via @--config=PATH@; every field is a CLI
 -- flag kebab-cased without the leading @--@. Discovery order is
 -- explicit \> env \> cwd \> walk-up to project root; merge order is
--- defaults \< config \< CLI.
---
--- 'loadConfig' / 'discoverConfigPath' do the IO; the merge
--- ('applyConfig') and theme application ('applyTheme') are pure
--- record-overlay functions. The @FromJSON@ instances for
--- 'OutputFormat' / 'JsonMode' / 'View' / 'Theme' live here so
+-- defaults \< config \< CLI. The @FromJSON@ instances live here so
 -- "AgdaDeps.Options" stays aeson-free.
 module AgdaDeps.Config
   ( -- * Config record

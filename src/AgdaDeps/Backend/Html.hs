@@ -133,14 +133,10 @@ renderLazyHtml
   -> [ADDef]
   -> LazyOutput
 renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFile positions externalsSummary defs =
-  let -- Group snippets by their module ONCE — 'moduleKey' (lifted owning
-      -- module) per snippet computed a single time, so the bundle manifest
-      -- keys match the graph.json module names. The old
-      -- snippetModulesOf + per-module snippetsForModule pair re-scanned the
-      -- whole snippet map for every module (O(modules × snippets)).
-      -- 'foldr' over the ascending 'M.toAscList' with 'insertWith (++)'
-      -- keeps each module's entries in ascending-QName order, matching the
-      -- old per-module filter exactly.
+  let -- Group snippets by their 'moduleKey' (lifted owning module) so the
+      -- bundle manifest keys match the graph.json module names. 'foldr'
+      -- over 'M.toAscList' with 'insertWith (++)' keeps each module's
+      -- entries in ascending-QName order.
       snippetsByModule :: Map String [(QName, Snippet)]
       snippetsByModule =
         foldr (\(qn, sn) -> M.insertWith (++) (moduleKey qn) [(qn, sn)])

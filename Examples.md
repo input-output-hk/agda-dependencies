@@ -147,7 +147,7 @@ HTTP serving** — browsers block `fetch()` on `file://`.
 **When to combine:** anything bigger than ~5k defs. Below that,
 inline-HTML loads instantly.
 
-### `--with-term-hashes` — round-6 P3 subterm fingerprints
+### `--with-term-hashes` — subterm fingerprints
 
 ```bash
 cabal run agda-deps -- --format=json --json-mode=expanded \
@@ -160,11 +160,10 @@ Emits canonical-form hashes for every elaborated subterm into the
 JSON. Off by default — adds a `Term` walk per definition and bloats
 the wire format by ~50-100%.
 
-**Default `--min-term-depth=3`** — empirically validated on the reference corpus.
-At `1` (no filter) the cluster ranking is dominated by trivial
-`Var`/`Lit`/`Sort` shapes; depth-3 cuts the hash volume ~3× (13.8M
-→ 4.6M on the reference corpus) and pushes meaningful clusters to the top.
-`--min-term-depth=1` is preserved for the launch behaviour.
+**Default `--min-term-depth=3`.** At `1` (no filter) the cluster ranking is
+dominated by trivial `Var`/`Lit`/`Sort` shapes; depth-3 cuts the hash volume
+~3× and pushes meaningful clusters to the top. `--min-term-depth=1` disables
+the filter.
 
 ### `--incremental` — cache the per-module work across rebuilds
 

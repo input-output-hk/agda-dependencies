@@ -84,7 +84,7 @@ Everything after `--` is forwarded to the backend (and to Agda's CLI):
 - `--format=dot|html|json` — choose output format (default: `dot`; see auto-inference above).
 - `--view=VIEW` — pick an HTML view variant. One of `module-dag-pods` (default), `cytoscape`, `ide-three-pane`, `source-centric`, `notion-doc`, `wiki-backlinks`, `sigma`, `big-module-dag-pods`, `critical-path-holes`, `progress-dashboard`, `cartographic-atlas`, `sunburst-hierarchy`, `reading-order-narrative`, `pixel-grid-overview`. See [Views](#views).
 - `--config=PATH` — load a YAML config file (overrides discovery; see [YAML config](#yaml-config)).
-- `--theme=default|light|dark|colorblind` — palette preset for the four state colours. `default` / `light`: round-4 defaults (`#4caf50` / `#f44336` / `#9c27b0` / `#ff9800`); `dark`: `#81c784` / `#ef5350` / `#ba68c8` / `#ffb74d`; `colorblind`: `#1b9e77` / `#d95f02` / `#7570b3` / `#e7298a`. Explicit `--color-*` flags still win over the theme.
+- `--theme=default|light|dark|colorblind` — palette preset for the four state colours. `default` / `light`: the standard palette (`#4caf50` / `#f44336` / `#9c27b0` / `#ff9800`); `dark`: `#81c784` / `#ef5350` / `#ba68c8` / `#ffb74d`; `colorblind`: `#1b9e77` / `#d95f02` / `#7570b3` / `#e7298a`. Explicit `--color-*` flags still win over the theme.
 - `--color-defined=#RRGGBB` — color for fully-defined nodes (default: `#4caf50`, green).
 - `--color-postulate=#RRGGBB` — color for postulates (default: `#f44336`, red).
 - `--color-hole=#RRGGBB` — color for nodes containing unsolved holes/metas (default: `#9c27b0`, purple).
@@ -96,8 +96,8 @@ Everything after `--` is forwarded to the backend (and to Agda's CLI):
 - `--no-externals` — drop external modules (anything outside the project root, plus modules referenced but not scanned) from the rendered graph entirely — nodes, edges, the lot. Cleaner than asking users to curate `--exclude=PREFIX` lists. This includes pure *re-export hubs* — a module that only `open … public`s names from elsewhere and so contributes no definition of its own (e.g. a stdlib umbrella like `Data.List`) is still recognised as external and dropped. The JSON additionally retains a top-level `externals_summary` field listing the dropped module names and (per module) their postulate names, so downstream tooling that wants a diagnostic record of the trusted base still has the data.
 - `--json-mode=packed|expanded` — choose the `--format=json` shape. Packed (default) is base64-encoded CSR for compactness on large graphs; expanded is the obvious arrays-of-records shape for downstream tooling. See [Consuming the JSON output](#consuming-the-json-output).
 - `--packed-analytical` — augment `--json-mode=packed`'s `defs` object with the per-definition analytical arrays the expanded form carries: `kinds`/`lines`/`access` (always), `types` (under `--with-signatures`), and CSR-packed `subtermOffsets`/`subtermHashes`/`subtermDepths` (under `--with-term-hashes`). Lets a downstream tool keep packed's ~5× size win **and** full analytical fidelity — a decoded packed-analytical graph is node-for-node identical to the expanded form (verified by `schema/packed_analytical_check.py`). Off by default (packed output is otherwise byte-identical to before); no effect on expanded output (which already carries these fields). The new arrays are base64 little-endian typed arrays; `access` is 3-valued (`0`=unknown/absent, `1`=public, `2`=private), `lines` uses `-1` for unknown, `types` uses `null`.
-- `--with-term-hashes` — round-6 P3. Walk every definition's elaborated `Term` (signature plus every clause body), canonicalise each subterm (de-Bruijn indices, source positions stripped, `MetaV` identities wildcarded, `Hiding` bit preserved), and emit a per-def array of `Word64` fingerprints as `definitionSubtermHashes` (plus a parallel `definitionSubtermDepths` array carrying the AST depth of each emitted subterm) in expanded JSON. Off by default — adds a Term walk per definition and bloats the wire format by 50–100% on real corpora. Intended for downstream AST-level clustering tooling.
-- `--min-term-depth=N` — round-6 P3 producer-side filter. Drop subterms below the given AST depth from the emitted hash list. Default `3`; `1` disables the filter (matches launch behaviour). The default suppresses single-node noise (`Var`, `Lit`, `Sort`, `Level`) that would otherwise dominate the cluster ranking. Ignored without `--with-term-hashes`.
+- `--with-term-hashes` — walk every definition's elaborated `Term` (signature plus every clause body), canonicalise each subterm (de-Bruijn indices, source positions stripped, `MetaV` identities wildcarded, `Hiding` bit preserved), and emit a per-def array of `Word64` fingerprints as `definitionSubtermHashes` (plus a parallel `definitionSubtermDepths` array carrying the AST depth of each emitted subterm) in expanded JSON. Off by default — adds a Term walk per definition and bloats the wire format by 50–100% on real corpora. Intended for downstream AST-level clustering tooling.
+- `--min-term-depth=N` — drop subterms below the given AST depth from the emitted hash list. Default `3`; `1` disables the filter. The default suppresses single-node noise (`Var`, `Lit`, `Sort`, `Level`) that would otherwise dominate cluster ranking. Ignored without `--with-term-hashes`.
 - `--with-signatures` — render each definition's type signature (the type-checker's `reify` of its type) and emit it as the per-def `"type"` field in expanded JSON. Shown *as-written*: not normalised, with Agda's default printing (implicit *arguments* at use sites suppressed — no `--show-implicit`; implicit binders in the signature still appear), collapsed to one line. Off by default — adds a reify + pretty-print per definition. Surfaced as the per-def `"type"` field for downstream tooling.
 - `--normalise-signatures` — `normalise` each type before rendering it (semantic, fully-reduced form rather than as-written). Off by default; no effect without `--with-signatures`.
 - `--signature-implicits` — render type signatures with implicit (and irrelevant) arguments shown. Off by default; no effect without `--with-signatures`. (Named to avoid clashing with Agda's own `--show-implicit`.)
@@ -269,8 +269,8 @@ json-mode: expanded
 gzip: false
 quiet: false
 out-dir: build/deps
-with-term-hashes: false       # round-6 P3; emit per-def subterm fingerprints
-min-term-depth: 3             # round-6 P3 filter; ignored without with-term-hashes
+with-term-hashes: false       # emit per-def subterm fingerprints
+min-term-depth: 3             # filter; ignored without with-term-hashes
 with-signatures: false        # emit per-def rendered type signatures
 normalise-signatures: false   # normalise types before rendering; needs with-signatures
 signature-implicits: false    # show implicit args in signatures; needs with-signatures
@@ -314,7 +314,7 @@ Module clusters keep their click-to-collapse behavior; only leaf clicks open the
 
 No separate `agda --html` step is needed — the backend writes the per-module Agda HTML to a temp directory under `-o`, slices the snippets out, removes the temp dir, and emits the bundles under `snippets/`. Names whose source file isn't reachable at compile time (e.g., some builtin / synthetic names) simply have no snippet attached and show a small placeholder.
 
-> **Removed:** earlier versions also embedded every snippet *inline* in a single self-contained `deps.html` (no `--lazy`). That mode was dropped — inline source could push `deps.html` past a gigabyte, and the lazy bundles cover the same need without the load-everything-up-front cost. Passing `--with-source` without `--lazy` now prints a warning and renders without embedded snippets. For *linked* (rather than embedded) source, see `--agda-html-dir` below, which needs no `--lazy`.
+> `--with-source` requires `--lazy`: the snippet bundles are fetched at runtime. (The earlier inline mode — every snippet baked into a single `deps.html` — was removed because it could push the file past a gigabyte.) Passing `--with-source` without `--lazy` prints a warning and renders without snippets. For *linked* rather than embedded source, see `--agda-html-dir` below (no `--lazy` needed).
 
 ### Opening the full `agda --html` page (`--agda-html-dir`)
 
@@ -361,17 +361,7 @@ On page load, the shell only fetches `graph.json` and cytoscape renders ~N modul
 
 **Why HTTP?** Modern browsers block `fetch()` on `file://` URLs, so the lazy layout has to be served via a tiny static server. `python3 -m http.server` is enough; any static-file server works.
 
-For reference, on a real-world project (the reference corpus, ~21k nodes, ~248k leaf edges, ~33k aggregated module-to-module edges, ~17k snippets):
-
-| Mode | Initial bytes (deps.html + graph.json) | Total bytes on disk |
-| --- | --- | --- |
-| inline source (removed) | 171 MB | 171 MB |
-| `--lazy` (early version: inlined edges) | 22 MB | 177 MB |
-| `--lazy` (current: module-split) | **3.2 MB** | 207 MB across 1+1+1974+1947 files |
-
-The first row is the now-removed inline-source mode, kept for context: it's why `--with-source` requires `--lazy`.
-
-The bulk of the on-disk size moves into per-module files (`modules/`, `snippets/`) that are only fetched when the user actually opens that module. Most users see much less than 3.2 MB over the wire.
+For reference, on a real-world project (~21k nodes, ~248k leaf edges, ~33k aggregated module-to-module edges, ~17k snippets), the module-split `--lazy` layout loads **~3.2 MB** initially (`deps.html` + `graph.json`) out of ~207 MB total on disk. The bulk of the on-disk size lives in per-module files (`modules/`, `snippets/`) fetched only when you open that module, so most users see much less than 3.2 MB over the wire.
 
 ## Running on your own code
 
@@ -396,7 +386,7 @@ Definitions that come from imported libraries appear as their own module cluster
 `--format=json` ships in two shapes selected by `--json-mode`:
 
 - **packed** (default) — the v2 wire format. Adjacency is CSR-packed; per-def state and module indices are base64-encoded `Int8` / `Int32` typed arrays. Optimal for projects with tens of thousands of nodes. Writing a consumer requires a base64 → typed-array decode pass. By default the packed `defs` object carries only `names` / `modules` / `states` / `x` / `y`; add [`--packed-analytical`](#backend-flags) to also emit the per-definition `kinds` / `lines` / `access` (and `types` under `--with-signatures`, CSR-packed `subterm*` under `--with-term-hashes`) arrays, so a consumer keeps the size win without losing the analytical fields the expanded form has. A decoded packed-analytical graph is node-for-node identical to expanded (the `schema/packed_analytical_check.py` gate enforces this).
-- **expanded** — the obvious shape: `definitions` as an array of `{id, name, module, state, kind, x, y}` records, `definitionEdges` and `moduleEdges` as arrays of qname / module-name pairs, plus a `reexports` array. No base64. Carries `"schemaVersion": 2` and `"mode": "expanded"` at the top level so downstream tools can recognise the shape. Best for small fixtures and ad-hoc tooling. Round 4 added an optional `definitionEdgesProvenance :: [Provenance]` array, parallel to `definitionEdges`, tagging each edge as one of `signature | body | module-local | with | unknown` (`module-local` marks an edge into an anonymous-module-local helper — a `where`-block helper or a `module _ (…) where` parameterised-section member; it was named `where` before `nodeKeyVersion` 3); older JSON without the field still parses (the consumer falls back to `unknown` for every edge). Both packed and expanded forms also carry a `"producer"` string (the build fingerprint of the emitting `agda-deps` — version, git revision, build date, GHC) and a `"nodeKeyVersion"` integer (the node-naming convention version, for stale-cache detection); both are additive and optional, and absent `nodeKeyVersion` is read as `1`.
+- **expanded** — the obvious shape: `definitions` as an array of `{id, name, module, state, kind, x, y}` records, `definitionEdges` and `moduleEdges` as arrays of qname / module-name pairs, plus a `reexports` array. No base64. Carries `"schemaVersion": 2` and `"mode": "expanded"` at the top level so downstream tools can recognise the shape. Best for small fixtures and ad-hoc tooling. Includes an optional `definitionEdgesProvenance :: [Provenance]` array, parallel to `definitionEdges`, tagging each edge as one of `signature | body | module-local | with | unknown` (`module-local` marks an edge into an anonymous-module-local helper — a `where`-block helper or a `module _ (…) where` parameterised-section member; it was named `where` before `nodeKeyVersion` 3); older JSON without the field still parses (the consumer falls back to `unknown` for every edge). Both packed and expanded forms also carry a `"producer"` string (the build fingerprint of the emitting `agda-deps` — version, git revision, build date, GHC) and a `"nodeKeyVersion"` integer (the node-naming convention version, for stale-cache detection); both are additive and optional, and absent `nodeKeyVersion` is read as `1`.
 
 State letters: `D` (defined), `P` (postulate), `H` (hole), `F` (failed under `--keep-going` — module-level marker, no underlying definition).
 

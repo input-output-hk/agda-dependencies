@@ -1,34 +1,24 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | @--incremental@ serialise cache: lets a rebuild skip re-emitting
--- byte-identical output (the "P2" half of incremental rebuild —
--- after the fragment cache cuts the per-definition /walk/, this cuts
--- the /serialise + write/ that then dominates).
+-- byte-identical output. Two skip mechanisms, both keyed off a tiny
+-- text manifest persisted next to the fragment cache:
 --
--- Two skip mechanisms, both keyed off a tiny manifest persisted next
--- to the fragment cache:
---
--- * __Monolithic output__ (@deps.json@ / inline @deps.html@) is a
---   single blob whose slices can't be patched cheaply, so the win is
---   limited to the /no-op rebuild/: if no module recompiled this run
---   (every fragment was a cache hit) AND the output-affecting context
---   (module set, options, build identity) is unchanged, the on-disk
---   file is already byte-identical — skip both generation and write.
+-- * __Monolithic output__ (@deps.json@ / inline @deps.html@) is one
+--   blob, so the win is limited to the no-op rebuild: skip both
+--   generation and write when no module recompiled this run AND the
+--   output-affecting context (module set, options, build identity) is
+--   unchanged.
 --
 -- * __Lazy per-module files__ (@modules\/\<M\>.json@,
---   @snippets\/\<M\>.json@) are independent, so each carries its own
---   content /epoch/; only files whose epoch changed are regenerated
---   and rewritten. A body-only edit thus rewrites just the edited
---   module's file. (Adding\/removing a definition shifts the global
---   node indices the per-module @outEdges@ reference, changing many
---   epochs — that's correct, if not minimal; truly minimal would need
---   a stable-index wire change, coordinated with the JS consumer.)
+--   @snippets\/\<M\>.json@) each carry a content /epoch/; only files
+--   whose epoch changed are regenerated. Adding\/removing a definition
+--   shifts the global node indices the per-module @outEdges@ reference,
+--   so many epochs change — correct, if not minimal.
 --
--- The manifest is plain text; it carries a format version + the
--- @--gzip@ flag in its header, so a version or gzip change invalidates
--- it wholesale (forcing a full rewrite). Only 'Agda.Utils.Hash' is
--- pulled from Agda, which is version-stable, so this module needs no
--- CPP.
+-- The manifest header carries a format version + the @--gzip@ flag; a
+-- change to either invalidates it wholesale. Needs no CPP (only the
+-- version-stable 'Agda.Utils.Hash' is pulled from Agda).
 module AgdaDeps.SerialiseCache
   ( Manifest
   , emptyManifest

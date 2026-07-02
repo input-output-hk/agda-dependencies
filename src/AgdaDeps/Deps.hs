@@ -158,13 +158,10 @@ data EdgeProv
   = ESignature  -- ^ Target appears in @defType@.
   | EBody       -- ^ Target appears in @theDef@ only (not in @defType@,
                 -- not a with-/anonymous-module helper).
-  | EModuleLocal -- ^ Target is a definition that was lexically nested in
-                -- an anonymous module — a @where@-block helper /or/ a
-                -- @module _ (…) where@ parameterised-section member
-                -- (Agda represents both identically). Does /not/ imply
-                -- the target is owned by this specific source; it only
-                -- flags that the target is a locally-scoped helper rather
-                -- than a top-level declared name. Wire tag: @module-local@.
+  | EModuleLocal -- ^ Target is an anonymous-module helper (a @where@-block
+                -- helper or a parameterised-section member; Agda represents
+                -- both identically). Flags a locally-scoped helper, not
+                -- ownership by this source. Wire tag: @module-local@.
   | EWith       -- ^ Target is the with-helper named by @funWith@.
   | EUnknown    -- ^ Catch-all: instance-method provider edges, or
                 -- contracted edges whose chain's source provenance was
@@ -245,22 +242,19 @@ instance Pretty ADDef where
                           , pshow "Deps:"  <+> pretty _deps
                           , pshow "DepsProv:" <+> pshow (M.toAscList _depsProv) ]
 
--- | Canonical node-identity string for a 'QName' as it appears in the
--- graph. Anonymous-module path segments (@where@-block helpers and
--- @module _ (…) where@ section members, which Agda renders with the
--- @._.@ marker) are /lifted/ into their nearest named ancestor module
--- via 'liftAnonSegments' — @Mod._.helper@ becomes @Mod.helper@,
--- @Mod._._.deep@ becomes @Mod.deep@ — so a section/where definition reads
--- as the parent-module member it logically is. Because lifting collapses
--- the per-section @_@ qualifier, same-named helpers in one module would
--- print identically, so they are disambiguated by their binding-site
--- line (@Mod.helper\@15@); a helper with no recorded binding site falls
--- back to the bare lifted name. Top-level names have no anonymous
--- segment, so 'liftAnonSegments' leaves them unchanged.
+-- | Canonical node-identity string for a 'QName'. Anonymous-module
+-- segments (the @._.@ marker Agda uses for both @where@-block helpers and
+-- @module _ (…) where@ section members) are lifted into the nearest named
+-- ancestor via 'liftAnonSegments' — @Mod._.helper@ becomes @Mod.helper@.
+-- Lifting collapses the per-section @_@ qualifier, so same-named helpers
+-- are disambiguated by binding-site line (@Mod.helper\@15@); a helper with
+-- no recorded binding site falls back to the bare lifted name.
 --
--- Single source of truth for node identity: 'hashQName' is its hash,
--- and the JSON wire @"name"@ field and edge endpoints are this exact
--- string. 'moduleKey' is the matching module-attribution function.
+-- Single source of truth for node identity: 'hashQName' is its hash, and
+-- the JSON wire @"name"@ field and edge endpoints are this exact string.
+-- Do not revert to bare 'prettyShow': same-named @where@-helpers collapse
+-- onto one node and lose their edges. 'moduleKey' is the matching
+-- module-attribution function.
 nodeKey :: QName -> String
 nodeKey qn
   | "._." `isInfixOf` raw     -- 'isWhereHelperName', inlined to reuse 'raw'
@@ -271,27 +265,17 @@ nodeKey qn
     lifted = liftAnonSegments raw
 
 -- | Canonical owning-module string for a 'QName', with anonymous
--- (@where@-block \/ parameterised-section) sub-modules lifted away via
--- 'liftAnonSegments' so attribution lands on the nearest /named/ module
--- (@Mod._@ ↦ @Mod@, @Mod._._@ ↦ @Mod@). The module-level companion to
--- 'nodeKey': every place that derives a module name from a 'QName' for
--- the graph (module DAG, pods, @moduleFiles@, externals classification,
--- @--exclude@ matching) routes through this so phantom @Mod._@ module
--- nodes never surface and set / index / membership all agree.
+-- sub-modules lifted away via 'liftAnonSegments' so attribution lands on
+-- the nearest named module (@Mod._@ ↦ @Mod@). Every place that derives a
+-- module name from a 'QName' for the graph must route through this, or
+-- phantom @Mod._@ module nodes surface and set/index/membership drift.
 moduleKey :: QName -> String
 moduleKey = liftAnonSegments . prettyShow . qnameModule
 
--- | Version of the on-disk node-key convention emitted by 'nodeKey'.
--- Stamped into @graph.json@ as @"nodeKeyVersion"@ so a consumer can
--- detect a stale-format cached graph. Bump whenever 'nodeKey' changes
--- shape.
---
---   * v1 — bare 'prettyShow';
---   * v2 — the @\@\<binding-line\>@ disambiguator on @where@/anonymous
---     helpers;
---   * v3 — anonymous-module segments lifted into the nearest named
---     ancestor ('liftAnonSegments'): @Mod._.helper\@15@ ↦
---     @Mod.helper\@15@, attribution re-homed to @Mod@.
+-- | Version of the node-key convention emitted by 'nodeKey'. Stamped
+-- into @graph.json@ so a consumer can detect a stale-format cached graph.
+-- Bump whenever 'nodeKey' changes shape. Currently 3 (anonymous-module
+-- segments lifted into the nearest named ancestor).
 nodeKeyVersion :: Int
 nodeKeyVersion = 3
 
@@ -326,10 +310,9 @@ computeDefAD opts def@Defn{..} = do
   let excludes = optExcludeModules opts
       notExcluded qn = not (isExcludedModule excludes (moduleKey qn))
       -- Walk 'defType' and 'theDef' separately to record which set each
-      -- name came from. The raw walks are shared with 'classifyDefWith'
-      -- (the hole check) so each tree is traversed once. Both sides go
-      -- through the exclude filter here; the 'ignoreDependency' filter is
-      -- applied later in 'contractIgnoredEdges'.
+      -- name came from. Raw walks are shared with 'classifyDefWith' so
+      -- each tree is traversed once. 'ignoreDependency' is applied later
+      -- in 'contractIgnoredEdges'.
       !rawSig    = namesIn defType
       !rawBody   = namesIn theDef
       !sigNames  = S.fromList (filter notExcluded rawSig)
@@ -637,18 +620,14 @@ contractIgnoredEdges defs = do
       -- the per-def rewrite, so 'contractWith' runs exactly once per def.
       expandeds  = map (contractWith hidden memo . _depsProv) defs
       allTargets = S.unions (map M.keysSet expandeds)
-  -- 'ignoreDependency' is a stable pure function of its 'QName' (a
-  -- signature lookup), so run it once per *distinct* contracted target
-  -- instead of once per (def, target) pair: a popular lemma referenced by
-  -- N kept defs was previously re-checked N times.
+  -- 'ignoreDependency' is a pure function of its 'QName' (a signature
+  -- lookup), so run it once per distinct contracted target.
   ignored <- filterM ignoreDependency (S.toList allTargets)
   let !ignoredSet = S.fromList ignored
   pure (zipWith (rewrite ignoredSet) defs expandeds)
   where
-    -- Drop the ignored targets from a contracted dep map. 'withoutKeys'
-    -- over the precomputed set yields exactly the keys
-    -- { qn in keys expanded : not (ignoreDependency qn) } that the old
-    -- per-def 'filterM' produced, with identical 'EdgeProv' values.
+    -- Drop the ignored targets from a contracted dep map, keeping the
+    -- surviving keys' 'EdgeProv' values.
     rewrite ignoredSet d expanded =
       let !keptProv = M.withoutKeys expanded ignoredSet
       in d { _deps = M.keysSet keptProv, _depsProv = keptProv }
@@ -900,18 +879,10 @@ ignoreDef Defn{..} = case theDef of
 
   -- Pattern-lambda / with-generated / Kan-op functions.
   Function{..} | isJust funExtLam || isWithFun funWith || isJust funIsKanOp -> True
-  -- 'funInline' functions: a user @{-# INLINE #-}@ (module-instantiation
-  -- copies are already caught by the 'defCopy' guard above, so this rule
-  -- is *not* about them — the historical "instantiated modules" comment
-  -- was wrong). DELIBERATE drop, do NOT remove: Agda inlines every call
-  -- site into the caller's body during type-checking, so by the time
-  -- 'compileDefAD' sees the elaborated 'Defn' an INLINE function has zero
-  -- *incoming* edges (the callers point at its body instead). Keeping it
-  -- would add an orphan node that a downstream dead-code analysis flags
-  -- as a false "dead". The lost call edges are unrecoverable from the
-  -- Backend's post-elaboration syntax (they're gone before the hook
-  -- fires); the principled recovery is consumer-side source scanning.
-  -- Characterised by test/InlineGap.agda; see Backlog.md.
+  -- Do NOT remove: drops user @{-# INLINE #-}@ functions. Agda inlines
+  -- every call site into the caller's body during type-checking, so by
+  -- the time the hook fires an INLINE function has zero incoming edges;
+  -- keeping it would add a false-"dead" orphan node.
   d@Function{..} | d ^. funInline -> True
 
   -- Primitive functions with no clauses (keeps builtin ones).
