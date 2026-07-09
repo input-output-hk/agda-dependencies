@@ -162,10 +162,12 @@ data GraphInput = GraphInput
     -- defs, no import edges, and aren't the entry. Used by
     -- 'AgdaDeps.SkipAgda' to surface modules discovered by the
     -- source-file scan that happen to be orphans in the import graph.
-  , giReExports       :: ![(String, String, [String])]
+  , giReExports       :: ![(String, String, [String], [(String, String)])]
     -- ^ Per (host-module, source-module) the fully-qualified names the
-    -- host module re-exports via @open … public@. Dedup-sorted by the
-    -- producer. Emitted in expanded JSON only.
+    -- host module re-exports via @open … public@, plus the renamed
+    -- (alias, canonical-nodeKey) pairs for that row (empty when nothing
+    -- was renamed). Dedup-sorted by the producer. Emitted in expanded
+    -- JSON only.
   , giExternalsSummary :: !(Maybe ExternalsSummary)
     -- ^ Diagnostic summary of the externals stripped under
     -- @--no-externals@; carried in both packed and expanded output.

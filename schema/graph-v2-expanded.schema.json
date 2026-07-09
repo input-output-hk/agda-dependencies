@@ -206,6 +206,11 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Fully-qualified names flowing through (match `definition.name`)."
+        },
+        "renames": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Additive/optional (R14). Map from each `renaming`d in-scope alias to the canonical `nodeKey` it resolves to (a member of `names`). Omitted when the row has no renamed entries, so rename-free corpora stay byte-identical."
         }
       }
     },

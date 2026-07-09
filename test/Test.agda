@@ -12,6 +12,7 @@ open import Where using (sumSquares; weirdSum)
 open import Collision using (useA; useB)  -- E1 regression: same-named `where` helpers
 open import InlineGap using (useInline; useAlias)  -- inliner-gap characterisation (#3)
 open import AnonSection using (useSection)  -- anonymous-module section lifting (nodeKeyVersion 3)
+import RenamedReexport  -- R14 fixture. Qualified (no `open`) on purpose: `open`ing pulls the Nat->Number alias into scope and reprints every --with-signatures type as `Number`.
 
 variable a b : Set
 

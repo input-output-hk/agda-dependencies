@@ -34,8 +34,9 @@ renderJson
   -> [FilePath]              -- ^ source files (from precompute)
   -> Map String FilePath     -- ^ module name -> binding-site source file
   -> Map QName Position      -- ^ pre-computed (x, y) per definition
-  -> [(String, String, [String])]
-                             -- ^ (host, source, qualified-names) re-exports
+  -> [(String, String, [String], [(String, String)])]
+                             -- ^ (host, source, qualified-names, renamed
+                             --   alias->canonical pairs) re-exports
   -> Maybe ExternalsSummary  -- ^ diagnostic summary under --no-externals
   -> [ADDef]
   -> String

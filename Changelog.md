@@ -7,6 +7,26 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-07-09 — `agda-deps` — emit `renaming` aliases on public re-exports
+
+Acting on external feedback: `open import M public renaming (merge to
+combine)` re-exports `M.merge` under the in-scope name `combine`, but the
+expanded `graph.json` `reexports[]` rows carried canonical FQNs only, so a
+consumer could not resolve `combine` back to `M.merge`. The alias was
+already computed in `collectReExports` and discarded.
+
+- **New optional `renames` map** on each expanded-mode `reexport` object:
+  `{ alias-in-scope-name: canonical-nodeKey }`, where the canonical value
+  is a member of that row's `names`. Omitted when the row has no renamed
+  entries, so rename-free corpora produce byte-identical output.
+- Expanded-only — packed and `--lazy` never emitted `reexports`, so there
+  is no packed-analytical or lazy work, and no fragment-format bump
+  (re-exports are derived in `postCompile`, not cached).
+- Additive wire field: `schemaVersion` stays 2, `nodeKeyVersion` stays 3.
+  Schema oracle regenerated from `Wire.hs`; golden regenerated cold.
+- Fixture: `test/RenamedReexport.agda`
+  (`open import Nat public renaming (Nat to Number)`).
+
 ## 2026-06-30 — `agda-deps` — fix: `wiki-backlinks` view back/forward navigation
 
 The `wiki-backlinks` view named its navigation stack `history`, which

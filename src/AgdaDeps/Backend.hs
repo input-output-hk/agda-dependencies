@@ -53,7 +53,7 @@ import Agda.Utils.GetOpt ( OptDescr(Option), ArgDescr(ReqArg, NoArg) )
 
 import Agda.Syntax.Abstract.Name ( QName )
 import qualified Agda.Syntax.Abstract.Name as A
-import Agda.Syntax.Internal ( qnameModule )
+import Agda.Syntax.Internal ( qnameModule, qnameName )
 import Agda.Syntax.Common.Pretty ( prettyShow )
 import Agda.Syntax.Scope.Base
   ( allThingsInScope, NameSpace(nsInScope, nsNames)
@@ -490,9 +490,9 @@ postCompileAD opts _ defMap = do
       precomputeImportEndpoints :: [String]
       precomputeImportEndpoints =
         concat [ [s, t] | (s, t) <- precomputedImports precomputed ]
-      -- (host, source, qname) re-export triples across all visited
+      -- (host, source, qname, alias) re-export tuples across all visited
       -- interfaces, computed once and shared with 'reExportRows' below.
-      reExportRaw :: [(String, String, String)]
+      reExportRaw :: [(String, String, String, Maybe String)]
       reExportRaw = concatMap (collectReExports . miInterface) (M.elems visited)
       -- Re-export hubs: a module that only @open … public@s names from
       -- elsewhere contributes no QName of its own to 'allQNames0', so it
@@ -501,7 +501,7 @@ postCompileAD opts _ defMap = do
       -- hub like @Data.List@ is seen and classified external. In-root
       -- hubs already carry True via other signals ('M.insertWith (||)').
       reExportEndpoints :: [String]
-      reExportEndpoints = concat [ [h, t] | (h, t, _n) <- reExportRaw ]
+      reExportEndpoints = concat [ [h, t] | (h, t, _n, _a) <- reExportRaw ]
       allEndpointModules :: [String]
       allEndpointModules =
         visitedImportEndpoints ++ precomputeImportEndpoints ++ reExportEndpoints
@@ -548,17 +548,25 @@ postCompileAD opts _ defMap = do
       visitedImportEdges =
         [ (s, t) | (s, t) <- importPairs, s /= t, keep s, keep t ]
 
-      -- (host-module, source-module, [qualified-names]) rows aggregated
-      -- across every visited interface. 'collectReExports' returns one
-      -- row per (host, source, qname) triple, grouped here by
-      -- (host, source) and dedup-sorted.
-      reExportRows :: [(String, String, [String])]
+      -- (host-module, source-module, [qualified-names], [(alias,
+      -- canonical)]) rows aggregated across every visited interface.
+      -- 'collectReExports' returns one tuple per (host, source, qname,
+      -- alias); grouped here by (host, source) and dedup-sorted. The
+      -- renames map is built from a second (host, source)-keyed map that
+      -- only collects tuples with a 'Just' alias; empty when nothing was
+      -- renamed (Wire omits the field then, keeping output byte-identical).
+      reExportRows :: [(String, String, [String], [(String, String)])]
       reExportRows =
-        let raw = [ (h, t, n) | (h, t, n) <- reExportRaw, keep h, keep t ]
+        let raw = [ (h, t, n, a) | (h, t, n, a) <- reExportRaw, keep h, keep t ]
             grouped :: M.Map (String, String) (S.Set String)
             grouped = M.fromListWith S.union
-              [ ((h, t), S.singleton n) | (h, t, n) <- raw ]
-        in [ (h, t, S.toAscList ns) | ((h, t), ns) <- M.toAscList grouped ]
+              [ ((h, t), S.singleton n) | (h, t, n, _) <- raw ]
+            renamesM :: M.Map (String, String) (S.Set (String, String))
+            renamesM = M.fromListWith S.union
+              [ ((h, t), S.singleton (al, n)) | (h, t, n, Just al) <- raw ]
+        in [ (h, t, S.toAscList ns, maybe [] S.toAscList (M.lookup (h, t) renamesM))
+           | ((h, t), ns) <- M.toAscList grouped
+           ]
 
   let precomputedImportEdges =
         [ (s, t)
@@ -953,19 +961,26 @@ findPrivateRanges fp = do
 -- because Agda's 'openModule' uses 'PublicNS' for child-module opens
 -- and 'ImportedNS' otherwise.
 --
--- Returns @(host, source, qname)@ triples (caller aggregates and
+-- Returns @(host, source, qname, alias)@ tuples (caller aggregates and
 -- dedups). Host = the interface's top-level module; source = the
 -- 'QName''s 'qnameModule', so chained re-exports collapse to the
 -- definition site. Self-edges filtered by comparing to 'iModuleName'.
-collectReExports :: Interface -> [(String, String, String)]
+--
+-- @alias@ is the post-@renaming@ in-scope spelling (the 'C.Name' key of
+-- 'nsNames') when it differs from the canonical unqualified name
+-- ('qnameName' — NOT the last segment of 'nodeKey', which can carry an
+-- @\@line@ suffix); 'Nothing' for un-renamed re-exports. Lets a consumer
+-- resolve @Host.combine@ back to @M.merge@ under
+-- @open import M public renaming (merge to combine)@.
+collectReExports :: Interface -> [(String, String, String, Maybe String)]
 collectReExports i =
   let hostMod  = prettyShow (iTopLevelModuleName i)
       thisModN = iModuleName i
-  in [ (hostMod, srcMod, nodeKey qn)
+  in [ (hostMod, srcMod, nodeKey qn, alias)
      | scope <- M.elems (iScope i)
      , ns <- [ ImportedNS, PublicNS ]
      , let nsBag = scopeNameSpace ns scope
-     , (_concrete, anames) <- M.toList (nsNames nsBag)
+     , (concrete, anames) <- M.toList (nsNames nsBag)
      , an <- List1.toList anames
        -- 2.9: 'anameName' from Agda.Syntax.Abstract.Name; 2.8: from Agda.Syntax.Scope.Base.
 #if MIN_VERSION_Agda(2,9,0)
@@ -980,4 +995,9 @@ collectReExports i =
        -- Lifting can collapse a host-owned section onto the host; that's
        -- not a re-export from elsewhere, so drop it.
      , srcMod /= hostMod
+       -- The 'nsNames' key is the post-@renaming@ in-scope spelling; a
+       -- 'Just' only when it differs from the canonical unqualified name.
+     , let alias = let a = prettyShow concrete
+                       canon = prettyShow (qnameName qn)
+                   in if a == canon then Nothing else Just a
      ]

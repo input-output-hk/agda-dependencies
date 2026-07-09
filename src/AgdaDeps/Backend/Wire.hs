@@ -63,7 +63,7 @@ data ExpandedGraph = ExpandedGraph
   , egTransModEdges  :: [WireEdge]
   , egModuleFiles    :: [(String, String)]    -- ^ ascending by key
   , egSourceFiles    :: [String]
-  , egReExports      :: [(String, String, [String])]
+  , egReExports      :: [(String, String, [String], [(String, String)])]
   , egSubtermHashes  :: Maybe [[Word64]]      -- ^ present iff any def carries hashes; parallel to 'egDefs'
   , egSubtermDepths  :: Maybe [[Int]]
   , egExternalsSummary :: Maybe WireExternals
@@ -246,13 +246,17 @@ definitionFields =
   , Required "y"      (SNullableType "number") (maybe "null" show . wdY)
   ]
 
--- | The @reexport@ object (@$defs/reexport@), encoded from an
--- @(from, to, names)@ row.
-reexportFields :: [Field (String, String, [String])]
+-- | The @reexport@ object (@$defs/reexport@), encoded from a
+-- @(from, to, names, renames)@ row. @renames@ maps each renamed
+-- in-scope alias to the canonical @nodeKey@ (a member of @names@);
+-- it is optional and omitted when the row has no renamed entries, so
+-- rename-free corpora stay byte-identical.
+reexportFields :: [Field (String, String, [String], [(String, String)])]
 reexportFields =
-  [ Required "from"  (SString Nothing)        (\(f, _, _) -> jsString f)
-  , Required "to"    (SString Nothing)        (\(_, t, _) -> jsString t)
-  , Required "names" (arrOf (SString Nothing)) (\(_, _, ns) -> jStrArray ns)
+  [ Required "from"    (SString Nothing)         (\(f, _, _, _) -> jsString f)
+  , Required "to"      (SString Nothing)         (\(_, t, _, _) -> jsString t)
+  , Required "names"   (arrOf (SString Nothing)) (\(_, _, ns, _) -> jStrArray ns)
+  , Optional "renames" (SMap (SString Nothing))  (\(_, _, _, rs) -> if null rs then Nothing else Just (jStrMap rs))
   ]
 
 -- | The @externalsSummary@ object (@$defs/externalsSummary@).

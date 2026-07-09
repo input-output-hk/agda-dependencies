@@ -527,7 +527,14 @@ consumers:
     (the reified type, not normalised, Agda's default printing — no
     `--show-implicit`; rendered in `AgdaDeps.Deps.computeDefAD` via
     `prettyTCM`, emitted by `buildExpandedJson`). Absent without the
-    flag, so default output is byte-identical.
+    flag, so default output is byte-identical. A `reexports[]` row that
+    used `renaming` additionally carries an optional `renames` map
+    (`{alias-in-scope-name: canonical-nodeKey}`, the canonical value a
+    member of the row's `names`); omitted when the row renamed nothing, so
+    rename-free output is byte-identical. Computed by `collectReExports`
+    (`Backend.hs`) from the `nsNames` concrete key vs `qnameName qn`, wired
+    through `reExportRows` and `Wire.reexportFields`. Expanded-only — packed
+    and `--lazy` never emit `reexports`.
 
 - **Lazy ingest path** (`--lazy`). Wire format split across files:
   - `graph.json` — module-level skeleton:

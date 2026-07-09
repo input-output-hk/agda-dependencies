@@ -1550,7 +1550,7 @@
       "access": "public",
       "id": 2,
       "kind": "function",
-      "line": 44,
+      "line": 45,
       "module": "Test",
       "name": "Test._++_",
       "state": "D",
@@ -1570,7 +1570,7 @@
       "access": "public",
       "id": 4,
       "kind": "constructor",
-      "line": 21,
+      "line": 22,
       "module": "Test.Exp",
       "name": "Test.Exp.Plus",
       "state": "D",
@@ -1600,7 +1600,7 @@
       "access": "public",
       "id": 7,
       "kind": "constructor",
-      "line": 23,
+      "line": 24,
       "module": "Test.Exp",
       "name": "Test.Exp.Var",
       "state": "D",
@@ -1610,7 +1610,7 @@
       "access": "public",
       "id": 8,
       "kind": "function",
-      "line": 32,
+      "line": 33,
       "module": "Test",
       "name": "Test.eval'",
       "state": "D",
@@ -1679,7 +1679,7 @@
       "access": "public",
       "id": 15,
       "kind": "function",
-      "line": 26,
+      "line": 27,
       "module": "Test",
       "name": "Test.eval",
       "state": "D",
@@ -1816,7 +1816,7 @@
       "access": "public",
       "id": 29,
       "kind": "function",
-      "line": 37,
+      "line": 38,
       "module": "Test",
       "name": "Test.sum",
       "state": "D",
@@ -1952,7 +1952,7 @@
       "access": "public",
       "id": 43,
       "kind": "constructor",
-      "line": 22,
+      "line": 23,
       "module": "Test.Exp",
       "name": "Test.Exp.Int",
       "state": "D",
@@ -2059,7 +2059,7 @@
       "access": "public",
       "id": 54,
       "kind": "datatype",
-      "line": 20,
+      "line": 21,
       "module": "Test",
       "name": "Test.Exp",
       "state": "D",
@@ -2175,7 +2175,7 @@
       "access": "public",
       "id": 66,
       "kind": "function",
-      "line": 49,
+      "line": 50,
       "module": "Test",
       "name": "Test.map",
       "state": "D",
@@ -2378,6 +2378,14 @@
       "Records"
     ],
     [
+      "RenamedReexport",
+      "Agda.Primitive"
+    ],
+    [
+      "RenamedReexport",
+      "Nat"
+    ],
+    [
       "Test",
       "Agda.Primitive"
     ],
@@ -2420,6 +2428,10 @@
     [
       "Test",
       "Records"
+    ],
+    [
+      "Test",
+      "RenamedReexport"
     ],
     [
       "Test",
@@ -2499,6 +2511,7 @@
     "Records",
     "Records.Box",
     "Records.Point",
+    "RenamedReexport",
     "Test",
     "Test.Exp",
     "Where"
@@ -2555,6 +2568,29 @@
       "to": "Records.Point"
     },
     {
+      "from": "RenamedReexport",
+      "names": [
+        "Nat.Nat",
+        "Nat._*_",
+        "Nat._+_",
+        "Nat._-_",
+        "Nat._<_",
+        "Nat._==_"
+      ],
+      "renames": {
+        "Number": "Nat.Nat"
+      },
+      "to": "Nat"
+    },
+    {
+      "from": "RenamedReexport",
+      "names": [
+        "Nat.Nat.suc",
+        "Nat.Nat.zero"
+      ],
+      "to": "Nat.Nat"
+    },
+    {
       "from": "Test",
       "names": [
         "Test.Exp.Int",
@@ -2577,6 +2613,7 @@
     "List.agda",
     "Nat.agda",
     "Records.agda",
+    "RenamedReexport.agda",
     "Test.agda",
     "Where.agda"
   ],
@@ -2674,6 +2711,10 @@
       "Nat"
     ],
     [
+      "RenamedReexport",
+      "Agda.Primitive"
+    ],
+    [
       "Test",
       "Agda.Primitive"
     ],
@@ -2716,6 +2757,10 @@
     [
       "Test",
       "Records"
+    ],
+    [
+      "Test",
+      "RenamedReexport"
     ],
     [
       "Test",
