@@ -8,17 +8,38 @@ Forward-looking work on `agda-deps`. For runnable examples see
 
 ## Open
 
-- [ ] **Drop the `source-repository-package` pin** in `cabal.project` once
-  Agda 2.9 lands on Hackage. It currently points at a specific upstream commit;
-  bump it to track 2.9 fixes until release.
-
 - [ ] **Truly minimal lazy serialise.** A body-only edit already rewrites just
   the edited module's lazy file, but adding/removing a definition renumbers the
   dense global node indices the per-module `outEdges` embed, so many files'
   epochs change. Making that minimal needs a stable-per-node index in the lazy
   wire format, coordinated with the JS consumer in `agda-graph-explorer`.
 
+- [ ] **Module-level option escapes (soundness-escape Phase 2).** The per-def
+  `unsafe` tags shipped (see below) cover `NON_TERMINATING` / `primTrustMe`,
+  but *file-level* escapes — `--type-in-type`, `--no-positivity-check`,
+  `--no-termination-check`, … — are properties of an interface's pragma
+  options, not any one def. Emit a top-level optional
+  `moduleOptionEscapes :: Map module [String]` read from each visited
+  interface's recorded options in `postCompileAD`. Verify first whether a
+  per-mutual-block `NO_POSITIVITY_CHECK` even survives into the interface; if
+  only file-level pragmas are representable, document that. Phase 1 already
+  covers the measured audit misses, so this is lower priority.
+
 ## Shipped — see Changelog
+
+- **Soundness-escape `unsafe` tags (R12)** — optional per-def `unsafe` array
+  (`non-terminating`, `trustme`), orthogonal to the untouched 4-state `state`
+  enum; expanded + `--packed-analytical` (Int8 bitmask) + `--incremental`
+  fragment (format v3). A `terminating-pragma` tag was dropped —
+  `funTerminates = Just True` is written for every proven-terminating def, so
+  it's indistinguishable from a normal proof. Consumer query surface (search /
+  audit by `unsafe`) is tracked in `agda-graph-explorer`.
+
+- **`renaming` aliases on re-exports (R14)** — optional `renames` map
+  (`{alias-in-scope-name: canonical-nodeKey}`) on each expanded `reexport`
+  row, omitted when nothing was renamed. Expanded-only. Consumer-side alias
+  resolution (locate / type-of / search on the aliased name) is tracked in
+  `agda-graph-explorer`.
 
 - **`--incremental`** — P1 per-module fragment cache + P2 incremental
   serialise, plus cache GC and `--cache-dir`. Keyed on interface hash + option

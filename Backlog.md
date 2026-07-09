@@ -8,6 +8,11 @@ see [TODO.md](TODO.md).
 
 ## Deferred — would be useful, no current push
 
+- **The `source-repository-package` pin** in `cabal.project` once
+  Agda 2.9 lands on Hackage. It currently points at a specific upstream commit;
+  bump it to track 2.9 fixes until release.
+
+
 - **Multicore for the post-Agda passes.** Agda's `TCM` and the `Backend'`
   hooks are serial (upstream contract) and unsafe to fork. The post-Agda IO in
   `postCompileAD` — `backfillAccess`'s `findPrivateRanges` scan,
