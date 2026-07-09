@@ -1,6 +1,30 @@
 {
   "definitionEdges": [
     [
+      "Agda.Builtin.Equality._\u2261_",
+      "Agda.Builtin.Equality._\u2261_.refl"
+    ],
+    [
+      "Agda.Builtin.Equality._\u2261_.refl",
+      "Agda.Builtin.Equality._\u2261_"
+    ],
+    [
+      "Agda.Builtin.Equality._\u2261_.refl",
+      "Agda.Builtin.Equality._\u2261_.refl"
+    ],
+    [
+      "Agda.Builtin.TrustMe.primTrustMe",
+      "Agda.Builtin.Equality._\u2261_"
+    ],
+    [
+      "Agda.Builtin.TrustMe.primTrustMe",
+      "Agda.Builtin.TrustMe.unsafePrimTrustMe"
+    ],
+    [
+      "Agda.Builtin.TrustMe.unsafePrimTrustMe",
+      "Agda.Builtin.Equality._\u2261_"
+    ],
+    [
       "AnonSection.client@21",
       "AnonSection.helper@18"
     ],
@@ -825,6 +849,50 @@
       "Test.sum"
     ],
     [
+      "Unsafe.countdown",
+      "Nat.Nat"
+    ],
+    [
+      "Unsafe.countdown",
+      "Nat.Nat.suc"
+    ],
+    [
+      "Unsafe.countdown",
+      "Nat.Nat.zero"
+    ],
+    [
+      "Unsafe.countdown",
+      "Unsafe.countdown"
+    ],
+    [
+      "Unsafe.double",
+      "Nat.Nat"
+    ],
+    [
+      "Unsafe.double",
+      "Nat._+_"
+    ],
+    [
+      "Unsafe.loop",
+      "Nat.Nat"
+    ],
+    [
+      "Unsafe.loop",
+      "Unsafe.loop"
+    ],
+    [
+      "Unsafe.trustEq",
+      "Agda.Builtin.Equality._\u2261_"
+    ],
+    [
+      "Unsafe.trustEq",
+      "Agda.Builtin.TrustMe.primTrustMe"
+    ],
+    [
+      "Unsafe.trustEq",
+      "Nat.Nat"
+    ],
+    [
       "Where.bump@27",
       "Nat.Nat"
     ],
@@ -902,6 +970,12 @@
     ]
   ],
   "definitionEdgesProvenance": [
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "signature",
     "module-local",
     "signature",
     "body",
@@ -1108,6 +1182,17 @@
     "body",
     "body",
     "body",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "signature",
     "signature",
     "body",
     "signature",
@@ -1175,6 +1260,7 @@
       3
     ],
     [],
+    [],
     [
       3
     ],
@@ -1189,6 +1275,18 @@
       3
     ],
     [
+      6,
+      5,
+      4,
+      3,
+      3
+    ],
+    [
+      3
+    ],
+    [
+      5,
+      4,
       3
     ],
     [
@@ -1275,6 +1373,7 @@
       4,
       3
     ],
+    [],
     [
       6,
       5,
@@ -1289,6 +1388,12 @@
     [
       3
     ],
+    [
+      5,
+      4,
+      3
+    ],
+    [],
     [],
     [],
     [
@@ -1304,6 +1409,16 @@
     [
       3,
       3,
+      3
+    ],
+    [
+      6,
+      5,
+      4,
+      3
+    ],
+    [
+      4,
       3
     ],
     [],
@@ -1374,6 +1489,7 @@
       511354308412946056
     ],
     [],
+    [],
     [
       15110967548103553614
     ],
@@ -1388,7 +1504,19 @@
       6892163928050598771
     ],
     [
+      10056469477656895440,
+      5136213874406743078,
+      916752469791783868,
+      14280300931421125740,
+      13625830895801670214
+    ],
+    [
       15058666949816219313
+    ],
+    [
+      2761753525227269783,
+      6693803233404257260,
+      10056541403241865377
     ],
     [
       9436652876642671107,
@@ -1474,6 +1602,7 @@
       5290952726666939646,
       174781178164142781
     ],
+    [],
     [
       16413620078856606245,
       10389158726901342143,
@@ -1488,6 +1617,12 @@
     [
       5746864539318884019
     ],
+    [
+      4944147998164277835,
+      5955610569138450549,
+      3538298824374574107
+    ],
+    [],
     [],
     [],
     [
@@ -1504,6 +1639,16 @@
       17816455636848200477,
       10838640019838869921,
       17103234435142918104
+    ],
+    [
+      10056469477656895440,
+      5136213874406743078,
+      916752469791783868,
+      14280300931421125740
+    ],
+    [
+      13261160653392931351,
+      8906526139041846287
     ],
     [],
     [
@@ -1550,7 +1695,7 @@
       "access": "public",
       "id": 2,
       "kind": "function",
-      "line": 45,
+      "line": 46,
       "module": "Test",
       "name": "Test._++_",
       "state": "D",
@@ -1570,7 +1715,7 @@
       "access": "public",
       "id": 4,
       "kind": "constructor",
-      "line": 22,
+      "line": 23,
       "module": "Test.Exp",
       "name": "Test.Exp.Plus",
       "state": "D",
@@ -1600,7 +1745,7 @@
       "access": "public",
       "id": 7,
       "kind": "constructor",
-      "line": 24,
+      "line": 25,
       "module": "Test.Exp",
       "name": "Test.Exp.Var",
       "state": "D",
@@ -1610,7 +1755,7 @@
       "access": "public",
       "id": 8,
       "kind": "function",
-      "line": 33,
+      "line": 34,
       "module": "Test",
       "name": "Test.eval'",
       "state": "D",
@@ -1669,6 +1814,19 @@
       "access": "public",
       "id": 14,
       "kind": "function",
+      "line": 14,
+      "module": "Unsafe",
+      "name": "Unsafe.loop",
+      "state": "D",
+      "type": "Nat \u2192 Nat",
+      "unsafe": [
+        "non-terminating"
+      ]
+    },
+    {
+      "access": "public",
+      "id": 15,
+      "kind": "function",
       "line": 32,
       "module": "Nat",
       "name": "Nat._<_",
@@ -1677,9 +1835,9 @@
     },
     {
       "access": "public",
-      "id": 15,
+      "id": 16,
       "kind": "function",
-      "line": 27,
+      "line": 28,
       "module": "Test",
       "name": "Test.eval",
       "state": "D",
@@ -1687,7 +1845,7 @@
     },
     {
       "access": "public",
-      "id": 16,
+      "id": 17,
       "kind": "function",
       "line": 41,
       "module": "Records",
@@ -1697,7 +1855,17 @@
     },
     {
       "access": "public",
-      "id": 17,
+      "id": 18,
+      "kind": "function",
+      "line": 12,
+      "module": "Agda.Builtin.TrustMe",
+      "name": "Agda.Builtin.TrustMe.primTrustMe",
+      "state": "D",
+      "type": "{a : Agda.Primitive.Level} {A : Set a} {x y : A} \u2192 x Agda.Builtin.Equality.\u2261 y"
+    },
+    {
+      "access": "public",
+      "id": 19,
       "kind": "function",
       "line": 18,
       "module": "Nat",
@@ -1707,7 +1875,17 @@
     },
     {
       "access": "public",
-      "id": 18,
+      "id": 20,
+      "kind": "datatype",
+      "line": 6,
+      "module": "Agda.Builtin.Equality",
+      "name": "Agda.Builtin.Equality._\u2261_",
+      "state": "D",
+      "type": "{a : Agda.Primitive.Level} {A : Set a} \u2192 A \u2192 A \u2192 Set a"
+    },
+    {
+      "access": "public",
+      "id": 21,
       "kind": "projection",
       "line": 10,
       "module": "Coinductive.Stream",
@@ -1717,7 +1895,7 @@
     },
     {
       "access": "public",
-      "id": 19,
+      "id": 22,
       "kind": "function",
       "line": 26,
       "module": "Collision",
@@ -1727,7 +1905,7 @@
     },
     {
       "access": "public",
-      "id": 20,
+      "id": 23,
       "kind": "constructor",
       "line": 7,
       "module": "Nat.Nat",
@@ -1737,7 +1915,7 @@
     },
     {
       "access": "public",
-      "id": 21,
+      "id": 24,
       "kind": "function",
       "line": 36,
       "module": "AnonSection",
@@ -1747,7 +1925,7 @@
     },
     {
       "access": "public",
-      "id": 22,
+      "id": 25,
       "kind": "function",
       "line": 27,
       "module": "Where",
@@ -1757,7 +1935,7 @@
     },
     {
       "access": "public",
-      "id": 23,
+      "id": 26,
       "kind": "postulate",
       "line": 8,
       "module": "Holes",
@@ -1766,7 +1944,7 @@
       "type": "Nat"
     },
     {
-      "id": 24,
+      "id": 27,
       "kind": "other",
       "module": "Nat",
       "name": "Nat.suc-0",
@@ -1774,7 +1952,7 @@
     },
     {
       "access": "public",
-      "id": 25,
+      "id": 28,
       "kind": "projection",
       "line": 12,
       "module": "Records.Point",
@@ -1784,7 +1962,7 @@
     },
     {
       "access": "public",
-      "id": 26,
+      "id": 29,
       "kind": "function",
       "line": 18,
       "module": "AnonSection",
@@ -1794,7 +1972,7 @@
     },
     {
       "access": "public",
-      "id": 27,
+      "id": 30,
       "kind": "projection",
       "line": 36,
       "module": "Records.Box",
@@ -1804,7 +1982,7 @@
     },
     {
       "access": "public",
-      "id": 28,
+      "id": 31,
       "kind": "function",
       "line": 28,
       "module": "Records",
@@ -1814,9 +1992,9 @@
     },
     {
       "access": "public",
-      "id": 29,
+      "id": 32,
       "kind": "function",
-      "line": 38,
+      "line": 39,
       "module": "Test",
       "name": "Test.sum",
       "state": "D",
@@ -1824,7 +2002,7 @@
     },
     {
       "access": "public",
-      "id": 30,
+      "id": 33,
       "kind": "function",
       "line": 17,
       "module": "Collision",
@@ -1833,7 +2011,7 @@
       "type": "Nat"
     },
     {
-      "id": 31,
+      "id": 34,
       "kind": "other",
       "module": "List",
       "name": "List._\u2237_-1",
@@ -1841,7 +2019,7 @@
     },
     {
       "access": "public",
-      "id": 32,
+      "id": 35,
       "kind": "function",
       "module": "Test",
       "name": "Test.Int-0",
@@ -1850,7 +2028,7 @@
     },
     {
       "access": "public",
-      "id": 33,
+      "id": 36,
       "kind": "function",
       "line": 21,
       "module": "AnonSection",
@@ -1860,7 +2038,7 @@
     },
     {
       "access": "public",
-      "id": 34,
+      "id": 37,
       "kind": "function",
       "line": 14,
       "module": "Collision",
@@ -1870,7 +2048,7 @@
     },
     {
       "access": "public",
-      "id": 35,
+      "id": 38,
       "kind": "function",
       "line": 23,
       "module": "Nat",
@@ -1880,7 +2058,7 @@
     },
     {
       "access": "public",
-      "id": 36,
+      "id": 39,
       "kind": "datatype",
       "line": 6,
       "module": "Nat",
@@ -1890,7 +2068,7 @@
     },
     {
       "access": "public",
-      "id": 37,
+      "id": 40,
       "kind": "function",
       "line": 14,
       "module": "Nat",
@@ -1900,7 +2078,7 @@
     },
     {
       "access": "public",
-      "id": 38,
+      "id": 41,
       "kind": "function",
       "line": 32,
       "module": "InlineGap",
@@ -1910,7 +2088,7 @@
     },
     {
       "access": "public",
-      "id": 39,
+      "id": 42,
       "kind": "function",
       "line": 12,
       "module": "Where",
@@ -1920,7 +2098,7 @@
     },
     {
       "access": "public",
-      "id": 40,
+      "id": 43,
       "kind": "record",
       "line": 34,
       "module": "Records",
@@ -1930,7 +2108,7 @@
     },
     {
       "access": "public",
-      "id": 41,
+      "id": 44,
       "kind": "function",
       "line": 17,
       "module": "Records",
@@ -1940,7 +2118,7 @@
     },
     {
       "access": "public",
-      "id": 42,
+      "id": 45,
       "kind": "projection",
       "line": 37,
       "module": "Records.Box",
@@ -1950,9 +2128,9 @@
     },
     {
       "access": "public",
-      "id": 43,
+      "id": 46,
       "kind": "constructor",
-      "line": 23,
+      "line": 24,
       "module": "Test.Exp",
       "name": "Test.Exp.Int",
       "state": "D",
@@ -1960,7 +2138,7 @@
     },
     {
       "access": "public",
-      "id": 44,
+      "id": 47,
       "kind": "constructor",
       "module": "Records.Point",
       "name": "Records.Point.constructor",
@@ -1969,7 +2147,7 @@
     },
     {
       "access": "public",
-      "id": 45,
+      "id": 48,
       "kind": "function",
       "line": 28,
       "module": "InlineGap",
@@ -1979,7 +2157,7 @@
     },
     {
       "access": "public",
-      "id": 46,
+      "id": 49,
       "kind": "function",
       "line": 18,
       "module": "Coinductive",
@@ -1989,7 +2167,7 @@
     },
     {
       "access": "public",
-      "id": 47,
+      "id": 50,
       "kind": "record",
       "line": 9,
       "module": "Records",
@@ -1999,7 +2177,7 @@
     },
     {
       "access": "public",
-      "id": 48,
+      "id": 51,
       "kind": "function",
       "line": 18,
       "module": "Where",
@@ -2009,7 +2187,7 @@
     },
     {
       "access": "public",
-      "id": 49,
+      "id": 52,
       "kind": "function",
       "line": 27,
       "module": "Nat",
@@ -2019,7 +2197,7 @@
     },
     {
       "access": "public",
-      "id": 50,
+      "id": 53,
       "kind": "projection",
       "line": 11,
       "module": "Records.Point",
@@ -2029,7 +2207,7 @@
     },
     {
       "access": "public",
-      "id": 51,
+      "id": 54,
       "kind": "function",
       "line": 11,
       "module": "Collision",
@@ -2039,7 +2217,7 @@
     },
     {
       "access": "public",
-      "id": 52,
+      "id": 55,
       "kind": "function",
       "module": "Test",
       "name": "Test.Plus-1",
@@ -2048,7 +2226,17 @@
     },
     {
       "access": "public",
-      "id": 53,
+      "id": 56,
+      "kind": "function",
+      "line": 21,
+      "module": "Unsafe",
+      "name": "Unsafe.countdown",
+      "state": "D",
+      "type": "Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 57,
       "kind": "constructor",
       "module": "Coinductive.Stream",
       "name": "Coinductive.Stream.constructor",
@@ -2057,9 +2245,9 @@
     },
     {
       "access": "public",
-      "id": 54,
+      "id": 58,
       "kind": "datatype",
-      "line": 21,
+      "line": 22,
       "module": "Test",
       "name": "Test.Exp",
       "state": "D",
@@ -2067,7 +2255,7 @@
     },
     {
       "access": "public",
-      "id": 55,
+      "id": 59,
       "kind": "function",
       "line": 24,
       "module": "Where",
@@ -2077,7 +2265,7 @@
     },
     {
       "access": "public",
-      "id": 56,
+      "id": 60,
       "kind": "function",
       "line": 15,
       "module": "Where",
@@ -2087,7 +2275,27 @@
     },
     {
       "access": "public",
-      "id": 57,
+      "id": 61,
+      "kind": "constructor",
+      "line": 7,
+      "module": "Agda.Builtin.Equality._\u2261_",
+      "name": "Agda.Builtin.Equality._\u2261_.refl",
+      "state": "D",
+      "type": "{a : Agda.Primitive.Level} {A : Set a} {x : A} \u2192 x Agda.Builtin.Equality.\u2261 x"
+    },
+    {
+      "access": "public",
+      "id": 62,
+      "kind": "function",
+      "line": 30,
+      "module": "Unsafe",
+      "name": "Unsafe.double",
+      "state": "D",
+      "type": "Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 63,
       "kind": "postulate",
       "line": 12,
       "module": "Holes",
@@ -2097,7 +2305,7 @@
     },
     {
       "access": "public",
-      "id": 58,
+      "id": 64,
       "kind": "function",
       "line": 11,
       "module": "Holes",
@@ -2107,7 +2315,7 @@
     },
     {
       "access": "public",
-      "id": 59,
+      "id": 65,
       "kind": "function",
       "module": "Test",
       "name": "Test.Plus-0",
@@ -2116,7 +2324,7 @@
     },
     {
       "access": "public",
-      "id": 60,
+      "id": 66,
       "kind": "function",
       "line": 28,
       "module": "AnonSection",
@@ -2126,7 +2334,7 @@
     },
     {
       "access": "public",
-      "id": 61,
+      "id": 67,
       "kind": "constructor",
       "line": 5,
       "module": "Bool.Bool",
@@ -2135,7 +2343,7 @@
       "type": "Bool.Bool"
     },
     {
-      "id": 62,
+      "id": 68,
       "kind": "other",
       "module": "List",
       "name": "List._\u2237_-0",
@@ -2143,7 +2351,7 @@
     },
     {
       "access": "public",
-      "id": 63,
+      "id": 69,
       "kind": "constructor",
       "line": 5,
       "module": "Bool.Bool",
@@ -2153,7 +2361,7 @@
     },
     {
       "access": "public",
-      "id": 64,
+      "id": 70,
       "kind": "function",
       "line": 25,
       "module": "Coinductive",
@@ -2162,8 +2370,31 @@
       "type": "Stream Nat \u2192 Stream Nat"
     },
     {
+      "access": "private",
+      "id": 71,
+      "kind": "postulate",
+      "line": 10,
+      "module": "Agda.Builtin.TrustMe",
+      "name": "Agda.Builtin.TrustMe.unsafePrimTrustMe",
+      "state": "P",
+      "type": "{a : Agda.Primitive.Level} {A : Set a} {x y : A} \u2192 x Agda.Builtin.Equality.\u2261 y"
+    },
+    {
       "access": "public",
-      "id": 65,
+      "id": 72,
+      "kind": "function",
+      "line": 26,
+      "module": "Unsafe",
+      "name": "Unsafe.trustEq",
+      "state": "D",
+      "type": "(m n : Nat) \u2192 m Agda.Builtin.Equality.\u2261 n",
+      "unsafe": [
+        "trustme"
+      ]
+    },
+    {
+      "access": "public",
+      "id": 73,
       "kind": "function",
       "line": 23,
       "module": "Collision",
@@ -2173,9 +2404,9 @@
     },
     {
       "access": "public",
-      "id": 66,
+      "id": 74,
       "kind": "function",
-      "line": 50,
+      "line": 51,
       "module": "Test",
       "name": "Test.map",
       "state": "D",
@@ -2183,7 +2414,7 @@
     },
     {
       "access": "public",
-      "id": 67,
+      "id": 75,
       "kind": "constructor",
       "line": 7,
       "module": "List.List",
@@ -2193,7 +2424,7 @@
     },
     {
       "access": "public",
-      "id": 68,
+      "id": 76,
       "kind": "function",
       "line": 23,
       "module": "Records",
@@ -2203,7 +2434,7 @@
     },
     {
       "access": "public",
-      "id": 69,
+      "id": 77,
       "kind": "record",
       "line": 7,
       "module": "Coinductive",
@@ -2214,13 +2445,49 @@
   ],
   "entryModule": "Test",
   "externalModules": [
+    "Agda.Builtin.Equality",
+    "Agda.Builtin.Equality.Erase",
+    "Agda.Builtin.Equality._\u2261_",
     "Agda.Builtin.Nat",
+    "Agda.Builtin.TrustMe",
     "Agda.Primitive",
     "Agda.Primitive.Cubical"
   ],
   "failedModules": [],
   "mode": "expanded",
   "moduleEdges": [
+    [
+      "Agda.Builtin.Equality",
+      "Agda.Builtin.Equality._\u2261_"
+    ],
+    [
+      "Agda.Builtin.Equality",
+      "Agda.Primitive"
+    ],
+    [
+      "Agda.Builtin.Equality.Erase",
+      "Agda.Builtin.Equality"
+    ],
+    [
+      "Agda.Builtin.Equality.Erase",
+      "Agda.Primitive"
+    ],
+    [
+      "Agda.Builtin.Equality._\u2261_",
+      "Agda.Builtin.Equality"
+    ],
+    [
+      "Agda.Builtin.TrustMe",
+      "Agda.Builtin.Equality"
+    ],
+    [
+      "Agda.Builtin.TrustMe",
+      "Agda.Builtin.Equality.Erase"
+    ],
+    [
+      "Agda.Builtin.TrustMe",
+      "Agda.Primitive"
+    ],
     [
       "Agda.Primitive.Cubical",
       "Agda.Primitive"
@@ -2439,6 +2706,10 @@
     ],
     [
       "Test",
+      "Unsafe"
+    ],
+    [
+      "Test",
       "Where"
     ],
     [
@@ -2448,6 +2719,26 @@
     [
       "Test.Exp",
       "Test"
+    ],
+    [
+      "Unsafe",
+      "Agda.Builtin.Equality"
+    ],
+    [
+      "Unsafe",
+      "Agda.Builtin.TrustMe"
+    ],
+    [
+      "Unsafe",
+      "Agda.Primitive"
+    ],
+    [
+      "Unsafe",
+      "Nat"
+    ],
+    [
+      "Unsafe",
+      "Nat.Nat"
     ],
     [
       "Where",
@@ -2471,6 +2762,9 @@
     ]
   ],
   "moduleFiles": {
+    "Agda.Builtin.Equality": "Equality.agda",
+    "Agda.Builtin.Equality._\u2261_": "Equality.agda",
+    "Agda.Builtin.TrustMe": "TrustMe.agda",
     "AnonSection": "AnonSection.agda",
     "Bool": "Bool.agda",
     "Bool.Bool": "Bool.agda",
@@ -2488,10 +2782,15 @@
     "Records.Point": "Records.agda",
     "Test": "Test.agda",
     "Test.Exp": "Test.agda",
+    "Unsafe": "Unsafe.agda",
     "Where": "Where.agda"
   },
   "modules": [
+    "Agda.Builtin.Equality",
+    "Agda.Builtin.Equality.Erase",
+    "Agda.Builtin.Equality._\u2261_",
     "Agda.Builtin.Nat",
+    "Agda.Builtin.TrustMe",
     "Agda.Primitive",
     "Agda.Primitive.Cubical",
     "AnonSection",
@@ -2514,11 +2813,19 @@
     "RenamedReexport",
     "Test",
     "Test.Exp",
+    "Unsafe",
     "Where"
   ],
   "nodeKeyVersion": 3,
   "producer": "<normalised>",
   "reexports": [
+    {
+      "from": "Agda.Builtin.Equality",
+      "names": [
+        "Agda.Builtin.Equality._\u2261_.refl"
+      ],
+      "to": "Agda.Builtin.Equality._\u2261_"
+    },
     {
       "from": "Bool",
       "names": [
@@ -2615,9 +2922,26 @@
     "Records.agda",
     "RenamedReexport.agda",
     "Test.agda",
+    "Unsafe.agda",
     "Where.agda"
   ],
   "transitiveModuleEdges": [
+    [
+      "Agda.Builtin.Equality",
+      "Agda.Primitive"
+    ],
+    [
+      "Agda.Builtin.Equality.Erase",
+      "Agda.Primitive"
+    ],
+    [
+      "Agda.Builtin.TrustMe",
+      "Agda.Builtin.Equality"
+    ],
+    [
+      "Agda.Builtin.TrustMe",
+      "Agda.Primitive"
+    ],
     [
       "AnonSection",
       "Agda.Primitive"
@@ -2764,11 +3088,31 @@
     ],
     [
       "Test",
+      "Unsafe"
+    ],
+    [
+      "Test",
       "Where"
     ],
     [
       "Test.Exp",
       "Nat"
+    ],
+    [
+      "Unsafe",
+      "Agda.Builtin.Equality"
+    ],
+    [
+      "Unsafe",
+      "Agda.Primitive"
+    ],
+    [
+      "Unsafe",
+      "Nat"
+    ],
+    [
+      "Unsafe",
+      "Nat.Nat"
     ],
     [
       "Where",

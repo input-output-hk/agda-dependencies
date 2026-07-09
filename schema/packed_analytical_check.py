@@ -19,6 +19,14 @@ import sys
 KINDS = ["function", "projection", "datatype", "record",
          "constructor", "postulate", "primitive", "other"]
 ACCESS = {0: None, 1: "public", 2: "private"}
+# Bit layout of the packed ``defs.unsafe`` Int8 bitmask; MUST match
+# AgdaDeps.Backend.GraphJson.encodeUnsafeByte.
+UNSAFE_BITS = [(1, "non-terminating"), (2, "trustme")]
+
+
+def unsafe_from_byte(b):
+    """Decode one packed unsafe bitmask byte to a sorted tag-name list."""
+    return sorted(name for bit, name in UNSAFE_BITS if b & bit)
 
 
 def dec(b64, fmt, size):
@@ -34,6 +42,9 @@ def decode_packed(g):
     kinds = dec(d["kinds"], "<b", 1)
     lines = dec(d["lines"], "<i", 4)
     access = dec(d["access"], "<b", 1)
+    # `unsafe` is always present in fresh packed-analytical output; guard
+    # for absence so this stays runnable against older output.
+    unsafe = dec(d["unsafe"], "<b", 1) if "unsafe" in d else [0] * n
     types = d.get("types")  # [str|null] or absent
     # subterm CSR (absent unless --with-term-hashes)
     if "subtermOffsets" in d:
@@ -50,6 +61,7 @@ def decode_packed(g):
             "line": (None if lines[i] == -1 else lines[i]),
             "access": ACCESS[access[i]],
             "type": (types[i] if types is not None else None),
+            "unsafe": unsafe_from_byte(unsafe[i]),
         }
         if offs is not None:
             a, b = offs[i], offs[i + 1]
@@ -70,6 +82,7 @@ def decode_expanded(g):
             "line": d.get("line"),
             "access": d.get("access"),
             "type": d.get("type"),
+            "unsafe": sorted(d.get("unsafe", [])),
         }
         if sh is not None:
             rec["hashes"] = sh[i]
@@ -92,7 +105,7 @@ def main():
     mismatches = []
     for name in pdefs:
         p, e = pdefs[name], edefs[name]
-        for f in ("kind", "line", "access", "type"):
+        for f in ("kind", "line", "access", "type", "unsafe"):
             if p[f] != e[f]:
                 mismatches.append(f"{name}.{f}: packed={p[f]!r} expanded={e[f]!r}")
         if p_has_sub and e_has_sub:

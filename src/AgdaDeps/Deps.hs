@@ -13,6 +13,7 @@ module AgdaDeps.Deps
     ADDef(..)
   , DefKind(..)
   , DefAccess(..)
+  , UnsafeTag(..)
 
     -- * Edge provenance
   , EdgeProv(..)
@@ -97,7 +98,7 @@ import Agda.TypeChecking.Monad
   , Definition(..), Defn(..)
   , Projection(..)
   , pattern Function, funWith, funExtLam, funInline, funIsKanOp, funClauses
-  , funProjection
+  , funProjection, funTerminates
   , pattern Primitive, primClauses
   , pattern PrimitiveSort
   , pattern Axiom
@@ -147,6 +148,35 @@ data DefAccess
 instance NFData DefAccess where
   rnf AccPrivate = ()
   rnf AccPublic  = ()
+
+-- | A soundness escape that a definition uses /directly/ (not
+-- transitively). Orthogonal to 'DefState': a def can be 'Defined' and
+-- still carry escapes. Emitted as the optional per-def @unsafe@ wire
+-- array (omitted when empty, so escape-free corpora stay byte-identical).
+--
+--   * 'UNonTerminating' — @{-# NON_TERMINATING #-}@
+--     (@funTerminates = Just False@).
+--   * 'UTrustMe' — the body/type references @primTrustMe@.
+--
+-- A @{-# TERMINATING #-}@ tag was prototyped (@funTerminates = Just True@)
+-- and dropped: verified empirically against this corpus that the ordinary
+-- termination checker /also/ writes @Just True@ back into the signature
+-- for every proven-terminating def, so the field cannot distinguish the
+-- pragma from a normal proof — it fired on @Nat._+_@, @Test.sum@, etc.
+-- 'UNonTerminating' alone still fixes the measured audit miss.
+data UnsafeTag
+  = UNonTerminating
+  | UTrustMe
+  deriving (Show, Eq, Ord)
+
+instance NFData UnsafeTag where
+  rnf x = x `seq` ()
+
+-- | 'nodeKey' of Agda's @primTrustMe@ primitive. Confirmed empirically
+-- against @test/Unsafe.agda@ (the QName survives 'namesIn' verbatim even
+-- though the primitive itself is filtered from the node set).
+trustMeNodeKey :: String
+trustMeNodeKey = "Agda.Builtin.TrustMe.primTrustMe"
 
 -- | How an outbound edge from a definition was discovered. Emitted as
 -- a wire tag (see 'provTag') at JSON-emission time in
@@ -231,6 +261,13 @@ data ADDef = ADDef
                                 -- @--with-signatures@; 'Nothing'
                                 -- otherwise. Emitted as the per-def
                                 -- @"type"@ field in expanded JSON.
+  , _unsafe :: ![UnsafeTag]
+                                -- ^ Soundness escapes used directly by
+                                -- this definition (see 'UnsafeTag').
+                                -- Always computed (no flag); emitted as
+                                -- the optional @"unsafe"@ array, omitted
+                                -- when empty. Strict: always traversed
+                                -- at emission and it's a short list.
   } deriving (Show)
 
 instance Pretty ADDef where
@@ -240,7 +277,8 @@ instance Pretty ADDef where
                           , pshow "Line:"  <+> pshow _line
                           , pshow "Access:" <+> pshow _access
                           , pshow "Deps:"  <+> pretty _deps
-                          , pshow "DepsProv:" <+> pshow (M.toAscList _depsProv) ]
+                          , pshow "DepsProv:" <+> pshow (M.toAscList _depsProv)
+                          , pshow "Unsafe:" <+> pshow _unsafe ]
 
 -- | Canonical node-identity string for a 'QName'. Anonymous-module
 -- segments (the @._.@ marker Agda uses for both @where@-block helpers and
@@ -346,6 +384,14 @@ computeDefAD opts def@Defn{..} = do
                          (prettyTCM ty)
                 pure (Just (unwords (words (render doc))))
               else pure Nothing
+  -- Soundness escapes, computed from data already in hand (no extra
+  -- term traversals): the termination-pragma marker on 'theDef' plus a
+  -- scan of the raw (pre-exclude) name walks for @primTrustMe@.
+  let termTag = case theDef of
+        Function{ funTerminates = Just False } -> [UNonTerminating]
+        _                                      -> []
+      usesTrustMe = any ((== trustMeNodeKey) . nodeKey) (rawSig ++ rawBody)
+      !unsafeTags = termTag ++ [ UTrustMe | usesTrustMe ]
   return ADDef
     { _name   = defName
     , _deps   = deps
@@ -357,6 +403,7 @@ computeDefAD opts def@Defn{..} = do
     , _subtermHashes = termHs
     , _subtermDepths = termDs
     , _sig    = sigStr
+    , _unsafe = unsafeTags
     }
 
 -- | Every 'Term' reachable from a 'Definition' for fingerprinting

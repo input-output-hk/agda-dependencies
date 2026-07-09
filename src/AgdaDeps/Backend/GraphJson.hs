@@ -33,6 +33,7 @@ module AgdaDeps.Backend.GraphJson
   ) where
 
 import Control.DeepSeq ( NFData(..) )
+import Data.Bits ( (.|.) )
 import Data.Char ( isAlphaNum, toLower )
 import Data.Int ( Int32, Int8 )
 import Data.List ( foldl', intercalate, sort, sortBy, sortOn )
@@ -55,7 +56,7 @@ import AgdaDeps.Csr
   , dedupSortedInt
   )
 import AgdaDeps.Deps    ( ADDef(..), DefKind(..), DefAccess(..)
-                        , EdgeProv(..)
+                        , EdgeProv(..), UnsafeTag(..)
                         , nodeKey, moduleKey, nodeKeyVersion, hashQName, collectAllQNames )
 import BuildInfo        ( buildFingerprint )
 import AgdaDeps.Layout  ( Position(..) )
@@ -786,6 +787,7 @@ packedAnalyticalJson defsList defs =
   ",\"kinds\":"  ++ jsB64Int8  kinds
   ++ ",\"lines\":"  ++ jsB64Int32 lns
   ++ ",\"access\":" ++ jsB64Int8  accs
+  ++ ",\"unsafe\":" ++ jsB64Int8  unsafes
   ++ typesField
   ++ subtermFields
   where
@@ -793,12 +795,17 @@ packedAnalyticalJson defsList defs =
     defLine   = mkDefLine   defs
     defAccess = mkDefAccess defs
     defSig    = mkDefSig    defs
+    defUnsafe = mkDefUnsafe defs
     hashesByQ = mkDefHashes defs
     depthsByQ = mkDefDepths defs
 
     kinds = [ encodeDefKind (defKind qn) | qn <- defsList ]
     lns   = [ maybe (-1) fromIntegral (defLine qn) | qn <- defsList ] :: [Int32]
     accs  = [ encodeDefAccess (defAccess qn) | qn <- defsList ]
+    -- One Int8 bitmask per def, ALWAYS present (like kinds/lines/access);
+    -- 0 = no escapes. Bit layout (MUST match packed_analytical_check.py
+    -- and README): bit 0 (1) = non-terminating, bit 1 (2) = trustme.
+    unsafes = [ encodeUnsafeByte (defUnsafe qn) | qn <- defsList ] :: [Int8]
     sigs  = [ defSig qn | qn <- defsList ]
 
     typesField
@@ -903,6 +910,17 @@ encodeDefAccess Nothing          = 0
 encodeDefAccess (Just AccPublic) = 1
 encodeDefAccess (Just AccPrivate) = 2
 
+-- | Pack a def's soundness escapes into one @Int8@ bitmask for the
+-- packed-analytical @defs.unsafe@ array. Bit layout (MUST match
+-- @schema/packed_analytical_check.py@ and the README): bit 0 (1) =
+-- @non-terminating@, bit 1 (2) = @trustme@. @0@ = no escapes, mirroring
+-- expanded's omission of the @unsafe@ key for such defs.
+encodeUnsafeByte :: [UnsafeTag] -> Int8
+encodeUnsafeByte = foldl' (\acc t -> acc .|. tagBit t) 0
+  where
+    tagBit UNonTerminating = 1
+    tagBit UTrustMe        = 2
+
 -- ** Per-QName analytical lookups (shared by packed-analytical + expanded)
 --
 -- Both forms key these by 'QName' over the same @defsList@, so a QName
@@ -943,6 +961,14 @@ mkDefHashes defs =
 mkDefDepths :: [ADDef] -> M.Map QName [Int]
 mkDefDepths defs =
   M.fromList [ (_name d, ds) | d <- defs, Just ds <- [_subtermDepths d] ]
+
+-- | Soundness-escape tags by QName; @[]@ for QNames with no 'ADDef'.
+-- Shared by packed-analytical and expanded so the two agree
+-- node-for-node.
+mkDefUnsafe :: [ADDef] -> (QName -> [UnsafeTag])
+mkDefUnsafe defs =
+  let !m = M.fromList [ (_name d, _unsafe d) | d <- defs ]
+  in \qn -> M.findWithDefault [] qn m
 
 -- | Wire encoding for 'EdgeProv' in the packed JSON form.
 encodeEdgeProv :: EdgeProv -> Int8
@@ -1354,6 +1380,7 @@ toExpandedGraph GraphInput{..} =
       defLine   = mkDefLine   giDefs
       defAccess = mkDefAccess giDefs
       defSig    = mkDefSig    giDefs
+      defUnsafe = mkDefUnsafe giDefs
 
       defModuleOf  = map moduleKey defsList
 
@@ -1431,6 +1458,7 @@ toExpandedGraph GraphInput{..} =
         , wdLine   = defLine qn
         , wdAccess = defAccess qn
         , wdType   = defSig qn
+        , wdUnsafe = defUnsafe qn
         , wdX      = fmap posX (M.lookup qn giPositions)
         , wdY      = fmap posY (M.lookup qn giPositions)
         }

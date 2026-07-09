@@ -40,7 +40,7 @@ import Data.Word  ( Word64 )
 import qualified Data.Set as S
 
 import AgdaDeps.Options ( DefState(..) )
-import AgdaDeps.Deps    ( DefKind(..), DefAccess(..), EdgeProv, provTag )
+import AgdaDeps.Deps    ( DefKind(..), DefAccess(..), UnsafeTag(..), EdgeProv, provTag )
 import AgdaDeps.Util    ( jsString )
 
 -- * Wire value types
@@ -79,6 +79,7 @@ data WireDef = WireDef
   , wdLine   :: Maybe Int
   , wdAccess :: Maybe DefAccess
   , wdType   :: Maybe String
+  , wdUnsafe :: [UnsafeTag]   -- ^ soundness escapes; omitted when empty
   , wdX      :: Maybe Float
   , wdY      :: Maybe Float
   }
@@ -114,6 +115,10 @@ wireKind DKOther       = "other"
 wireAccess :: DefAccess -> String
 wireAccess AccPrivate = "private"
 wireAccess AccPublic  = "public"
+
+wireUnsafe :: UnsafeTag -> String
+wireUnsafe UNonTerminating = "non-terminating"
+wireUnsafe UTrustMe        = "trustme"
 
 -- * The JSON-Schema model (draft 2020-12 subset)
 
@@ -242,6 +247,9 @@ definitionFields =
   , Optional "line"   (SInteger (Just 1))      (fmap show . wdLine)
   , Optional "access" (SRef "access")          (fmap (jsString . wireAccess) . wdAccess)
   , Optional "type"   (SString Nothing)        (fmap jsString . wdType)
+  , Optional "unsafe" (arrOf (SRef "unsafeTag"))
+      (\d -> if null (wdUnsafe d) then Nothing
+             else Just (jArray (jsString . wireUnsafe) (wdUnsafe d)))
   , Required "x"      (SNullableType "number") (maybe "null" show . wdX)
   , Required "y"      (SNullableType "number") (maybe "null" show . wdY)
   ]
@@ -277,6 +285,7 @@ defsRegistry =
   , ("access",     SString (Just ["private", "public"]))
   , ("provenance", SString (Just [ "signature", "body", "module-local"
                                   , "with", "unknown" ]))
+  , ("unsafeTag",  SString (Just [ "non-terminating", "trustme" ]))
   , ("definition",       objectSchemaOf definitionFields)
   , ("reexport",         objectSchemaOf reexportFields)
   , ("externalsSummary", objectSchemaOf externalsSummaryFields)

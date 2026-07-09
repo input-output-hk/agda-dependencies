@@ -7,6 +7,37 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-07-09 — `agda-deps` — tag soundness escapes beyond postulates (`unsafe`)
+
+Acting on external feedback: the graph flags postulates (`state: "P"`) and
+unsolved holes (`"H"`), but a `{-# NON_TERMINATING #-}` function or a body
+built on `primTrustMe` emitted as plain `state: "D"` — indistinguishable
+from safe code, so a graph-derived `agda --safe`-style audit missed them.
+
+- **New optional per-def `unsafe` array** — the escapes a definition uses
+  **directly** (not transitively): `non-terminating` (a
+  `{-# NON_TERMINATING #-}` function, `funTerminates = Just False`) and
+  `trustme` (the body/type references `primTrustMe`). Orthogonal to
+  `state`: a def can be `D` and still carry an escape. Always computed (no
+  flag; the signals are already in hand during the per-def walk), omitted
+  when empty, so escape-free corpora produce byte-identical output.
+- **Packed-analytical parity:** a dense `unsafe` `Int8` bitmask array
+  (bit 0 = `non-terminating`, bit 1 = `trustme`; `0` = none), so a decoded
+  packed graph stays node-for-node identical to expanded
+  (`schema/packed_analytical_check.py` extended to decode + compare it).
+- **`{-# TERMINATING #-}` was deliberately dropped.** Verified against the
+  corpus that Agda's ordinary termination checker also writes
+  `funTerminates = Just True` for every proven-terminating def, so the
+  marker can't be told apart from a normal proof — it would fire on
+  `Nat._+_`, `Test.sum`, and friends. `non-terminating` alone fixes the
+  measured audit miss.
+- Additive wire field: `schemaVersion` stays 2, `nodeKeyVersion` stays 3.
+  Schema oracle regenerated from `Wire.hs`; golden regenerated cold.
+  `--incremental` fragment format bumped 2 → 3 (tags ride the fragment, so
+  a `Skip`ped module keeps them; older caches self-invalidate).
+- Fixture: `test/Unsafe.agda` (`NON_TERMINATING`, `primTrustMe`, a
+  `TERMINATING` control, and a plain function that must carry no tag).
+
 ## 2026-07-09 — `agda-deps` — emit `renaming` aliases on public re-exports
 
 Acting on external feedback: `open import M public renaming (merge to

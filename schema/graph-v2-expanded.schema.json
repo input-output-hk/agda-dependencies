@@ -159,6 +159,11 @@
       "enum": ["signature", "body", "module-local", "with", "unknown"],
       "description": "How an edge was discovered: defType (signature), theDef body, anonymous-module-local helper (where-block helper or parameterised-section member; does not imply ownership by this source), with-auxiliary, or unclassified."
     },
+    "unsafeTag": {
+      "type": "string",
+      "enum": ["non-terminating", "trustme"],
+      "description": "A soundness escape a definition uses directly: `non-terminating` (a `{-# NON_TERMINATING #-}` function) or `trustme` (the body/type references `primTrustMe`). A `{-# TERMINATING #-}` marker is deliberately NOT surfaced: Agda's ordinary termination checker also stamps proven defs, so it cannot be distinguished from a normal proof."
+    },
     "definition": {
       "type": "object",
       "additionalProperties": true,
@@ -184,6 +189,11 @@
         "type": {
           "type": "string",
           "description": "Additive/optional (--with-signatures). Reified type signature, as-written (not normalised), collapsed to one line."
+        },
+        "unsafe": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/unsafeTag" },
+          "description": "Additive/optional (R12). Soundness escapes this definition uses DIRECTLY (not transitively). Always computed (no flag); omitted when empty, so escape-free defs stay byte-identical. Orthogonal to `state`: a def can be `D` and still carry escapes."
         },
         "x": {
           "type": ["number", "null"],

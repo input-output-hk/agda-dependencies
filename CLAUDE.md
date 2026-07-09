@@ -447,6 +447,20 @@ Wire encoding: packed JSON → `Int8` byte (0/1/2/3); expanded JSON +
 the v2 `graph.json` consumed by HTML → letter `"D"` / `"P"` / `"H"` /
 `"F"`.
 
+**Soundness escapes are orthogonal to `state`.** The 4-state enum is
+untouched by escape tagging. Escapes beyond postulates/holes — a
+`{-# NON_TERMINATING #-}` function or a body using `primTrustMe` — are
+surfaced as a separate optional per-def `unsafe` array (`UnsafeTag` in
+`Deps.hs`; wire tags `non-terminating` / `trustme` owned by `Wire.hs`).
+Always computed (no flag), omitted when empty (escape-free defs stay
+byte-identical), and 3-valued semantics don't apply — it's a list. Emitted
+in expanded (`unsafe: [...]`) and packed-analytical (an `Int8` bitmask,
+bit 0 = non-terminating, bit 1 = trustme). A `{-# TERMINATING #-}` tag was
+tried and dropped: Agda's ordinary termination checker also sets
+`funTerminates = Just True`, so it can't be told apart from a normal
+proof (fired on `Nat._+_`, `Test.sum`, …). Direct-use only; transitive
+taint is a consumer query. Fixture: `test/Unsafe.agda`.
+
 ## v2 graph.json schema
 
 All HTML views consume the v2 schema; `--format=json` emits it

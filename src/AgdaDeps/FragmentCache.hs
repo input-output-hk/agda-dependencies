@@ -68,7 +68,7 @@ import qualified Agda.TypeChecking.Serialise as Ser
 import Agda.Utils.Serialize ( Serialize, serialize, deserialize )
 
 import AgdaDeps.Deps
-  ( DefKind(..), EdgeProv(..), nodeKeyVersion )
+  ( DefKind(..), EdgeProv(..), UnsafeTag(..), nodeKeyVersion )
 import AgdaDeps.Logging ( info )
 import AgdaDeps.Options ( DefState(..) )
 #endif
@@ -90,7 +90,7 @@ data FragmentData = FragmentData
 -- before/after deltas, not name-prefix filters (a filter drops
 -- anonymous-module entries whose QNames no module name prefixes).
 fragmentFormatVersion :: Word64
-fragmentFormatVersion = 2
+fragmentFormatVersion = 3
 
 -- | Fingerprint of every option that changes fragment /content/.
 -- Rendering-only options (format, view, colours, externals filtering,
@@ -247,10 +247,13 @@ tryDeserialize bs =
 -- fragment (treated as a miss).
 
 type WireProv    = (QName, Int)
+-- The trailing @[Int]@ is the def's soundness-escape tags
+-- ('UnsafeTag' via 'unsafeToInt'); nested inside an existing pair to
+-- stay within the tuple arities 'EmbPrj' ships instances for.
 type WireDef     =
   ( (QName, [WireProv])
   , ((Int, Int), Maybe Int)
-  , ((Maybe [Word64], Maybe [Int]), Maybe String)
+  , ((Maybe [Word64], Maybe [Int]), (Maybe String, [Int]))
   )
 type WirePayload = ([WireDef], ([(QName, [WireProv])], [(QName, [QName])]))
 
@@ -265,7 +268,8 @@ toWire (FragmentData defs ignored providers) =
     defToWire d =
       ( (_name d, provsToWire (_depsProv d))
       , ((stateToInt (_state d), kindToInt (_kind d)), _line d)
-      , ((_subtermHashes d, _subtermDepths d), _sig d)
+      , ( (_subtermHashes d, _subtermDepths d)
+        , (_sig d, map unsafeToInt (_unsafe d)) )
       )
     provsToWire m = [ (qn, provToInt p) | (qn, p) <- M.toList m ]
 
@@ -279,10 +283,11 @@ fromWire (wdefs, (wignored, wproviders)) = do
     , fragProviders = M.fromList wproviders
     }
   where
-    defFromWire ((qn, wps), ((st, kd), line), ((hs, ds), sig)) = do
-      prov  <- provsFromWire wps
-      state <- intToState st
-      kind  <- intToKind kd
+    defFromWire ((qn, wps), ((st, kd), line), ((hs, ds), (sig, wunsafe))) = do
+      prov   <- provsFromWire wps
+      state  <- intToState st
+      kind   <- intToKind kd
+      unsafe <- mapM intToUnsafe wunsafe
       pure ADDef
         { _name   = qn
         , _deps   = M.keysSet prov
@@ -294,6 +299,7 @@ fromWire (wdefs, (wignored, wproviders)) = do
         , _subtermHashes = hs
         , _subtermDepths = ds
         , _sig    = sig
+        , _unsafe = unsafe
         }
     provsFromWire ps =
       M.fromList <$> mapM (\ (qn, p) -> (,) qn <$> intToProv p) ps
@@ -346,6 +352,15 @@ intToProv 2 = Just EModuleLocal
 intToProv 3 = Just EWith
 intToProv 4 = Just EUnknown
 intToProv _ = Nothing
+
+unsafeToInt :: UnsafeTag -> Int
+unsafeToInt UNonTerminating = 0
+unsafeToInt UTrustMe        = 1
+
+intToUnsafe :: Int -> Maybe UnsafeTag
+intToUnsafe 0 = Just UNonTerminating
+intToUnsafe 1 = Just UTrustMe
+intToUnsafe _ = Nothing
 
 -- ** Byte-level plumbing (Agda >= 2.9 only)
 
