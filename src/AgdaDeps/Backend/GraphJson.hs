@@ -179,6 +179,13 @@ data GraphInput = GraphInput
     -- per-definition analytical arrays (kind / line / access / type /
     -- subterm hashes). Packed (non-lazy) path only; 'False' leaves
     -- packed output byte-identical.
+  , giModuleOptionEscapes :: ![(String, [String])]
+    -- ^ Per module, the file-level @{-# OPTIONS ⋯ #-}@ soundness escapes
+    -- ('AgdaDeps.Deps.optionEscapes'). Ascending by module; only modules
+    -- with an escape appear. Emitted as the optional top-level
+    -- @moduleOptionEscapes@ object in every form (packed / expanded /
+    -- lazy @graph.json@), omitted when empty so escape-free corpora stay
+    -- byte-identical.
   }
 
 -- | Output of the v2 emitter, ready for the backend to write to disk.
@@ -564,6 +571,14 @@ buildGraphJson GraphInput{..} =
         Just es -> ",\"externals_summary\":" ++ externalsSummaryJson es
         Nothing -> ""
 
+      -- Optional module-level soundness escapes (file @OPTIONS@ pragmas);
+      -- absent when no module declares one, so escape-free corpora stay
+      -- byte-identical.
+      moduleOptionEscapesField
+        | null giModuleOptionEscapes = ""
+        | otherwise = ",\"moduleOptionEscapes\":"
+                   ++ stringArrMapJson giModuleOptionEscapes
+
       graphJson = "{\"v\":2"
         ++ ",\"nodeKeyVersion\":" ++ show nodeKeyVersion
         ++ ",\"producer\":"     ++ jsString buildFingerprint
@@ -591,6 +606,7 @@ buildGraphJson GraphInput{..} =
             ",\"moduleFiles\":" ++ stringMapJson moduleFilesMap)
         ++ ",\"searchIndex\":" ++ searchIndexJson searchNames searchKinds searchBigrams
         ++ externalsSummaryField
+        ++ moduleOptionEscapesField
         ++ "}"
 
   in GraphJsonOutput
@@ -858,6 +874,16 @@ stringMapJson :: M.Map String FilePath -> String
 stringMapJson m =
   "{" ++ intercalate ","
     [ jsString k ++ ":" ++ jsString v | (k, v) <- M.toList m ]
+  ++ "}"
+
+-- | @{ <key>: [<str>, …], … }@ from an association list. Keys are
+-- emitted in the list's given order (the caller supplies ascending).
+-- Byte-coherent with Wire's @jStrArrMap@ (the expanded path), so the
+-- packed / lazy and expanded forms agree.
+stringArrMapJson :: [(String, [String])] -> String
+stringArrMapJson kvs =
+  "{" ++ intercalate ","
+    [ jsString k ++ ":" ++ stringArrayJson v | (k, v) <- kvs ]
   ++ "}"
 
 pairArrayJson :: [(Int, Int)] -> String
@@ -1493,6 +1519,7 @@ toExpandedGraph GraphInput{..} =
        , egModuleFiles    = M.toList giModuleFile
        , egSourceFiles    = giSourceFiles
        , egReExports      = giReExports
+       , egModuleOptionEscapes = giModuleOptionEscapes
        , egSubtermHashes  =
            if M.null defHashesByQ then Nothing
            else Just [ M.findWithDefault [] qn defHashesByQ | qn <- defsList ]

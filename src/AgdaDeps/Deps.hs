@@ -15,6 +15,10 @@ module AgdaDeps.Deps
   , DefAccess(..)
   , UnsafeTag(..)
 
+    -- * Module-level soundness escapes (file @OPTIONS@ pragmas)
+  , safetyRelevantOptionFlags
+  , optionEscapes
+
     -- * Edge provenance
   , EdgeProv(..)
   , provPrec
@@ -171,6 +175,54 @@ data UnsafeTag
 
 instance NFData UnsafeTag where
   rnf x = x `seq` ()
+
+-- | File-level @{-# OPTIONS ⋯ #-}@ flags that make @agda --safe@ reject
+-- a whole module — the module-level analogue of 'UnsafeTag'. This is the
+-- set of /unconditional single-flag/ escapes from Agda's own
+-- @Agda.Interaction.Options.Base.unsafePragmaOptions@ (the function
+-- backing the @SafeFlagPragma@ warning); RE-SYNC THIS LIST on an Agda
+-- bump. It is a superset across the supported range: 2.9 adds
+-- @--local-rewriting@ over 2.8, and an unknown token simply never
+-- matches, so one set serves both builds (no CPP).
+--
+-- /Deliberately excluded/: combination-conditional escapes that
+-- @unsafePragmaOptions@ reports only when two flags co-occur
+-- (@--cubical-compatible@ + @--with-K@, @--without-K@ + @--flat-split@,
+-- @--without-K@ + @--large-indices@, @--large-indices@ +
+-- @--forced-argument-recursion@). A file-token scan cannot evaluate the
+-- combination without reconstructing the resolved 'PragmaOptions', so
+-- those are out of scope here (and none is a common soundness audit
+-- miss). Also out of scope: per-block declaration pragmas such as
+-- @{-# NO_POSITIVITY_CHECK #-}@ / @{-# TERMINATING #-}@, which are NOT
+-- @OPTIONS@ pragmas and never appear in @iFilePragmaOptions@.
+safetyRelevantOptionFlags :: Set String
+safetyRelevantOptionFlags = S.fromList
+  [ "--allow-unsolved-metas"
+  , "--allow-incomplete-matches"
+  , "--no-positivity-check"
+  , "--no-termination-check"
+  , "--type-in-type"
+  , "--omega-in-omega"
+  , "--sized-types"
+  , "--injective-type-constructors"
+  , "--irrelevant-projections"
+  , "--experimental-irrelevance"
+  , "--rewriting"
+  , "--local-rewriting"
+  , "--cumulativity"
+  , "--allow-exec"
+  , "--no-load-primitives"
+  ]
+
+-- | Keep only the safety-relevant flags ('safetyRelevantOptionFlags')
+-- from a module's raw file-level @OPTIONS@ tokens, deduplicated and in
+-- ascending order. Empty when the module declares no file-level
+-- soundness escape (so escape-free corpora emit nothing). Pure, so the
+-- caller in "AgdaDeps.Backend" only has to hand it the flattened
+-- @iFilePragmaOptions@ token list.
+optionEscapes :: [String] -> [String]
+optionEscapes toks =
+  S.toAscList (S.intersection safetyRelevantOptionFlags (S.fromList toks))
 
 -- | 'nodeKey' of Agda's @primTrustMe@ primitive. Confirmed empirically
 -- against @test/Unsafe.agda@ (the QName survives 'namesIn' verbatim even

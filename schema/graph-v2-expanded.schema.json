@@ -101,6 +101,11 @@
       "items": { "$ref": "#/$defs/reexport" },
       "description": "Public re-export rows (`open import M public`)."
     },
+    "moduleOptionEscapes": {
+      "type": "object",
+      "additionalProperties": { "type": "array", "items": { "type": "string" } },
+      "description": "Optional (R15). Per module, the file-level `{-# OPTIONS #-}` soundness escapes (`--type-in-type`, `--no-positivity-check`, `--rewriting`, …) that make `agda --safe` reject it. Only modules with at least one escape appear; omitted entirely when none does, so escape-free corpora stay byte-identical. Module-level, orthogonal to per-def `unsafe`. Per-block declaration pragmas (`{-# NO_POSITIVITY_CHECK #-}`) are NOT OPTIONS pragmas and never appear here."
+    },
     "definitionSubtermHashes": {
       "type": "array",
       "items": {

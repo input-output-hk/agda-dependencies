@@ -461,6 +461,28 @@ tried and dropped: Agda's ordinary termination checker also sets
 proof (fired on `Nat._+_`, `Test.sum`, …). Direct-use only; transitive
 taint is a consumer query. Fixture: `test/Unsafe.agda`.
 
+**File-level option escapes are module-level, not per-def (R15).** A
+whole-module escape via a file pragma (`{-# OPTIONS --type-in-type #-}`,
+`--no-positivity-check`, `--rewriting`, …) is a property of the *interface*,
+not any def, so it is emitted as a separate optional top-level
+`moduleOptionEscapes :: Map module [String]` (NOT folded into the per-def
+`unsafe` array — that would blow the `Int8` packed bitmask and conflate a
+module fact with a def fact). Computed in `postCompileAD` from each visited
+interface's **`iFilePragmaOptions`** (the file's own `OPTIONS` tokens),
+filtered through `Deps.optionEscapes` / `safetyRelevantOptionFlags` (the
+unconditional single-flag set of Agda's `unsafePragmaOptions` — RE-SYNC on
+an Agda bump). **Use `iFilePragmaOptions`, not `iOptionsUsed`**: the latter
+is the fully-resolved per-module options and folds in command-line +
+library defaults, so it would misattribute `--lenient-imports`
+(⇒ `--allow-unsolved-metas`) or a `.agda-lib` default to every module. Two
+things NOT captured, by construction (documented in `optionEscapes`,
+pinned by `test/OptionEscapes.agda`): per-block declaration pragmas
+(`{-# NO_POSITIVITY_CHECK #-}` / `{-# TERMINATING #-}` — not `OPTIONS`
+pragmas, never in `iFilePragmaOptions`) and combination-conditional escapes
+(`--without-K` + `--flat-split`, …). Emitted in expanded + packed + lazy
+`graph.json`, omitted when empty (byte-identical when escape-free). No CPP:
+`iFilePragmaOptions` / `OptionsPragma` are identical in Agda 2.8 and 2.9.
+
 ## v2 graph.json schema
 
 All HTML views consume the v2 schema; `--format=json` emits it
@@ -469,7 +491,8 @@ directly. The **expanded** form has a machine-readable JSON Schema at
 (draft 2020-12). `required` covers the fields emitted since v2
 inception; additive fields (`nodeKeyVersion`, `producer`,
 `definitionEdgesProvenance`, `definitionSubterm*`, `externals_summary`,
-per-def `line`/`access`/`type`) are optional, and `additionalProperties`
+`moduleOptionEscapes`, per-def `line`/`access`/`type`) are optional, and
+`additionalProperties`
 is open, so it validates older and forward-compatible output too. The
 `packed` form and `--lazy` layout are not (yet) schematised.
 

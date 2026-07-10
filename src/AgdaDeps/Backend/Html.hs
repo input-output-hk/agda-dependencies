@@ -63,10 +63,11 @@ renderHtml
   -> [FilePath]             -- ^ source files (from precompute)
   -> Map String FilePath    -- ^ module name -> binding-site source file
   -> Map QName Position     -- ^ pre-computed (x, y) per definition
+  -> [(String, [String])]   -- ^ per-module file-@OPTIONS@ soundness escapes
   -> Maybe ExternalsSummary -- ^ diagnostic summary under --no-externals
   -> [ADDef]
   -> String
-renderHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFile positions externalsSummary defs =
+renderHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFile positions optionEscapes externalsSummary defs =
   let gi = GraphInput
         { giDefs            = defs
         , giStateMap        = stateMap
@@ -84,6 +85,7 @@ renderHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap externals fa
         , giReExports       = []
         , giExternalsSummary = externalsSummary
         , giPackedAnalytical = False
+        , giModuleOptionEscapes = optionEscapes
         }
   in renderHtmlFromInput view palette gzipEnabled agdaHtmlDir gi
 
@@ -129,10 +131,11 @@ renderLazyHtml
   -> [FilePath]
   -> Map String FilePath
   -> Map QName Position
+  -> [(String, [String])]   -- ^ per-module file-@OPTIONS@ soundness escapes
   -> Maybe ExternalsSummary -- ^ diagnostic summary under --no-externals
   -> [ADDef]
   -> LazyOutput
-renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFile positions externalsSummary defs =
+renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFile positions optionEscapes externalsSummary defs =
   let -- Group snippets by their 'moduleKey' (lifted owning module) so the
       -- bundle manifest keys match the graph.json module names. 'foldr'
       -- over 'M.toAscList' with 'insertWith (++)' keeps each module's
@@ -159,6 +162,7 @@ renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap external
         , giReExports       = []
         , giExternalsSummary = externalsSummary
         , giPackedAnalytical = False
+        , giModuleOptionEscapes = optionEscapes
         }
       gjo = buildGraphJson gi
 

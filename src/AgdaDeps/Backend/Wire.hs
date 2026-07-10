@@ -64,6 +64,12 @@ data ExpandedGraph = ExpandedGraph
   , egModuleFiles    :: [(String, String)]    -- ^ ascending by key
   , egSourceFiles    :: [String]
   , egReExports      :: [(String, String, [String], [(String, String)])]
+  , egModuleOptionEscapes :: [(String, [String])]
+    -- ^ Per module, the file-level @{-# OPTIONS ⋯ #-}@ soundness escapes
+    -- ('AgdaDeps.Deps.optionEscapes'). Ascending by module; only modules
+    -- with at least one escape appear. Emitted as the optional
+    -- @moduleOptionEscapes@ object, omitted when empty so escape-free
+    -- corpora stay byte-identical.
   , egSubtermHashes  :: Maybe [[Word64]]      -- ^ present iff any def carries hashes; parallel to 'egDefs'
   , egSubtermDepths  :: Maybe [[Int]]
   , egExternalsSummary :: Maybe WireExternals
@@ -223,6 +229,9 @@ expandedFields =
   , Required "moduleFiles"               (SMap (SString Nothing)) (jStrMap . egModuleFiles)
   , Required "sourceFiles"               strArr                   (jStrArray . egSourceFiles)
   , Required "reexports"                 (arrOf (SRef "reexport")) (jArray (encodeObject reexportFields) . egReExports)
+  , Optional "moduleOptionEscapes"       (SMap (arrOf (SString Nothing)))
+      (\g -> let es = egModuleOptionEscapes g
+             in if null es then Nothing else Just (jStrArrMap es))
   , Optional "definitionSubtermHashes"   (arrOf nats)             (fmap (jArray natArr) . egSubtermHashes)
   , Optional "definitionSubtermDepths"   (arrOf nats)             (fmap (jArray natArrI) . egSubtermDepths)
   , Optional "externals_summary"         (SRef "externalsSummary") (fmap (encodeObject externalsSummaryFields) . egExternalsSummary)

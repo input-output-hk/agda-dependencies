@@ -14,6 +14,7 @@ open import InlineGap using (useInline; useAlias)  -- inliner-gap characterisati
 open import AnonSection using (useSection)  -- anonymous-module section lifting (nodeKeyVersion 3)
 import RenamedReexport  -- R14 fixture. Qualified (no `open`) on purpose: `open`ing pulls the Nat->Number alias into scope and reprints every --with-signatures type as `Number`.
 import Unsafe  -- R12 fixture (soundness escapes). Qualified (no `open`) to keep its names out of scope, same rationale as RenamedReexport above.
+import OptionEscapes  -- R15 fixture (file-level {-# OPTIONS #-} escapes). Qualified; --type-in-type is non-infective so Test stays unaffected.
 
 variable a b : Set
 

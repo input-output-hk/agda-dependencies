@@ -159,6 +159,8 @@ emit opts moduleFileMap entryModule externals imports sourceFiles allModules = d
         , giReExports       = []
         , giExternalsSummary = Nothing
         , giPackedAnalytical = False
+        -- No Agda interfaces in --skip-agda, so no file-@OPTIONS@ escapes.
+        , giModuleOptionEscapes = []
         }
       gjo = buildGraphJson gi
 

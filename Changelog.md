@@ -7,6 +7,43 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-07-10 — `agda-deps` — tag file-level `{-# OPTIONS #-}` soundness escapes (R15)
+
+Soundness-escape Phase 2, completing the Phase 1 per-def `unsafe` work
+(2026-07-09). Phase 1 covered per-def escapes (`NON_TERMINATING`,
+`primTrustMe`), but a *whole-module* escape via a file pragma
+(`{-# OPTIONS --type-in-type #-}`, `--no-positivity-check`, `--rewriting`,
+…) left every def in the module as plain `state: "D"`, so a graph-derived
+`agda --safe` audit still missed it.
+
+- **New optional top-level `moduleOptionEscapes`** — a `Map module
+  [String]` (object keyed by module name; values the offending flag
+  tokens). Read from each visited interface's **`iFilePragmaOptions`** —
+  the file's own `OPTIONS` tokens — in `postCompileAD`, keeping only the
+  safety-relevant flags (`AgdaDeps.Deps.safetyRelevantOptionFlags`, the
+  unconditional single-flag set of Agda's own `unsafePragmaOptions`).
+- **File-level, not resolved.** Deliberately `iFilePragmaOptions` and NOT
+  `iOptionsUsed` (the fully-resolved per-module options): `iOptionsUsed`
+  folds in command-line + library-default options, so it would
+  misattribute e.g. `--lenient-imports` (⇒ `--allow-unsolved-metas`) or a
+  library `.agda-lib` default to *every* module. The file scan is
+  pollution-immune and exactly "what this file declared".
+- **Boundary (verified, documented).** A per-block `{-# NO_POSITIVITY_CHECK #-}`
+  is a *declaration* pragma, not an `OPTIONS` pragma, so it never appears in
+  `iFilePragmaOptions` and is not captured; nor are combination-conditional
+  escapes (`--without-K` + `--flat-split`, …). Pinned by
+  `test/OptionEscapes.agda`, whose file-level `--type-in-type` surfaces
+  while its block `NO_POSITIVITY_CHECK` does not.
+- Emitted in expanded + packed + lazy `graph.json`, module-level (orthogonal
+  to per-def `unsafe`), omitted when empty so escape-free corpora stay
+  byte-identical. Additive wire field: `schemaVersion` stays 2,
+  `nodeKeyVersion` stays 3. Schema oracle updated from `Wire.hs`; golden
+  regenerated cold (`Holes`/`Test` carry their real `--allow-unsolved-metas`,
+  `OptionEscapes` its `--type-in-type`). No `--incremental` fragment bump:
+  escapes are recomputed from the visited interfaces every run, not cached.
+- Both Agda 2.8 and 2.9 builds compile unchanged — `iFilePragmaOptions` /
+  `OptionsPragma` are identical across the range, so no CPP.
+
 ## 2026-07-09 — `agda-deps` — tag soundness escapes beyond postulates (`unsafe`)
 
 Acting on external feedback: the graph flags postulates (`state: "P"`) and

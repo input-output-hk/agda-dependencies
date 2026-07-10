@@ -37,10 +37,11 @@ renderJson
   -> [(String, String, [String], [(String, String)])]
                              -- ^ (host, source, qualified-names, renamed
                              --   alias->canonical pairs) re-exports
+  -> [(String, [String])]    -- ^ per-module file-@OPTIONS@ soundness escapes
   -> Maybe ExternalsSummary  -- ^ diagnostic summary under --no-externals
   -> [ADDef]
   -> String
-renderJson mode packedAnalytical stateMap externals failed entryModule importEdges sourceFiles moduleFile positions reexports externalsSummary defs =
+renderJson mode packedAnalytical stateMap externals failed entryModule importEdges sourceFiles moduleFile positions reexports optionEscapes externalsSummary defs =
   let gi = GraphInput
         { giDefs            = defs
         , giStateMap        = stateMap
@@ -58,6 +59,7 @@ renderJson mode packedAnalytical stateMap externals failed entryModule importEdg
         , giReExports       = reexports
         , giExternalsSummary = externalsSummary
         , giPackedAnalytical = packedAnalytical
+        , giModuleOptionEscapes = optionEscapes
         }
   in case mode of
        JsonPacked   -> gjoGraphJson (buildGraphJson gi)

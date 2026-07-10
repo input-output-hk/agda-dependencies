@@ -14,18 +14,24 @@ Forward-looking work on `agda-deps`. For runnable examples see
   epochs change. Making that minimal needs a stable-per-node index in the lazy
   wire format, coordinated with the JS consumer in `agda-graph-explorer`.
 
-- [ ] **Module-level option escapes (soundness-escape Phase 2).** The per-def
-  `unsafe` tags shipped (see below) cover `NON_TERMINATING` / `primTrustMe`,
-  but *file-level* escapes — `--type-in-type`, `--no-positivity-check`,
-  `--no-termination-check`, … — are properties of an interface's pragma
-  options, not any one def. Emit a top-level optional
-  `moduleOptionEscapes :: Map module [String]` read from each visited
-  interface's recorded options in `postCompileAD`. Verify first whether a
-  per-mutual-block `NO_POSITIVITY_CHECK` even survives into the interface; if
-  only file-level pragmas are representable, document that. Phase 1 already
-  covers the measured audit misses, so this is lower priority.
-
 ## Shipped — see Changelog
+
+- **Module-level option escapes (soundness-escape Phase 2, R15)** — a
+  top-level optional `moduleOptionEscapes :: Map module [String]` read from
+  each visited interface's `iFilePragmaOptions` in `postCompileAD`, keeping
+  only the safety-relevant flags (`--type-in-type`, `--no-positivity-check`,
+  `--rewriting`, `--injective-type-constructors`, …; the unconditional
+  single-flag set of Agda's own `unsafePragmaOptions`). File-level
+  (`iFilePragmaOptions`), NOT resolved (`iOptionsUsed`) — so command-line
+  (`--lenient-imports` ⇒ `--allow-unsolved-metas`) and library-default
+  options don't misattribute an escape to every module. Emitted in expanded
+  + packed + lazy `graph.json`, omitted when empty (escape-free corpora stay
+  byte-identical). Confirmed the boundary the TODO flagged: a per-block
+  `{-# NO_POSITIVITY_CHECK #-}` is a *declaration* pragma, not an `OPTIONS`
+  pragma, so it never reaches `iFilePragmaOptions` and is not captured (nor
+  are combination-conditional escapes like `--without-K` + `--flat-split`) —
+  documented in `AgdaDeps.Deps.optionEscapes`. Fixture:
+  `test/OptionEscapes.agda`.
 
 - **Soundness-escape `unsafe` tags (R12)** — optional per-def `unsafe` array
   (`non-terminating`, `trustme`), orthogonal to the untouched 4-state `state`
