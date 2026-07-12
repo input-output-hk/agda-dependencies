@@ -10,9 +10,6 @@
 --
 -- The on-wire form is little-endian raw bytes of the typed arrays,
 -- base64-encoded, decoded JS-side via @atob@ + @Uint8Array.from@.
---
--- Key functions: 'buildCsr', 'reverseCsr', 'dedupSortedInt',
--- 'encodeInt32LE', 'encodeInt8LE', 'encodeFloat32LE', 'b64'.
 module AgdaDeps.Csr
   ( -- * CSR builders
     buildCsr

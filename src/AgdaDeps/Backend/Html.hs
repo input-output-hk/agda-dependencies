@@ -1,4 +1,3 @@
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 -- | HTML output (v2 schema). Two modes:
 --
@@ -22,7 +21,6 @@ module AgdaDeps.Backend.Html
 import Data.List ( intercalate, isPrefixOf )
 import Data.Map ( Map )
 import qualified Data.Map as M
-import Data.Set ( Set )
 import qualified Data.Set as S
 import Data.Word ( Word64 )
 
@@ -31,16 +29,14 @@ import Data.FileEmbed ( embedStringFile )
 import Agda.Syntax.Abstract.Name ( QName )
 import Agda.Utils.Hash ( hashString )
 
-import AgdaDeps.Deps    ( ADDef(..), hashQName, moduleKey )
-import AgdaDeps.Layout  ( Position )
-import AgdaDeps.Options ( ColorPalette(..), DefState(..), View(..) )
+import AgdaDeps.Deps    ( hashQName, moduleKey )
+import AgdaDeps.Options ( ColorPalette(..), View(..) )
 import AgdaDeps.Source  ( Snippet(..) )
 import AgdaDeps.Util    ( jsString )
 
 import AgdaDeps.Backend.GraphJson
   ( GraphInput(..), GraphJsonOutput(..)
   , ModuleDetailJson(mdjFileName, mdjEpoch, mdjContent)
-  , ExternalsSummary
   , buildGraphJson
   , snippetBundleFilename
   )
@@ -54,40 +50,14 @@ renderHtml
   -> ColorPalette
   -> Bool                   -- ^ @--gzip@ enabled (passed through to template).
   -> Maybe FilePath         -- ^ @--agda-html-dir@ base (Nothing = no source links).
-  -> Map QName Snippet
-  -> Map QName DefState
-  -> Set String             -- ^ external module names
-  -> Set String             -- ^ failed module names (--keep-going)
-  -> Maybe String           -- ^ entry-point module name
-  -> [(String, String)]     -- ^ module-level import edges
-  -> [FilePath]             -- ^ source files (from precompute)
-  -> Map String FilePath    -- ^ module name -> binding-site source file
-  -> Map QName Position     -- ^ pre-computed (x, y) per definition
-  -> [(String, [String])]   -- ^ per-module file-@OPTIONS@ soundness escapes
-  -> Maybe ExternalsSummary -- ^ diagnostic summary under --no-externals
-  -> [ADDef]
+  -> Map QName Snippet      -- ^ per-definition source snippets (@--with-source@)
+  -> GraphInput             -- ^ shared graph data (from "AgdaDeps.Backend")
   -> String
-renderHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFile positions optionEscapes externalsSummary defs =
-  let gi = GraphInput
-        { giDefs            = defs
-        , giStateMap        = stateMap
-        , giImportEdges     = importEdges
-        , giSourceFiles     = sourceFiles
-        , giModuleFile      = moduleFile
-        , giEntryModule     = entryModule
-        , giExternalModules = externals
-        , giFailedModules   = failed
-        , giPositions       = positions
-        , giWithSource      = not (M.null snippetMap)
-        , giSnippetModules  = snippetModulesOf snippetMap
-        , giLazy            = False
-        , giExtraModules    = S.empty
-        , giReExports       = []
-        , giExternalsSummary = externalsSummary
-        , giPackedAnalytical = False
-        , giModuleOptionEscapes = optionEscapes
-        }
-  in renderHtmlFromInput view palette gzipEnabled agdaHtmlDir gi
+renderHtml view palette gzipEnabled agdaHtmlDir snippetMap gi =
+  let gi' = gi { giWithSource     = not (M.null snippetMap)
+               , giSnippetModules = snippetModulesOf snippetMap
+               }
+  in renderHtmlFromInput view palette gzipEnabled agdaHtmlDir gi'
 
 -- | Render HTML straight from a 'GraphInput'. The high-level
 -- 'renderHtml' is a wrapper around this for callers that build the
@@ -122,20 +92,10 @@ renderLazyHtml
   -> ColorPalette
   -> Bool                   -- ^ @--gzip@ enabled.
   -> Maybe FilePath         -- ^ @--agda-html-dir@ base (Nothing = no source links).
-  -> Map QName Snippet
-  -> Map QName DefState
-  -> Set String
-  -> Set String
-  -> Maybe String
-  -> [(String, String)]
-  -> [FilePath]
-  -> Map String FilePath
-  -> Map QName Position
-  -> [(String, [String])]   -- ^ per-module file-@OPTIONS@ soundness escapes
-  -> Maybe ExternalsSummary -- ^ diagnostic summary under --no-externals
-  -> [ADDef]
+  -> Map QName Snippet      -- ^ per-definition source snippets (@--with-source@)
+  -> GraphInput             -- ^ shared graph data (from "AgdaDeps.Backend")
   -> LazyOutput
-renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFile positions optionEscapes externalsSummary defs =
+renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap giBase =
   let -- Group snippets by their 'moduleKey' (lifted owning module) so the
       -- bundle manifest keys match the graph.json module names. 'foldr'
       -- over 'M.toAscList' with 'insertWith (++)' keeps each module's
@@ -145,25 +105,10 @@ renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap stateMap external
         foldr (\(qn, sn) -> M.insertWith (++) (moduleKey qn) [(qn, sn)])
               M.empty (M.toAscList snippetMap)
       snippetModules = M.keys snippetsByModule
-      gi = GraphInput
-        { giDefs            = defs
-        , giStateMap        = stateMap
-        , giImportEdges     = importEdges
-        , giSourceFiles     = sourceFiles
-        , giModuleFile      = moduleFile
-        , giEntryModule     = entryModule
-        , giExternalModules = externals
-        , giFailedModules   = failed
-        , giPositions       = positions
-        , giWithSource      = not (M.null snippetMap)
-        , giSnippetModules  = snippetModules
-        , giLazy            = True
-        , giExtraModules    = S.empty
-        , giReExports       = []
-        , giExternalsSummary = externalsSummary
-        , giPackedAnalytical = False
-        , giModuleOptionEscapes = optionEscapes
-        }
+      gi = giBase { giWithSource     = not (M.null snippetMap)
+                  , giSnippetModules = snippetModules
+                  , giLazy           = True
+                  }
       gjo = buildGraphJson gi
 
       moduleDetails =

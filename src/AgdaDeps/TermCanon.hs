@@ -38,12 +38,11 @@ import           Agda.Syntax.Internal
 import           Agda.Syntax.Common.Pretty ( prettyShow )
 import           Agda.Utils.Hash ( hashString )
 
--- | Difference list of @(hash, depth)@ pairs. Threaded through the walk
--- so every parent\/child concatenation is an O(1) function composition
--- instead of a left-nested @(++)@ — the latter is quadratic on the deep
--- single-elim application spines (@Def f [Apply (Def g …)]@) that
--- dominate elaborated terms. The final list is recovered by applying the
--- endo to @[]@, preserving the pre-order element sequence.
+-- | Difference list of @(hash, depth)@ pairs, threaded through the walk
+-- so each parent\/child concatenation is an O(1) function composition,
+-- not a left-nested @(++)@ (quadratic on the deep single-elim spines
+-- @Def f [Apply (Def g …)]@ that dominate elaborated terms). Recover the
+-- list by applying the endo to @[]@; the pre-order sequence is preserved.
 type HashDList = [(Word64, Int)] -> [(Word64, Int)]
 
 -- | Hash every subterm of @t@ whose AST depth is at least @minDepth@,
@@ -148,9 +147,8 @@ canonAndSubsDom !minD d =
 canonElimsSubs :: Int -> Elims -> (ShowS, Int, HashDList)
 canonElimsSubs !minD es =
   let !n = length es
-      -- Single right fold over the elims: thread encoder, max depth, and
-      -- the (composed) hash difference list together rather than mapping
-      -- once and projecting the triple three more times.
+      -- Single right fold threading encoder, max depth, and the composed
+      -- hash difference list together.
       step (eEnc, eD, eHs) (encAcc, dAcc, hsAcc) =
         ( ('|':) . eEnc . encAcc, max eD dAcc, eHs . hsAcc )
       (encs, maxD, hss) = foldr (step . canonElimSubs minD) (id, 0, id) es

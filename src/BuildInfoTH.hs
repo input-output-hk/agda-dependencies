@@ -55,11 +55,8 @@ runGit args = do
     _                           -> Nothing
 
 -- | The short revision, with a @+@ suffix when the tree is dirty.
---
--- When @git@ succeeds (in-tree dev build) it wins. When it fails — e.g.
--- an sdist build under @cabal install@ with no @.git@ — fall back to the
--- @AGDA_DEPS_GIT_REV@ environment variable so an installer can still
--- stamp the revision; only if that is unset do we report @"unknown"@.
+-- Falls back to @AGDA_DEPS_GIT_REV@ when git fails (e.g. a tarball build
+-- with no @.git@), then @"unknown"@ if that too is unset.
 captureGit :: IO String
 captureGit = do
   mrev <- runGit ["rev-parse", "--short=12", "HEAD"]

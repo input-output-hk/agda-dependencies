@@ -21,7 +21,7 @@ module AgdaDeps.Backend
   , ModuleRes
   ) where
 
-import Control.Monad ( when )
+import Control.Monad ( when, unless )
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Control.DeepSeq ( force )
 
@@ -35,13 +35,12 @@ import Data.Set ( Set )
 import qualified Data.Set as S
 
 import qualified Data.Text as T
-import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 
 import Data.Version ( showVersion )
 import Paths_agda_deps ( version )
 
-import Data.List ( foldl', isPrefixOf )
+import Data.List ( foldl', isPrefixOf, sortOn )
 
 import qualified System.Directory
 import System.Directory ( createDirectoryIfMissing, getCurrentDirectory )
@@ -76,8 +75,8 @@ import Agda.TypeChecking.Monad.Base
   , iFilePragmaOptions
   )
 -- 'OptionsPragma'/'pragmaStrings' live here in both 2.8 and 2.9 (the
--- module has no export list). 'iFilePragmaOptions' is likewise present
--- in both — no CPP needed for the R15 file-OPTIONS scan.
+-- module has no export list); 'iFilePragmaOptions' likewise — no CPP
+-- needed for the file-OPTIONS scan.
 import Agda.Interaction.Library.Base ( pragmaStrings )
 import Agda.TypeChecking.Monad.Imports ( getVisitedModules )
 import Agda.TypeChecking.Monad.State ( getSignature )
@@ -110,7 +109,7 @@ import AgdaDeps.Deps ( nodeKeyVersion )
 import BuildInfo ( buildFingerprint )
 import AgdaDeps.Layout ( Position, computePositions )
 import AgdaDeps.Options
-  ( Options(..), OutputFormat(..), View(..), DefState
+  ( Options(..), OutputFormat(..), DefState
   , ColorPalette(..), defaultOptions
   , outdirOpt, formatOpt, viewOpt
   , colorOpt, withSourceOpt, agdaHtmlDirOpt, lazyOpt, excludeOpt
@@ -132,7 +131,7 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BLC
 import AgdaDeps.Source ( Snippet, collectHighlightedSnippets, srcLocOf )
 import AgdaDeps.Backend.Dot  ( renderDot )
-import AgdaDeps.Backend.GraphJson ( ExternalsSummary, buildExternalsSummary )
+import AgdaDeps.Backend.GraphJson ( GraphInput(..), ExternalsSummary, buildExternalsSummary )
 import AgdaDeps.Backend.Html ( renderHtml, renderLazyHtml, LazyOutput(..) )
 import AgdaDeps.Backend.Json ( renderJson )
 
@@ -447,7 +446,7 @@ postCompileAD
   :: Options -> IsMain -> Map TopLevelModuleName [Maybe ADDef] -> TCM ()
 postCompileAD opts _ defMap = do
   let rawDefs0 :: [ADDef]
-      rawDefs0 = concat . M.elems $ fmap catMaybes defMap
+      rawDefs0 = concatMap catMaybes (M.elems defMap)
 
   -- Contract dep edges through ignored helpers (with-functions, inlined
   -- module-instantiation copies, etc.). Runs in 'postCompile' so the
@@ -574,19 +573,19 @@ postCompileAD opts _ defMap = do
            | ((h, t), ns) <- M.toAscList grouped
            ]
 
-      -- R15: file-level @{-# OPTIONS ⋯ #-}@ soundness escapes per visited
-      -- module. Read from each interface's 'iFilePragmaOptions' — the
-      -- file's OWN OPTIONS tokens — NOT 'iOptionsUsed', which folds in
-      -- command-line + library options and would misattribute e.g.
-      -- @--lenient-imports@ (⇒ @--allow-unsolved-metas@) to every module.
-      -- 'optionEscapes' keeps only the safety-relevant flags; 'keep'
-      -- applies the same @--exclude@ / @--no-externals@ filter as the
-      -- other module-level outputs. 'M.fromList' → 'M.toAscList' sorts by
-      -- module and drops escape-free modules, so escape-free corpora emit
-      -- nothing (byte-identical). Per-block @NO_POSITIVITY_CHECK@ etc. are
-      -- declaration pragmas, not OPTIONS, so they never appear here.
+      -- File-level @{-# OPTIONS ⋯ #-}@ soundness escapes per visited
+      -- module. Read from 'iFilePragmaOptions' — the file's OWN OPTIONS
+      -- tokens — NOT 'iOptionsUsed', which folds in command-line + library
+      -- options and would misattribute e.g. @--lenient-imports@
+      -- (⇒ @--allow-unsolved-metas@) to every module. 'optionEscapes' keeps
+      -- only the safety-relevant flags; 'keep' applies the same
+      -- @--exclude@ / @--no-externals@ filter. 'sortOn fst' orders the
+      -- survivors ('visited' is keyed by an opaque hash). The
+      -- 'not (null esc)' guard drops escape-free modules (byte-identical
+      -- when escape-free). Per-block @NO_POSITIVITY_CHECK@ etc. are
+      -- declaration pragmas, not OPTIONS, so never appear here.
       moduleOptionEscapes :: [(String, [String])]
-      moduleOptionEscapes = M.toAscList $ M.fromList
+      moduleOptionEscapes = sortOn fst
         [ (m, esc)
         | mi <- M.elems visited
         , let iface = miInterface mi
@@ -647,6 +646,31 @@ postCompileAD opts _ defMap = do
   anyRecompiled <- liftIO $ readIORef recompiledRef
   let monoSkippable = useSerialiseCache opts && not anyRecompiled
 
+      -- The shared graph-data bundle for the JSON / HTML emitters. Each
+      -- render path overrides only its format-specific fields via record
+      -- update (JSON: giReExports + giPackedAnalytical; HTML: giWithSource
+      -- + giSnippetModules; lazy: also giLazy) instead of re-threading the
+      -- whole bundle as positional arguments.
+      baseGraphInput = GraphInput
+        { giDefs             = defs
+        , giStateMap         = stateMap
+        , giImportEdges      = importEdges
+        , giSourceFiles      = sourceFiles
+        , giModuleFile       = moduleFileMap
+        , giEntryModule      = entryModule
+        , giExternalModules  = externalModules
+        , giFailedModules    = failedModules
+        , giPositions        = positions
+        , giWithSource       = False
+        , giSnippetModules   = []
+        , giLazy             = False
+        , giExtraModules     = S.empty
+        , giReExports        = []
+        , giExternalsSummary = externalsSummary
+        , giPackedAnalytical = False
+        , giModuleOptionEscapes = moduleOptionEscapes
+        }
+
   info "agda-deps: writing output…"
   case optFormat opts of
     FmtDot ->
@@ -655,22 +679,19 @@ postCompileAD opts _ defMap = do
            Just dir -> liftIO $ TL.writeFile (dir </> "deps.dot") dotText
            Nothing  -> liftIO $ TL.putStrLn dotText
     FmtJson ->
-      case optOutDir opts of
-        Nothing -> liftIO $ putStrLn $
-          renderJson (optJsonMode opts) (optPackedAnalytical opts) stateMap externalModules failedModules entryModule importEdges sourceFiles moduleFileMap positions reExportRows moduleOptionEscapes externalsSummary defs
+      let jsonText = renderJson (optJsonMode opts)
+                       (baseGraphInput { giReExports = reExportRows
+                                       , giPackedAnalytical = optPackedAnalytical opts })
+      in case optOutDir opts of
+        Nothing -> liftIO $ putStrLn jsonText
         Just dir -> liftIO $ do
           let path = dir </> "deps.json"
-          skip <- if monoSkippable
-                    then do
-                      m <- readManifest cacheDir (optGzip opts)
-                      ex <- System.Directory.doesFileExist path
-                      pure (manifestLookup "deps.json" m == Just monoToken && ex)
-                    else pure False
+          skip <- monoOutputUnchanged monoSkippable cacheDir (optGzip opts)
+                    "deps.json" monoToken path
           if skip
             then info "agda-deps: --incremental: deps.json unchanged; skipped re-emit."
             else do
-              writeFile path $
-                renderJson (optJsonMode opts) (optPackedAnalytical opts) stateMap externalModules failedModules entryModule importEdges sourceFiles moduleFileMap positions reExportRows moduleOptionEscapes externalsSummary defs
+              writeFile path jsonText
               when (useSerialiseCache opts) $
                 writeManifest cacheDir (optGzip opts)
                   (manifestFromList [("deps.json", monoToken)])
@@ -693,7 +714,7 @@ postCompileAD opts _ defMap = do
                      ++ "without embedded snippets. Use --with-source --lazy, or "
                      ++ "--agda-html-dir=DIR to link out to `agda --html` pages.")
                 return M.empty
-          liftIO $ writeHtmlOutput dir opts (SerialiseCtx (useSerialiseCache opts) cacheDir monoSkippable monoToken) snippetMap stateMap externalModules failedModules entryModule importEdges sourceFiles moduleFileMap positions moduleOptionEscapes externalsSummary defs
+          liftIO $ writeHtmlOutput dir opts (SerialiseCtx (useSerialiseCache opts) cacheDir monoSkippable monoToken) snippetMap baseGraphInput
 
   -- '--incremental': prune fragment files for modules no longer in the
   -- graph (deleted / renamed source). Live set = every module Agda
@@ -747,6 +768,21 @@ data SerialiseCtx = SerialiseCtx
   , scMonoToken :: Epoch      -- ^ output-context token ('outputToken').
   }
 
+-- | Whether a monolithic output (@deps.json@ / @deps.html@) re-emit can
+-- be skipped: the serialise cache is active with nothing recompiled this
+-- run (@skippable@), the file already exists, and its manifest slot still
+-- matches the current output token. Shared by the JSON and HTML paths so
+-- the two skip checks can't drift. The skip needs BOTH the recompiled
+-- guard (folded into @skippable@ by the caller) and a matching @token@.
+monoOutputUnchanged
+  :: Bool -> FilePath -> Bool -> String -> Epoch -> FilePath -> IO Bool
+monoOutputUnchanged skippable cacheDir gz slot token path
+  | not skippable = pure False
+  | otherwise = do
+      m  <- readManifest cacheDir gz
+      ex <- System.Directory.doesFileExist path
+      pure (manifestLookup slot m == Just token && ex)
+
 -- | Write the HTML output: a single self-contained @deps.html@, or
 -- (with @--lazy@) a small shell plus @graph.json@, per-module detail
 -- files, and per-module snippet files.
@@ -757,21 +793,13 @@ data SerialiseCtx = SerialiseCtx
 -- monolithic no-op skip.
 writeHtmlOutput
   :: FilePath -> Options -> SerialiseCtx
-  -> Map QName Snippet -> Map QName DefState
-  -> Set String         -- ^ external module names
-  -> Set String         -- ^ failed module names
-  -> Maybe String       -- ^ entry-point module name
-  -> [(String, String)] -- ^ import edges
-  -> [FilePath]         -- ^ source files (from precompute)
-  -> Map String FilePath -- ^ module name -> binding-site source file
-  -> Map QName Position  -- ^ positions per QName
-  -> [(String, [String])] -- ^ per-module file-@OPTIONS@ soundness escapes
-  -> Maybe ExternalsSummary -- ^ diagnostic summary under --no-externals
-  -> [ADDef] -> IO ()
-writeHtmlOutput dir opts sc snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFileMap positions optionEscapes externalsSummary defs
+  -> Map QName Snippet   -- ^ per-definition source snippets (@--with-source@)
+  -> GraphInput          -- ^ shared graph data (from 'postCompileAD')
+  -> IO ()
+writeHtmlOutput dir opts sc snippetMap gi
   | optLazy opts = do
       let gz = optGzip opts
-          lo = renderLazyHtml (optView opts) (optColors opts) gz (optAgdaHtmlDir opts) snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFileMap positions optionEscapes externalsSummary defs
+          lo = renderLazyHtml (optView opts) (optColors opts) gz (optAgdaHtmlDir opts) snippetMap gi
       -- Shell + module-level skeleton are small: always (re)write.
       writeFile (dir </> "deps.html")  (lazyShellHtml lo)
       writeJsonMaybeGz gz (dir </> "graph.json") (lazyGraphJson lo)
@@ -800,17 +828,13 @@ writeHtmlOutput dir opts sc snippetMap stateMap externals failed entryModule imp
           (manifestFromList (catMaybes (detailEntries ++ snippetEntries)))
   | otherwise = do
       let path = dir </> "deps.html"
-      skip <- if scMonoSkip sc
-                then do
-                  m  <- readManifest (scCacheDir sc) (optGzip opts)
-                  ex <- System.Directory.doesFileExist path
-                  pure (manifestLookup "deps.html" m == Just (scMonoToken sc) && ex)
-                else pure False
+      skip <- monoOutputUnchanged (scMonoSkip sc) (scCacheDir sc) (optGzip opts)
+                "deps.html" (scMonoToken sc) path
       if skip
         then info "agda-deps: --incremental: deps.html unchanged; skipped re-emit."
         else do
           writeFile path $
-            renderHtml (optView opts) (optColors opts) (optGzip opts) (optAgdaHtmlDir opts) snippetMap stateMap externals failed entryModule importEdges sourceFiles moduleFileMap positions optionEscapes externalsSummary defs
+            renderHtml (optView opts) (optColors opts) (optGzip opts) (optAgdaHtmlDir opts) snippetMap gi
           when (scEnabled sc) $
             writeManifest (scCacheDir sc) (optGzip opts)
               (manifestFromList [("deps.html", scMonoToken sc)])
@@ -833,7 +857,7 @@ writeHtmlOutput dir opts sc snippetMap stateMap externals failed entryModule imp
           full = destDir </> fname
       uptodate <- if scEnabled sc && manifestLookup slot oldM == Just epoch
                     then fileCurrent gz full else pure False
-      when (not uptodate) $ writeJsonMaybeGz gz full content
+      unless uptodate $ writeJsonMaybeGz gz full content
       pure (Just (slot, epoch))
 
     -- A snippet bundle. The byte cap is checked only when a (re)write is
@@ -868,9 +892,7 @@ writeHtmlOutput dir opts sc snippetMap stateMap externals failed entryModule imp
 writeJsonMaybeGz :: Bool -> FilePath -> String -> IO ()
 writeJsonMaybeGz gz path content = do
   writeFile path content
-  if gz
-    then BL.writeFile (path ++ ".gz") (GZip.compress (BLC.pack content))
-    else return ()
+  when gz $ BL.writeFile (path ++ ".gz") (GZip.compress (BLC.pack content))
 
 -- | Classify modules whose source lives outside the project root (the
 -- working directory after 'Main''s .agda-lib discovery). A module is

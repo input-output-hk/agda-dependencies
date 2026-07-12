@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PatternGuards #-}
 -- | Resolve the project's @.agda-lib@ @depend:@ closure to concrete
 -- include directories, constraining Agda's search path to exactly the
@@ -11,9 +10,6 @@
 -- it. On any resolution failure (registry missing, library not found,
 -- malformed file) it logs a stderr breadcrumb and leaves argv
 -- untouched.
---
--- Key functions: 'wantsResolveDeps', 'stripResolveDepsFlag',
--- 'resolveProjectDepsArgs'.
 module AgdaDeps.LibResolve
   ( wantsResolveDeps
   , stripResolveDepsFlag
@@ -94,7 +90,6 @@ resolveProjectDepsArgs say root = do
 
 data LibFile = LibFile
   { libName     :: String
-  , libDirOf    :: FilePath  -- ^ the directory the .agda-lib lives in
   , libDepends  :: [String]
   , libIncludes :: [FilePath]
   } deriving Show
@@ -118,7 +113,6 @@ readLibFile path = do
       depends  = splitDepends (fromMaybe "" (lookup "depend"  fields))
   return LibFile
     { libName     = name
-    , libDirOf    = dir
     , libDepends  = depends
     , libIncludes = map (resolveAgainst dir) includes
     }

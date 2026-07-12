@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
 -- | Dependency analysis: walks each 'Definition' to extract its direct
@@ -65,7 +66,7 @@ module AgdaDeps.Deps
   ) where
 
 import Control.DeepSeq ( NFData(..) )
-import Control.Monad ( filterM )
+import Control.Monad ( filterM, when )
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Data.IORef ( IORef, modifyIORef', newIORef, readIORef, writeIORef )
 import Data.List ( foldl', isInfixOf, isPrefixOf )
@@ -83,8 +84,9 @@ import System.IO.Unsafe ( unsafePerformIO )
 
 import Agda.Utils.Hash ( hashString )
 import Agda.Utils.Lens ( (^.) )
+import Agda.Utils.Monad ( anyM )
 
-import Agda.Syntax.Abstract.Name ( QName, qnameToConcrete, nameBindingSite )
+import Agda.Syntax.Abstract.Name ( QName, nameBindingSite )
 import Agda.Syntax.Common ( unArg, namedThing )
 import Agda.Syntax.Internal
   ( qnameName, qnameModule, MetaId, Clause(..)
@@ -162,12 +164,9 @@ instance NFData DefAccess where
 --     (@funTerminates = Just False@).
 --   * 'UTrustMe' — the body/type references @primTrustMe@.
 --
--- A @{-# TERMINATING #-}@ tag was prototyped (@funTerminates = Just True@)
--- and dropped: verified empirically against this corpus that the ordinary
--- termination checker /also/ writes @Just True@ back into the signature
--- for every proven-terminating def, so the field cannot distinguish the
--- pragma from a normal proof — it fired on @Nat._+_@, @Test.sum@, etc.
--- 'UNonTerminating' alone still fixes the measured audit miss.
+-- No @{-# TERMINATING #-}@ tag: the ordinary termination checker also
+-- writes @funTerminates = Just True@ for every proven-terminating def, so
+-- it can't be told apart from a normal proof.
 data UnsafeTag
   = UNonTerminating
   | UTrustMe
@@ -177,22 +176,16 @@ instance NFData UnsafeTag where
   rnf x = x `seq` ()
 
 -- | File-level @{-# OPTIONS ⋯ #-}@ flags that make @agda --safe@ reject
--- a whole module — the module-level analogue of 'UnsafeTag'. This is the
--- set of /unconditional single-flag/ escapes from Agda's own
--- @Agda.Interaction.Options.Base.unsafePragmaOptions@ (the function
--- backing the @SafeFlagPragma@ warning); RE-SYNC THIS LIST on an Agda
--- bump. It is a superset across the supported range: 2.9 adds
--- @--local-rewriting@ over 2.8, and an unknown token simply never
--- matches, so one set serves both builds (no CPP).
+-- a whole module — the module-level analogue of 'UnsafeTag'. The
+-- /unconditional single-flag/ escapes from Agda's
+-- @Agda.Interaction.Options.Base.unsafePragmaOptions@; RE-SYNC on an Agda
+-- bump. A superset across the supported range — unknown tokens never
+-- match, so one set serves 2.8 and 2.9 (no CPP).
 --
--- /Deliberately excluded/: combination-conditional escapes that
--- @unsafePragmaOptions@ reports only when two flags co-occur
--- (@--cubical-compatible@ + @--with-K@, @--without-K@ + @--flat-split@,
--- @--without-K@ + @--large-indices@, @--large-indices@ +
--- @--forced-argument-recursion@). A file-token scan cannot evaluate the
--- combination without reconstructing the resolved 'PragmaOptions', so
--- those are out of scope here (and none is a common soundness audit
--- miss). Also out of scope: per-block declaration pragmas such as
+-- Not covered: combination-conditional escapes @unsafePragmaOptions@
+-- reports only when two flags co-occur (e.g. @--without-K@ +
+-- @--flat-split@) — a file-token scan can't evaluate them without the
+-- resolved 'PragmaOptions'; and per-block declaration pragmas such as
 -- @{-# NO_POSITIVITY_CHECK #-}@ / @{-# TERMINATING #-}@, which are NOT
 -- @OPTIONS@ pragmas and never appear in @iFilePragmaOptions@.
 safetyRelevantOptionFlags :: Set String
@@ -224,9 +217,9 @@ optionEscapes :: [String] -> [String]
 optionEscapes toks =
   S.toAscList (S.intersection safetyRelevantOptionFlags (S.fromList toks))
 
--- | 'nodeKey' of Agda's @primTrustMe@ primitive. Confirmed empirically
--- against @test/Unsafe.agda@ (the QName survives 'namesIn' verbatim even
--- though the primitive itself is filtered from the node set).
+-- | 'nodeKey' of Agda's @primTrustMe@ primitive. The QName survives
+-- 'namesIn' verbatim even though the primitive is filtered from the node
+-- set.
 trustMeNodeKey :: String
 trustMeNodeKey = "Agda.Builtin.TrustMe.primTrustMe"
 
@@ -422,7 +415,7 @@ computeDefAD opts def@Defn{..} = do
                                           (definitionTerms def))
                      else Nothing
       (!termHs, !termDs) = case termPairs of
-        Just ps -> (Just (map fst ps), Just (map snd ps))
+        Just ps -> let (hs, ds) = unzip ps in (Just hs, Just ds)
         Nothing -> (Nothing, Nothing)
   -- Render the type signature on demand: 'prettyTCM' reifies the stored
   -- 'defType', collapsed to a single line. '--normalise-signatures'
@@ -550,9 +543,8 @@ recordInstanceMethods :: Definition -> TCM ()
 recordInstanceMethods Defn{..} =
   let isInstance = isJust defInstance
       methods    = projectionMethods theDef
-  in if isInstance || not (null methods)
-       then recordMethodProviders defName methods
-       else return ()
+  in when (isInstance || not (null methods)) $
+       recordMethodProviders defName methods
   where
     -- Pull the projection QName off the head pattern of every clause.
     -- The @R ∋ λ where@ shape has one ProjP per clause; anything else
@@ -648,7 +640,7 @@ recordMethodProviders :: MonadIO m => QName -> [QName] -> m ()
 recordMethodProviders binder methods =
   liftIO $ modifyIORef' methodProvidersRef $ \m ->
     foldl' (\acc method ->
-              M.insertWith (\new old -> head new : old) method [binder] acc)
+              M.insertWith (\_ old -> binder : old) method [binder] acc)
            m
            methods
 
@@ -929,20 +921,12 @@ classifyDefWith sigRaw bodyRaw def@Defn{..}
             referencesUnsolvedMeta = any isUnsolvedMetaName referencedNames
         if referencesUnsolvedMeta
           then return Hole
-          else if null metas
-            then return Defined
-            else do
-              anyUnsolved <- anyM isMetaUnsolved metas
-              return $ if anyUnsolved then Hole else Defined
+          else do
+            anyUnsolved <- anyM isMetaUnsolved metas
+            return $ if anyUnsolved then Hole else Defined
   where
     isMetaUnsolved :: MetaId -> TCM Bool
     isMetaUnsolved m = isOpenMeta <$> lookupMetaInstantiation m
-
-    anyM :: Monad m => (a -> m Bool) -> [a] -> m Bool
-    anyM _ []     = return False
-    anyM p (x:xs) = do
-      b <- p x
-      if b then return True else anyM p xs
 
 -- | Collect metavariables in a 'Defn' by walking the cases that carry
 -- term content ('Defn' has no 'AllMetas' instance).

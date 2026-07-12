@@ -5,24 +5,22 @@
 --
 -- A /fragment/ is the @[ADDef]@ 'AgdaDeps.Backend.postModuleAD' returns
 -- for one module (dead-private extras included) plus the module's slices
--- of the two compile-time side-channels ('IgnoredEdgeMap',
--- 'MethodProviderMap') — a @Skip@ped module's @compileDef@ hooks don't
--- run, so the slices must be cached or its helper edges are lost.
+-- of the two side-channels ('IgnoredEdgeMap', 'MethodProviderMap'). A
+-- @Skip@ped module's @compileDef@ never runs, so those slices must be
+-- cached or its helper edges are lost.
 --
 -- Cache key: @(fragment format version, content-option fingerprint,
--- iFullHash, nodeKeyVersion)@. 'iFullHash' folds in the transitive
--- imported-interface hashes (the @.agdai@ validity mechanism), so a
--- fragment is invalidated exactly when a change can alter this module's
--- elaborated defs.
+-- iFullHash, nodeKeyVersion)@. 'iFullHash' folds in transitive
+-- imported-interface hashes, so a fragment is invalidated exactly when a
+-- change can alter this module's elaborated defs.
 --
--- Fragments are only written from a fresh type-check: a warm interface
--- load exposes a dead-code-pruned signature and loses edges, so caching
--- the fresh fragment keeps output cache-state independent.
+-- Written only from a fresh type-check: a warm interface load exposes a
+-- dead-code-pruned signature and loses edges, so caching the fresh
+-- fragment keeps output cache-state independent.
 --
--- Serialisation rides Agda's 'EmbPrj' machinery so 'QName's round-trip
--- with exact 'NameId's (required for downstream 'getConstInfo' lookups).
--- The byte layer ('Agda.Utils.Serialize') is Agda >= 2.9 only; on 2.8
--- the cache degrades to "always miss, never write".
+-- Serialisation rides Agda's 'EmbPrj' so 'QName's round-trip with exact
+-- 'NameId's (needed for 'getConstInfo'). The byte layer is Agda >= 2.9
+-- only; on 2.8 the cache always misses and never writes.
 module AgdaDeps.FragmentCache
   ( fragmentCacheSupported
   , FragmentData(..)
@@ -85,10 +83,10 @@ data FragmentData = FragmentData
     -- side-channel (only binders homed in this module).
   }
 
--- | Bump whenever the fragment payload shape (or the meaning of any
--- encoded field) changes. The side-channel slices must be exact
--- before/after deltas, not name-prefix filters (a filter drops
--- anonymous-module entries whose QNames no module name prefixes).
+-- | Bump whenever the fragment payload shape (or any encoded field's
+-- meaning) changes. The side-channel slices must be exact before/after
+-- deltas, not name-prefix filters — a filter drops anonymous-module
+-- entries no module name prefixes.
 fragmentFormatVersion :: Word64
 fragmentFormatVersion = 3
 
@@ -120,12 +118,9 @@ fragmentFileFor cacheDir modName =
     hex w = pad (showHex w "")
     pad s = replicate (16 - length s) '0' ++ s
 
--- | Garbage-collect stale fragment files: delete every @*.frag@ in
--- @cacheDir@ whose module name is not in @liveModules@ (modules no
--- longer in the graph after a deletion / rename). Returns the number
--- removed. Version-independent (a 2.8 build never writes fragments, so
--- it finds none); failures are swallowed — a GC hiccup must not fail
--- the build.
+-- | Delete every @*.frag@ in @cacheDir@ whose module is not in
+-- @liveModules@ (gone after a deletion\/rename). Returns the count
+-- removed. Failures are swallowed — a GC hiccup must not fail the build.
 gcFragments :: MonadIO m => FilePath -> [String] -> m Int
 gcFragments cacheDir liveModules = liftIO $ do
   exists <- doesDirectoryExist cacheDir

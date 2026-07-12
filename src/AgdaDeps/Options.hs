@@ -57,6 +57,7 @@ module AgdaDeps.Options
 
 import Control.DeepSeq ( NFData(..) )
 import Control.Monad.Except ( MonadError(throwError) )
+import Data.List ( isPrefixOf )
 
 import AgdaDeps.Util ( isValidHexColor )
 
@@ -196,30 +197,25 @@ data Options = Options
   , optJsonMode :: JsonMode
   , optLenientImports :: Bool
   , optWithTermHashes :: Bool
-    -- ^ When 'True', compute a canonical-form hash for every subterm
-    -- walked in @compileDefAD@ and emit the per-def array as
-    -- @definitionSubtermHashes@ in expanded JSON. Off by default. See
-    -- 'AgdaDeps.TermCanon'.
+    -- ^ Compute a canonical-form hash for every subterm walked in
+    -- @compileDefAD@; emit the per-def @definitionSubtermHashes@ array in
+    -- expanded JSON. Off by default. See 'AgdaDeps.TermCanon'.
   , optMinTermDepth   :: !Int
     -- ^ Minimum AST depth at which a subterm's hash gets emitted.
     -- Default 3; @1@ disables filtering. Ignored when
     -- 'optWithTermHashes' is 'False'.
   , optWithSignatures :: Bool
-    -- ^ When 'True', render each definition's type signature (reify of
-    -- @defType@ via @prettyTCM@) and emit it as the per-def @"type"@
-    -- field in expanded JSON. Rendered as-written: not normalised, with
-    -- Agda's default printing (no @--show-implicit@; implicit binders in
-    -- the signature still appear). Off by default.
+    -- ^ Emit each definition's reified type (@defType@ via @prettyTCM@)
+    -- as the per-def @"type"@ field in expanded JSON. Not normalised,
+    -- Agda's default printing. Off by default.
   , optNormaliseSignatures :: Bool
-    -- ^ @--normalise-signatures@: 'normalise' each definition's type
-    -- before rendering it under 'optWithSignatures', yielding the
-    -- fully-reduced form. Off by default. No effect unless
-    -- 'optWithSignatures' is also set.
+    -- ^ @--normalise-signatures@: 'normalise' each type before rendering
+    -- under 'optWithSignatures'. Off by default; no effect without it.
   , optShowImplicit   :: Bool
-    -- ^ @--signature-implicits@ (named to avoid clashing with Agda's own
-    -- @--show-implicit@): render type signatures with implicit (and
-    -- irrelevant) arguments shown, via 'withShowAllArguments'. Off by
-    -- default. No effect unless 'optWithSignatures' is also set.
+    -- ^ @--signature-implicits@ (avoids clashing with Agda's own
+    -- @--show-implicit@): show implicit + irrelevant args in signatures,
+    -- via 'withShowAllArguments'. Off by default; no effect without
+    -- 'optWithSignatures'.
   , optIncremental    :: Bool
     -- ^ @--incremental@: per-module fragment cache for the
     -- per-definition backend walk, keyed on the interface hash.
@@ -231,18 +227,16 @@ data Options = Options
     -- @\<out-dir\>/.agda-deps-cache@. No effect without
     -- @--incremental@.
   , optPackedAnalytical :: Bool
-    -- ^ @--packed-analytical@: augment the packed @defs@ object with the
-    -- per-definition analytical arrays (kind\/line\/access\/type\/subterm
-    -- hashes) so the compact form carries everything the expanded form
-    -- does. Off by default (packed output stays byte-identical); only
-    -- affects @--json-mode=packed@.
+    -- ^ @--packed-analytical@: add the per-def analytical arrays
+    -- (kind\/line\/access\/type\/subterm hashes) to the packed @defs@
+    -- object, so packed carries what expanded does. Off by default
+    -- (packed stays byte-identical); only affects @--json-mode=packed@.
   , optAgdaHtmlDir    :: Maybe FilePath
-    -- ^ @--agda-html-dir=DIR@: location of the syntax-highlighted pages
-    -- written by @agda --html@, interpreted by the browser relative to
-    -- the generated HTML file. When 'Just', HTML views surface an "Open
-    -- source" link that opens @DIR\/\<Module.Name\>.html@; the value
-    -- reaches the views as the @AGDA_HTML_BASE@ prelude var. 'Nothing'
-    -- disables the affordance.
+    -- ^ @--agda-html-dir=DIR@: location of the @agda --html@ pages,
+    -- resolved by the browser relative to the generated HTML. When
+    -- 'Just', views surface an "Open source" link to
+    -- @DIR\/\<Module.Name\>.html@ (passed as the @AGDA_HTML_BASE@ prelude
+    -- var). 'Nothing' disables it.
   }
 
 instance NFData Options where
@@ -289,8 +283,7 @@ defaultOptions = Options
 isExcludedModule :: [String] -> String -> Bool
 isExcludedModule excludes m = any matches excludes
   where
-    matches p = p == m || (p ++ ".") `isPrefixOfStr` m
-    isPrefixOfStr p s = take (length p) s == p
+    matches p = p == m || (p ++ ".") `isPrefixOf` m
 
 -- ** CLI option parsers
 

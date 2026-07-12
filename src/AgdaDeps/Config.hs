@@ -40,6 +40,7 @@ import qualified Data.Aeson.Types as A
 import qualified Data.Text as T
 import qualified Data.Yaml as Y
 
+import Data.List ( stripPrefix )
 import Data.Maybe ( fromMaybe )
 import System.Directory
   ( doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory )
@@ -402,10 +403,6 @@ extractConfigArg = go Nothing []
           go (Just v) keep rest
       | otherwise = go acc (a : keep) rest
 
-    stripPrefix p s
-      | take (length p) s == p = Just (drop (length p) s)
-      | otherwise              = Nothing
-
 -- | Look at @-o@ / @--out-dir=…@ in argv and, if its value has a
 -- recognised extension, return the format that should be inferred.
 -- Returns 'Nothing' for directories, missing flags, or unrecognised
@@ -418,13 +415,9 @@ inferFormatFromOutput = pickValue
       | a == "-o" || a == "--out-dir" = case rest of
           (v : _) -> matchExt v
           []      -> Nothing
-      | Just v <- stripEq "-o=" a       = matchExt v
-      | Just v <- stripEq "--out-dir=" a = matchExt v
+      | Just v <- stripPrefix "-o=" a       = matchExt v
+      | Just v <- stripPrefix "--out-dir=" a = matchExt v
       | otherwise = pickValue rest
-
-    stripEq p s
-      | take (length p) s == p = Just (drop (length p) s)
-      | otherwise              = Nothing
 
     matchExt :: FilePath -> Maybe String
     matchExt v = case takeExtension v of

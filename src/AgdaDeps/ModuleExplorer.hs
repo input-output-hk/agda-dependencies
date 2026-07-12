@@ -1,5 +1,4 @@
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | Partial-compilation support: walks Agda's loaded-module table on
@@ -86,7 +85,7 @@ import Agda.TypeChecking.Monad
   , stBackends
 #endif
   , setCurrentRange, defName
-  , modifyTCLens, modifyTCLens', setTCLens'
+  , modifyTCLens', setTCLens'
   )
 import Agda.TypeChecking.Monad.Base
   ( stCurrentModule, eActiveBackendName
@@ -115,14 +114,12 @@ import AgdaDeps.Logging ( info )
 -- ** Driver entry point
 
 -- | Drop-in for @Agda.Main.runAgdaArgs@ that uses the partial-compile
--- interactor. When argv carries no source file (e.g. @--help@,
--- @--version@) the standard 'runAgda' path takes over via the
--- 'Nothing' branch.
+-- interactor. With no source file in argv (e.g. @--help@) the standard
+-- 'runAgda' path takes over via the 'Nothing' branch.
 --
--- @reportFailed@ is invoked once per @check mainFile@ failure with the
--- name of the module Agda was busy checking when the error fired. The
--- callback should record the name somewhere the backend can read in its
--- @postCompile@ hook.
+-- @reportFailed@ is called once per @check mainFile@ failure with the
+-- module Agda was checking, to record where the backend's @postCompile@
+-- can read it.
 runPartial
   :: (String -> IO ())  -- ^ @reportFailed modName@
   -> [Backend]
@@ -156,15 +153,14 @@ runPartial reportFailed backends = do
 
 -- | Catch-everything guard for the best-effort partial pass.
 --
--- Do not simplify back to 'catchError': that only catches 'TCErr', but
--- Agda internals also throw GHC exceptions (e.g. @__IMPOSSIBLE__@, exit
--- 120). This catches both (a 'TCErr' is itself a GHC exception),
--- re-throwing only 'ExitCode' and asynchronous exceptions.
+-- Don't simplify back to 'catchError': it catches only 'TCErr', but Agda
+-- internals also throw GHC exceptions (@__IMPOSSIBLE__@, exit 120). This
+-- catches both (a 'TCErr' is itself a GHC exception), re-throwing only
+-- 'ExitCode' and async exceptions.
 --
--- Unlike 'catchError', the state is NOT rolled back: the handler
--- continues from wherever the failed action left off, which is what a
--- skip-and-continue driver wants (the next module's 'setInterface'
--- re-establishes the per-module state).
+-- Unlike 'catchError', state is NOT rolled back: the handler continues
+-- from where the failed action left off — what a skip-and-continue
+-- driver wants (the next 'setInterface' re-establishes per-module state).
 catchAllTCM :: TCM a -> (E.SomeException -> TCM a) -> TCM a
 catchAllTCM m h = TCM $ \ r e ->
   unTCM m r e `E.catches`
@@ -209,9 +205,9 @@ partialBackendInteraction
   -> TCM () -> (AbsolutePath -> TCM ACB.CheckResult) -> TCM ()
 partialBackendInteraction reportFailed mainFile backends setup check = do
   -- Wrap both 'setup' and 'check mainFile' so library / pragma / option
-  -- errors firing before 'check mainFile' starts are caught too.
-  -- 'catchError' handles 'TCErr' (and rolls the TCState back — see
-  -- 'mergeIfaceState'); 'catchAllTCM' picks up everything else.
+  -- errors firing before the check starts are caught too. 'catchError'
+  -- handles 'TCErr' (and rolls the TCState back, hence 'mergeIfaceState');
+  -- 'catchAllTCM' picks up everything else.
   let guarded :: TCM a -> TCM (Either () a)
       guarded act =
         ((Right <$> act)
@@ -331,10 +327,9 @@ partialCompilerMain backend isMain =
     perModule env acc iface = do
       let tlmn = iTopLevelModuleName iface
       -- Always NotMain: the pass can't tell which decoded interface is
-      -- the entry point (its check usually never finished). Passing the
-      -- global flag would make every module claim IsMain, so entry-module
-      -- capture records the last one processed — an absent entryModule is
-      -- better than a wrong one.
+      -- the entry point, and passing IsMain to all makes entry-module
+      -- capture record whichever ran last. An absent entryModule beats a
+      -- wrong one.
       mRes <- (Just <$> compileOneModule backend env NotMain iface)
                 `catchAllTCM` \ ex -> do
                   reportSkippedModule tlmn (exceptionLine ex)
@@ -344,15 +339,13 @@ partialCompilerMain backend isMain =
         Nothing -> acc
 
 -- | Re-create what importing a module normally adds to the TCM state.
---
 -- 'catchError' rolls the whole 'TCState' back (only @stDecodedModules@
--- survives), so we rebuild the import state from the decoded interfaces.
--- The signature alone is NOT enough: builtin bindings (else
--- @infallibleSortKit@ dies with @__IMPOSSIBLE__@ under
--- @--with-signatures@), display forms + pattern synonyms (for
+-- survives), so rebuild the import state from the decoded interfaces.
+-- The signature alone is NOT enough: builtins (else @infallibleSortKit@
+-- dies under @--with-signatures@), display forms + pattern synonyms (for
 -- @prettyTCM@), and the remote meta store (for hole classification) all
--- matter. Mirrors the non-exported @mergeInterface@ \/
--- @addImportedThings@, minus the duplicate-builtin and confluence checks.
+-- matter. Mirrors @mergeInterface@\/@addImportedThings@ minus the
+-- duplicate-builtin and confluence checks.
 mergeIfaceState :: Interface -> TCM ()
 mergeIfaceState iface = do
   mergeIfaceSig iface

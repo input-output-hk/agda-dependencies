@@ -14,6 +14,9 @@ import System.Environment ( getArgs )
 import System.Exit ( exitSuccess )
 import System.FilePath ( (</>), isAbsolute, takeDirectory, takeExtension )
 
+import Control.Monad ( when )
+import Data.List ( isPrefixOf )
+
 import Agda.Compiler.Backend ( Backend_boot(Backend) )
 #if MIN_VERSION_Agda(2,9,0)
 import Agda.Main ( runAgdaArgs )
@@ -54,18 +57,16 @@ main = do
   rawArgs <- getArgs
   -- Plain --help / -h / -? short-circuit to backend-only help; forms
   -- like --help=warning pass through to Agda.
-  if any isHelpRequest rawArgs && not (any wantsAgdaHelp rawArgs)
-    then printHelp >> exitSuccess
-    else return ()
+  when (any isHelpRequest rawArgs && not (any wantsAgdaHelp rawArgs)) $
+    printHelp >> exitSuccess
   -- --version / -V / --numeric-version report agda-deps's own version.
   case filter isVersionRequest rawArgs of
     (v:_) -> printVersion (v == "--numeric-version") >> exitSuccess
     []    -> return ()
   -- --emit-schema prints the generated JSON Schema for expanded JSON
   -- output and exits (no Agda run, no input file needed).
-  if "--emit-schema" `elem` rawArgs
-    then putStrLn expandedSchemaJson >> exitSuccess
-    else return ()
+  when ("--emit-schema" `elem` rawArgs) $
+    putStrLn expandedSchemaJson >> exitSuccess
   -- Detect --quiet before any 'info' call.
   setQuiet ("--quiet" `elem` rawArgs)
 
@@ -138,7 +139,7 @@ main = do
 isFlagPrefix :: String -> String -> Bool
 isFlagPrefix flag arg =
      arg == flag
-  || take (length flag + 1) arg == (flag ++ "=")
+  || (flag ++ "=") `isPrefixOf` arg
 
 -- | True when the user has already passed flags that govern library
 -- handling (so our auto-discovery shouldn't second-guess them).
@@ -147,11 +148,9 @@ userOptedOutOfLibDiscovery = any isOptOut
   where
     isOptOut a =
          a == "--no-libraries"
-      || a == "--library"      || hasPrefix "--library="      a
+      || a == "--library"      || "--library="      `isPrefixOf` a
       || a == "-l"
-      || a == "--library-file" || hasPrefix "--library-file=" a
-
-    hasPrefix p s = take (length p) s == p
+      || a == "--library-file" || "--library-file=" `isPrefixOf` a
 
 -- | Canonicalize file/dir paths in argv (the @-o@ and @-i@ flag values,
 -- plus positional @*.agda@ / @*.lagda*@ source files) to absolute paths.

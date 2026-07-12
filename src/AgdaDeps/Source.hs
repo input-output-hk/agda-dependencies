@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | Source-snippet extraction for the HTML drawer.
 --
@@ -39,7 +37,7 @@ import Data.Word ( Word32 )
 import System.Directory ( doesFileExist, createDirectoryIfMissing, removeDirectoryRecursive )
 import System.FilePath ( (</>) )
 
-import Agda.Compiler.Backend ( IsMain )
+import Data.List ( isPrefixOf )
 
 import Agda.Syntax.Abstract.Name ( QName, nameBindingSite )
 import Agda.Syntax.Internal ( qnameName, qnameModule )
@@ -184,14 +182,12 @@ findTopLevelForQName tlms qn =
       candidates = [ tlmn
                    | tlmn <- tlms
                    , let s = prettyShow tlmn
-                   , s == qmStr || (s ++ ".") `isPrefixOfStr` qmStr
+                   , s == qmStr || (s ++ ".") `isPrefixOf` qmStr
                    ]
       best = foldr (\a b -> if length (prettyShow a) >= length (prettyShow b) then a else b)
   in case candidates of
        []     -> Nothing
        (x:xs) -> Just (best x xs)
-  where
-    isPrefixOfStr p s = take (length p) s == p
 
 readFileCached
   :: IORef.IORef (Map FilePath (Maybe [String]))

@@ -287,7 +287,7 @@ Clicking a leaf node in the HTML graph can open that definition's Agda source co
 2. Read each definition's `.agda` source to locate the **paragraph** (run of non-blank lines) around its binding site.
 3. Slice the matching span out of the highlighted HTML for that module and write it to a per-module `snippets/<Module>.json` bundle that the page fetches on demand.
 
-`--with-source` needs `--lazy`: the snippet bundles are fetched at runtime, not baked into `deps.html`. (The self-contained inline variant was removed — see the note below.) Because the page uses `fetch()`, the output directory has to be served over HTTP:
+`--with-source` needs `--lazy`: the snippet bundles are fetched at runtime, not baked into `deps.html`. Because the page uses `fetch()`, the output directory has to be served over HTTP:
 
 ```
 cabal run agda-deps -- --format=html --with-source --lazy -i test/ -o test/ test/Test.agda
@@ -314,7 +314,7 @@ Module clusters keep their click-to-collapse behavior; only leaf clicks open the
 
 No separate `agda --html` step is needed — the backend writes the per-module Agda HTML to a temp directory under `-o`, slices the snippets out, removes the temp dir, and emits the bundles under `snippets/`. Names whose source file isn't reachable at compile time (e.g., some builtin / synthetic names) simply have no snippet attached and show a small placeholder.
 
-> `--with-source` requires `--lazy`: the snippet bundles are fetched at runtime. (The earlier inline mode — every snippet baked into a single `deps.html` — was removed because it could push the file past a gigabyte.) Passing `--with-source` without `--lazy` prints a warning and renders without snippets. For *linked* rather than embedded source, see `--agda-html-dir` below (no `--lazy` needed).
+> `--with-source` requires `--lazy`: the snippet bundles are fetched at runtime. Passing it without `--lazy` prints a warning and renders without snippets. For *linked* rather than embedded source, see `--agda-html-dir` below (no `--lazy` needed).
 
 ### Opening the full `agda --html` page (`--agda-html-dir`)
 
@@ -357,7 +357,7 @@ snippets/
   bundle-<hash>.json   ← fallback for modules with non-safe filenames
 ```
 
-On page load, the shell only fetches `graph.json` and cytoscape renders ~N module boxes plus aggregated module-to-module edges. When you click a module, the page fetches `modules/<Module>.detail.json` (cached), splices its leaf nodes into cytoscape, and re-routes the relevant edges — leaf-to-leaf where both endpoints' modules are expanded, leaf-to-module-parent otherwise. Module-meta-edges that have at least one expanded endpoint are hidden in favour of the more specific dynamic edges. Click again to collapse.
+On page load, the shell only fetches `graph.json` and cytoscape renders ~N module boxes plus aggregated module-to-module edges. When you click a module, the page fetches `modules/<Module>.json` (cached), splices its leaf nodes into cytoscape, and re-routes the relevant edges — leaf-to-leaf where both endpoints' modules are expanded, leaf-to-module-parent otherwise. Module-meta-edges that have at least one expanded endpoint are hidden in favour of the more specific dynamic edges. Click again to collapse.
 
 **Why HTTP?** Modern browsers block `fetch()` on `file://` URLs, so the lazy layout has to be served via a tiny static server. `python3 -m http.server` is enough; any static-file server works.
 

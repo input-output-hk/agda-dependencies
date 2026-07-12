@@ -41,7 +41,7 @@ import qualified Data.Set as S
 
 import AgdaDeps.Options ( DefState(..) )
 import AgdaDeps.Deps    ( DefKind(..), DefAccess(..), UnsafeTag(..), EdgeProv, provTag )
-import AgdaDeps.Util    ( jsString )
+import AgdaDeps.Util    ( jsString, jArray, jStrArray, jStrMap, jStrArrMap )
 
 -- * Wire value types
 --
@@ -66,10 +66,9 @@ data ExpandedGraph = ExpandedGraph
   , egReExports      :: [(String, String, [String], [(String, String)])]
   , egModuleOptionEscapes :: [(String, [String])]
     -- ^ Per module, the file-level @{-# OPTIONS ⋯ #-}@ soundness escapes
-    -- ('AgdaDeps.Deps.optionEscapes'). Ascending by module; only modules
-    -- with at least one escape appear. Emitted as the optional
-    -- @moduleOptionEscapes@ object, omitted when empty so escape-free
-    -- corpora stay byte-identical.
+    -- ('AgdaDeps.Deps.optionEscapes'), ascending by module; only modules
+    -- with an escape appear. Emitted as the optional @moduleOptionEscapes@
+    -- object; omitted when empty so escape-free corpora stay byte-identical.
   , egSubtermHashes  :: Maybe [[Word64]]      -- ^ present iff any def carries hashes; parallel to 'egDefs'
   , egSubtermDepths  :: Maybe [[Int]]
   , egExternalsSummary :: Maybe WireExternals
@@ -191,21 +190,12 @@ encodeObject fs a = "{" ++ intercalate "," (mapMaybe emit fs) ++ "}"
 
 -- * Encoder helpers
 
-jArray :: (a -> String) -> [a] -> String
-jArray f xs = "[" ++ intercalate "," (map f xs) ++ "]"
-
-jStrArray :: [String] -> String
-jStrArray = jArray jsString
-
-jStrMap :: [(String, String)] -> String
-jStrMap kvs = "{" ++ intercalate "," [ jsString k ++ ":" ++ jsString v | (k, v) <- kvs ] ++ "}"
+-- | The generic array/object encoders ('jArray', 'jStrArray', 'jStrMap',
+-- 'jStrArrMap') live in "AgdaDeps.Util" so this expanded path and the
+-- packed/lazy path in "AgdaDeps.Backend.GraphJson" share one byte layout.
 
 encEdge :: WireEdge -> String
 encEdge (WireEdge (a, b)) = "[" ++ jsString a ++ "," ++ jsString b ++ "]"
-
--- | @{ <key>: [<str>, …], … }@ — the @postulates_by_module@ shape.
-jStrArrMap :: [(String, [String])] -> String
-jStrArrMap kvs = "{" ++ intercalate "," [ jsString k ++ ":" ++ jStrArray v | (k, v) <- kvs ] ++ "}"
 
 -- * The field tables
 

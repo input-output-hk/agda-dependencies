@@ -36,7 +36,7 @@ import Control.DeepSeq ( NFData(..) )
 import Data.Bits ( (.|.) )
 import Data.Char ( isAlphaNum, toLower )
 import Data.Int ( Int32, Int8 )
-import Data.List ( foldl', intercalate, sort, sortBy, sortOn )
+import Data.List ( foldl', inits, intercalate, sort, sortOn )
 import Data.Maybe ( isJust )
 import Data.Word ( Word64 )
 import qualified Data.Map.Strict as M
@@ -61,7 +61,7 @@ import AgdaDeps.Deps    ( ADDef(..), DefKind(..), DefAccess(..)
 import BuildInfo        ( buildFingerprint )
 import AgdaDeps.Layout  ( Position(..) )
 import AgdaDeps.Options ( DefState(..) )
-import AgdaDeps.Util    ( jsString )
+import AgdaDeps.Util    ( jsString, jStrArray, jStrMap, jStrArrMap )
 import AgdaDeps.Backend.Wire
   ( ExpandedGraph(..), WireDef(..), WireEdge(..), WireExternals(..)
   , encodeExpanded, validateExpanded )
@@ -77,8 +77,7 @@ data Counts = Counts !Int !Int !Int !Int
 
 -- | Diagnostic summary of the external modules that @--no-externals@
 -- stripped from the graph. Emitted at the top level as
--- @externals_summary@ only under @--no-externals@; carried by both
--- @packed@ and @expanded@ modes.
+-- @externals_summary@ in both @packed@ and @expanded@ modes.
 --
 -- JSON shape:
 --
@@ -126,22 +125,15 @@ buildExternalsSummary externals defs =
   where
     -- Unqualified name: last dot-component, or the whole name if no dot.
     shortNameOf :: String -> String
-    shortNameOf s = case break (== '.') (reverse s) of
-      (revLast, "")        -> reverse revLast
-      (revLast, _revDotty) -> reverse revLast
+    shortNameOf = reverse . takeWhile (/= '.') . reverse
 
 -- | JSON for 'ExternalsSummary' (packed / @--lazy@ path). The expanded
 -- path emits the same shape via @AgdaDeps.Backend.Wire@ — keep the two
 -- byte-coherent if this shape changes.
 externalsSummaryJson :: ExternalsSummary -> String
 externalsSummaryJson (ExternalsSummary mods byMod) =
-  "{\"modules\":" ++ stringArrayJson (S.toAscList mods)
-  ++ ",\"postulates_by_module\":"
-  ++ "{" ++ intercalate ","
-         [ jsString k ++ ":" ++ stringArrayJson v
-         | (k, v) <- M.toAscList byMod
-         ]
-  ++ "}"
+  "{\"modules\":" ++ jStrArray (S.toAscList mods)
+  ++ ",\"postulates_by_module\":" ++ jStrArrMap (M.toAscList byMod)
   ++ "}"
 
 -- | All the inputs the schema emitter needs.
@@ -181,11 +173,10 @@ data GraphInput = GraphInput
     -- packed output byte-identical.
   , giModuleOptionEscapes :: ![(String, [String])]
     -- ^ Per module, the file-level @{-# OPTIONS ⋯ #-}@ soundness escapes
-    -- ('AgdaDeps.Deps.optionEscapes'). Ascending by module; only modules
+    -- ('AgdaDeps.Deps.optionEscapes'), ascending by module; only modules
     -- with an escape appear. Emitted as the optional top-level
-    -- @moduleOptionEscapes@ object in every form (packed / expanded /
-    -- lazy @graph.json@), omitted when empty so escape-free corpora stay
-    -- byte-identical.
+    -- @moduleOptionEscapes@ object (packed / expanded / lazy); omitted
+    -- when empty so escape-free corpora stay byte-identical.
   }
 
 -- | Output of the v2 emitter, ready for the backend to write to disk.
@@ -197,10 +188,10 @@ data GraphJsonOutput = GraphJsonOutput
 
 -- | One per-module detail file in lazy mode.
 --
--- 'mdjEpoch' is a cheap content fingerprint (no base64, no JSON
--- assembly) so the incremental-serialise path can skip rewriting a file
--- without forcing the lazy 'mdjContent' thunk. Keep it strict and the
--- content thunk lazy so a skipped file never renders.
+-- 'mdjEpoch' is a cheap content fingerprint (no base64/JSON assembly),
+-- so the incremental-serialise path can skip rewriting a file without
+-- forcing 'mdjContent'. Keep the epoch strict and the content thunk lazy
+-- so a skipped file never renders.
 data ModuleDetailJson = ModuleDetailJson
   { mdjModuleName :: String
   , mdjFileName   :: FilePath
@@ -210,17 +201,42 @@ data ModuleDetailJson = ModuleDetailJson
 
 -- ** Emission
 
+-- | Deterministic definition list shared by both emitters: every QName
+-- in the graph, sorted by 'hashQName' for stable byte output. Keeping it
+-- in one place is what makes 'buildGraphJson' and 'toExpandedGraph' agree
+-- node-for-node.
+graphDefsList :: [ADDef] -> [QName]
+graphDefsList = sortOn hashQName . collectAllQNames
+
+-- | The module-name node set shared by both emitters: union of def
+-- modules, import-edge endpoints, the entry module, failed modules, and
+-- extra modules. @'S.toAscList'@ of the result is the ascending module
+-- list both forms emit.
+graphModulesSet
+  :: [String]           -- ^ 'moduleKey' of each definition
+  -> [(String, String)] -- ^ import edges
+  -> Maybe String       -- ^ entry module
+  -> S.Set String       -- ^ failed modules
+  -> S.Set String       -- ^ extra modules
+  -> S.Set String
+graphModulesSet defModuleNames importEdges entryModule failedModules extraModules =
+  let !s0 = S.fromList defModuleNames
+      !s1 = foldl' (\s (a, b) -> S.insert b (S.insert a s)) s0 importEdges
+      !s2 = case entryModule of
+              Just m  -> S.insert m s1
+              Nothing -> s1
+      !s3 = S.union s2 failedModules
+  in S.union s3 extraModules
+
 buildGraphJson :: GraphInput -> GraphJsonOutput
 buildGraphJson GraphInput{..} =
   let mode = if giLazy then EmitLazy else EmitInline
 
       -- (1) Definition list ---------------------------------------------
-      allQNames :: [QName]
-      allQNames = collectAllQNames giDefs
-
-      -- Sort by hashQName for deterministic byte output across runs.
+      -- Sorted by hashQName for deterministic byte output across runs;
+      -- shared with 'toExpandedGraph' via 'graphDefsList'.
       defsList :: [QName]
-      defsList = sortOn hashQName allQNames
+      defsList = graphDefsList giDefs
 
       -- Edge endpoints index by canonical 'nodeKey' string, not 'QName'
       -- 'Ord' (which distinguishes same-key helpers and re-drops edges).
@@ -240,14 +256,8 @@ buildGraphJson GraphInput{..} =
       -- Union of def modules, import-edge endpoints, the entry module,
       -- failed modules, and extra modules. 'S.toAscList' is sorted.
       modulesSet :: S.Set String
-      modulesSet =
-        let !s0 = S.fromList defModuleNames
-            !s1 = foldl' (\s (a, b) -> S.insert b (S.insert a s)) s0 giImportEdges
-            !s2 = case giEntryModule of
-                    Just m  -> S.insert m s1
-                    Nothing -> s1
-            !s3 = S.union s2 giFailedModules
-        in S.union s3 giExtraModules
+      modulesSet = graphModulesSet defModuleNames giImportEdges
+                     giEntryModule giFailedModules giExtraModules
 
       modules :: [String]
       modules = S.toAscList modulesSet
@@ -271,8 +281,7 @@ buildGraphJson GraphInput{..} =
       defState qn = M.findWithDefault Defined qn giStateMap
 
       -- Per-def state, looked up once and shared by 'defStateBytes' and
-      -- 'moduleStateCounts' (both walk 'defsList'), rather than hitting
-      -- 'giStateMap' twice per def.
+      -- 'moduleStateCounts' (both walk 'defsList').
       defStates :: [DefState]
       defStates = map defState defsList
 
@@ -577,13 +586,13 @@ buildGraphJson GraphInput{..} =
       moduleOptionEscapesField
         | null giModuleOptionEscapes = ""
         | otherwise = ",\"moduleOptionEscapes\":"
-                   ++ stringArrMapJson giModuleOptionEscapes
+                   ++ jStrArrMap giModuleOptionEscapes
 
       graphJson = "{\"v\":2"
         ++ ",\"nodeKeyVersion\":" ++ show nodeKeyVersion
         ++ ",\"producer\":"     ++ jsString buildFingerprint
-        ++ ",\"modules\":"      ++ stringArrayJson modules
-        ++ ",\"files\":"        ++ stringArrayJson files
+        ++ ",\"modules\":"      ++ jStrArray modules
+        ++ ",\"files\":"        ++ jStrArray files
         ++ ",\"moduleToFile\":" ++ jsB64Int32 moduleToFile
         ++ ",\"fileToModules\":" ++ intArrayArrayJson fileToModules
         ++ defsJson
@@ -754,7 +763,7 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
             !ps     = externalPostulatesFor m
             extField
               | null ps   = ""
-              | otherwise = ",\"externalPostulates\":" ++ stringArrayJson ps
+              | otherwise = ",\"externalPostulates\":" ++ jStrArray ps
         in "{\"defs\":"     ++ defsObjectJsonModule [] [] [] []
         ++ ",\"outEdges\":" ++ outEdgesJson []
         ++ ",\"placeholder\":true"
@@ -783,7 +792,7 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
 -- for the default (byte-identical) form.
 defsObjectJson :: [String] -> [Int32] -> [Int8] -> [Float] -> [Float] -> String -> String
 defsObjectJson names mods states xs ys analytical =
-  "{\"names\":"      ++ stringArrayJson names
+  "{\"names\":"      ++ jStrArray names
   ++ ",\"modules\":" ++ jsB64Int32   mods
   ++ ",\"states\":"  ++ jsB64Int8    states
   ++ ",\"x\":"       ++ jsB64Float32 xs
@@ -848,7 +857,7 @@ stringOrNullArrayJson xs =
 
 defsObjectJsonModule :: [String] -> [Int8] -> [Float] -> [Float] -> String
 defsObjectJsonModule names states xs ys =
-  "{\"names\":"      ++ stringArrayJson names
+  "{\"names\":"      ++ jStrArray names
   ++ ",\"states\":"  ++ jsB64Int8    states
   ++ ",\"x\":"       ++ jsB64Float32 xs
   ++ ",\"y\":"       ++ jsB64Float32 ys
@@ -867,24 +876,10 @@ outEdgesJson xs = "[" ++ intercalate "," (map one xs) ++ "]"
   where
     one (a, b, c) = "[" ++ show a ++ "," ++ show b ++ "," ++ show c ++ "]"
 
-stringArrayJson :: [String] -> String
-stringArrayJson xs = "[" ++ intercalate "," (map jsString xs) ++ "]"
-
+-- | @{ <key>: <str>, … }@ from a 'M.Map'; a typed convenience over the
+-- shared 'jStrMap' ('M.toList' is ascending).
 stringMapJson :: M.Map String FilePath -> String
-stringMapJson m =
-  "{" ++ intercalate ","
-    [ jsString k ++ ":" ++ jsString v | (k, v) <- M.toList m ]
-  ++ "}"
-
--- | @{ <key>: [<str>, …], … }@ from an association list. Keys are
--- emitted in the list's given order (the caller supplies ascending).
--- Byte-coherent with Wire's @jStrArrMap@ (the expanded path), so the
--- packed / lazy and expanded forms agree.
-stringArrMapJson :: [(String, [String])] -> String
-stringArrMapJson kvs =
-  "{" ++ intercalate ","
-    [ jsString k ++ ":" ++ stringArrayJson v | (k, v) <- kvs ]
-  ++ "}"
+stringMapJson = jStrMap . M.toList
 
 pairArrayJson :: [(Int, Int)] -> String
 pairArrayJson xs = "[" ++ intercalate "," (map p xs) ++ "]"
@@ -1014,7 +1009,7 @@ renderFileTree files =
       -- Set-based dedup avoids the O(n^2) of 'nub'.
       allPaths :: [[String]]
       allPaths = S.toAscList . S.fromList $
-        concatMap (\(_, comps) -> filter (not . null) (inits' comps)) tokens
+        concatMap (\(_, comps) -> filter (not . null) (inits comps)) tokens
 
       fileLookup :: M.Map [String] FilePath
       fileLookup = M.fromList [ (comps, f) | (f, comps) <- tokens ]
@@ -1044,10 +1039,6 @@ renderFileTree files =
         ++ "}"
   in "[" ++ intercalate "," (map entry allPaths) ++ "]"
 
-inits' :: [a] -> [[a]]
-inits' []     = [[]]
-inits' (x:xs) = [] : map (x:) (inits' xs)
-
 splitPath' :: FilePath -> [String]
 splitPath' = filter (not . null) . splitOn '/'
 
@@ -1076,11 +1067,7 @@ renderModuleTree modules =
       treeIdx = M.fromList (zip treeNames [0..])
 
       parentOf :: String -> Int
-      parentOf m = case reverse (properPrefixes m) of
-        []     -> -1
-        (p:ps) -> case M.lookup p treeIdx of
-          Just i  -> i
-          Nothing -> findFirst ps
+      parentOf m = findFirst (reverse (properPrefixes m))
         where
           findFirst []     = -1
           findFirst (q:qs) = case M.lookup q treeIdx of
@@ -1150,7 +1137,7 @@ bigramThreshold = 50000
 
 searchIndexJson :: [String] -> [Int8] -> M.Map String [Int] -> String
 searchIndexJson names kinds bigrams =
-  "{\"names\":"      ++ stringArrayJson names
+  "{\"names\":"      ++ jStrArray names
   ++ ",\"kinds\":"   ++ jsB64Int8 kinds
   ++ ",\"bigrams\":" ++ bigramObj
   ++ "}"
@@ -1183,21 +1170,25 @@ snippetBundleFilename = safeFilename "bundle-"
 
 -- ** Transitive-edge helpers
 
+-- | The @edge (u, v) is transitively implied by another out-edge of u@
+-- predicate for a fixed adjacency map. The per-node reachable set
+-- ('reach') is computed once and shared across every edge query via the
+-- returned closure.
+transitiveEdgePred :: IM.IntMap IS.IntSet -> (Int -> Int -> Bool)
+transitiveEdgePred adj =
+  let reach :: IM.IntMap IS.IntSet
+      reach = IM.fromList [ (u, bfsFrom adj u) | u <- IM.keys adj ]
+  in \u v ->
+       let others = IS.delete v (IM.findWithDefault IS.empty u adj)
+       in any (\w -> IS.member v (IM.findWithDefault IS.empty w reach))
+              (IS.toList others)
+
 -- | Definition-level transitive reduction over an adjacency list.
 transitiveDefEdges :: [(Int, [Int])] -> [(Int, Int)]
 transitiveDefEdges adjList =
-  let adj :: IM.IntMap IS.IntSet
-      adj = IM.fromListWith IS.union
+  let adj = IM.fromListWith IS.union
         [ (s, IS.fromList ts) | (s, ts) <- adjList, not (null ts) ]
-
-      reach :: IM.IntMap IS.IntSet
-      reach = IM.fromList [ (u, bfsFrom adj u) | u <- IM.keys adj ]
-
-      isTransitive u v =
-        let others = IS.delete v (IM.findWithDefault IS.empty u adj)
-        in any (\w -> IS.member v (IM.findWithDefault IS.empty w reach))
-               (IS.toList others)
-
+      isTransitive = transitiveEdgePred adj
   in [ (s, t)
      | (s, ts) <- adjList
      , t <- ts
@@ -1206,18 +1197,9 @@ transitiveDefEdges adjList =
 
 transitiveEdgesInt :: [(Int, Int)] -> [(Int, Int)]
 transitiveEdgesInt edges =
-  let adj :: IM.IntMap IS.IntSet
-      adj = IM.fromListWith IS.union
+  let adj = IM.fromListWith IS.union
         [ (s, IS.singleton t) | (s, t) <- edges ]
-
-      reach :: IM.IntMap IS.IntSet
-      reach = IM.fromList [ (u, bfsFrom adj u) | u <- IM.keys adj ]
-
-      isTransitive u v =
-        let others = IS.delete v (IM.findWithDefault IS.empty u adj)
-        in any (\w -> IS.member v (IM.findWithDefault IS.empty w reach))
-               (IS.toList others)
-
+      isTransitive = transitiveEdgePred adj
   in [ (s, t) | (s, t) <- edges, isTransitive s t ]
 
 -- | Reachable set from @start@ via a stack-style traversal (no level
@@ -1382,11 +1364,8 @@ buildExpandedJson gi =
 -- check ('validateExpanded').
 toExpandedGraph :: GraphInput -> ExpandedGraph
 toExpandedGraph GraphInput{..} =
-  let allQNames :: [QName]
-      allQNames = collectAllQNames giDefs
-
-      defsList :: [QName]
-      defsList = sortOn hashQName allQNames
+  let defsList :: [QName]
+      defsList = graphDefsList giDefs
 
       defIndexMap :: M.Map QName Int
       defIndexMap = M.fromList (zip defsList [0..])
@@ -1410,16 +1389,10 @@ toExpandedGraph GraphInput{..} =
 
       defModuleOf  = map moduleKey defsList
 
-      -- modules: same union as buildGraphJson so the two shapes agree.
+      -- modules: shared with buildGraphJson so the two shapes agree.
       modulesSet :: S.Set String
-      modulesSet =
-        let !s0 = S.fromList defModuleOf
-            !s1 = foldl' (\s (a, b) -> S.insert b (S.insert a s)) s0 giImportEdges
-            !s2 = case giEntryModule of
-                    Just m  -> S.insert m s1
-                    Nothing -> s1
-            !s3 = S.union s2 giFailedModules
-        in S.union s3 giExtraModules
+      modulesSet = graphModulesSet defModuleOf giImportEdges
+                     giEntryModule giFailedModules giExtraModules
 
       modules    = S.toAscList modulesSet
       externals  = S.toAscList giExternalModules

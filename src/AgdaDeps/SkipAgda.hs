@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | Render the dependency graph from the source-file scan alone, the
 -- @--skip-agda@ code path. 'AgdaDeps.Precompute' has already
@@ -19,7 +18,7 @@ module AgdaDeps.SkipAgda
   , runSkipAgda
   ) where
 
-import Control.Monad ( foldM )
+import Control.Monad ( foldM, when )
 import Data.List ( find, isPrefixOf )
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -159,7 +158,9 @@ emit opts moduleFileMap entryModule externals imports sourceFiles allModules = d
         , giReExports       = []
         , giExternalsSummary = Nothing
         , giPackedAnalytical = False
-        -- No Agda interfaces in --skip-agda, so no file-@OPTIONS@ escapes.
+        -- Empty: the source scanner doesn't extract file-level
+        -- @{-# OPTIONS #-}@ tokens ('Precompute.stripBlockComments'
+        -- strips them as block comments).
         , giModuleOptionEscapes = []
         }
       gjo = buildGraphJson gi
@@ -184,16 +185,13 @@ emit opts moduleFileMap entryModule externals imports sourceFiles allModules = d
         hPutStrLn stderr "agda-deps: --skip-agda --format=html requires -o/--out-dir."
         exitFailure
       Just dir -> do
-        createDirectoryIfMissing True dir
         -- Reuse the full pipeline's view templates. Def-level views
         -- render empty pods; module-DAG views render normally.
         let html = renderHtmlFromInput (optView opts) (optColors opts)
                                        (optGzip opts) (optAgdaHtmlDir opts) gi
         writeFile (dir </> "deps.html") html
-        if optGzip opts
-          then BL.writeFile (dir </> "deps.html.gz")
-                 (GZip.compress (BLC.pack html))
-          else return ()
+        when (optGzip opts) $
+          BL.writeFile (dir </> "deps.html.gz") (GZip.compress (BLC.pack html))
 
 -- | DOT renderer for the module-only graph: one node per module, one
 -- edge per import. The entry module gets a red border, externals

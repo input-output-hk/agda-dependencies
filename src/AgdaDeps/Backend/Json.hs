@@ -1,4 +1,3 @@
-{-# LANGUAGE RecordWildCards #-}
 -- | Generic JSON graph artifact emitted with @--format=json@.
 --
 -- Shares the v2 graph.json schema with the HTML output via
@@ -8,59 +7,17 @@ module AgdaDeps.Backend.Json
   ( renderJson
   ) where
 
-import Data.Map ( Map )
-import qualified Data.Map as M
-import Data.Set ( Set )
-import qualified Data.Set as S
-
-import Agda.Syntax.Abstract.Name ( QName )
-
-import AgdaDeps.Deps    ( ADDef(..) )
-import AgdaDeps.Layout  ( Position )
-import AgdaDeps.Options ( DefState, JsonMode(..) )
+import AgdaDeps.Options ( JsonMode(..) )
 
 import AgdaDeps.Backend.GraphJson
-  ( GraphInput(..), GraphJsonOutput(..), ExternalsSummary
+  ( GraphInput, GraphJsonOutput(..)
   , buildGraphJson, buildExpandedJson )
 
-renderJson
-  :: JsonMode                -- ^ packed (default) or expanded
-  -> Bool                    -- ^ @--packed-analytical@
-  -> Map QName DefState
-  -> Set String              -- ^ external module names
-  -> Set String              -- ^ failed module names (--keep-going)
-  -> Maybe String            -- ^ entry-point module name
-  -> [(String, String)]      -- ^ all direct module-level import edges
-  -> [FilePath]              -- ^ source files (from precompute)
-  -> Map String FilePath     -- ^ module name -> binding-site source file
-  -> Map QName Position      -- ^ pre-computed (x, y) per definition
-  -> [(String, String, [String], [(String, String)])]
-                             -- ^ (host, source, qualified-names, renamed
-                             --   alias->canonical pairs) re-exports
-  -> [(String, [String])]    -- ^ per-module file-@OPTIONS@ soundness escapes
-  -> Maybe ExternalsSummary  -- ^ diagnostic summary under --no-externals
-  -> [ADDef]
-  -> String
-renderJson mode packedAnalytical stateMap externals failed entryModule importEdges sourceFiles moduleFile positions reexports optionEscapes externalsSummary defs =
-  let gi = GraphInput
-        { giDefs            = defs
-        , giStateMap        = stateMap
-        , giImportEdges     = importEdges
-        , giSourceFiles     = sourceFiles
-        , giModuleFile      = moduleFile
-        , giEntryModule     = entryModule
-        , giExternalModules = externals
-        , giFailedModules   = failed
-        , giPositions       = positions
-        , giWithSource      = False
-        , giSnippetModules  = []
-        , giLazy            = False
-        , giExtraModules    = S.empty
-        , giReExports       = reexports
-        , giExternalsSummary = externalsSummary
-        , giPackedAnalytical = packedAnalytical
-        , giModuleOptionEscapes = optionEscapes
-        }
-  in case mode of
-       JsonPacked   -> gjoGraphJson (buildGraphJson gi)
-       JsonExpanded -> buildExpandedJson gi
+-- | Emit the v2 graph.json for a fully-assembled 'GraphInput'. The
+-- caller ("AgdaDeps.Backend") sets the JSON-specific fields
+-- (@giReExports@, @giPackedAnalytical@) on the shared base input.
+renderJson :: JsonMode -> GraphInput -> String
+renderJson mode gi =
+  case mode of
+    JsonPacked   -> gjoGraphJson (buildGraphJson gi)
+    JsonExpanded -> buildExpandedJson gi

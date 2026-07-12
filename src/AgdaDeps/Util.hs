@@ -23,6 +23,10 @@ module AgdaDeps.Util
 
     -- * JSON helpers
   , jsString
+  , jArray
+  , jStrArray
+  , jStrMap
+  , jStrArrMap
 
     -- * argv inspection (shared by Main + Precompute)
   , candidateDirs
@@ -30,7 +34,7 @@ module AgdaDeps.Util
   ) where
 
 import Data.Char ( isHexDigit )
-import Data.List ( intercalate, isSuffixOf )
+import Data.List ( intercalate, isSuffixOf, stripPrefix )
 import qualified Data.Set as Set
 import Data.Word ( Word8 )
 import Numeric ( readHex, showHex )
@@ -131,6 +135,27 @@ jsString s = '"' : concatMap esc s ++ "\""
 
     pad4 xs = replicate (4 - length xs) '0' ++ xs
 
+-- | @[ f x, … ]@ — a JSON array rendered with a per-element encoder.
+-- The single source of the @[…]@/@,@ layout the wire depends on; shared
+-- by "AgdaDeps.Backend.Wire" and "AgdaDeps.Backend.GraphJson" so the
+-- expanded and packed/lazy forms stay byte-coherent.
+jArray :: (a -> String) -> [a] -> String
+jArray f xs = "[" ++ intercalate "," (map f xs) ++ "]"
+
+-- | @[ "s", … ]@ — a JSON array of (escaped) strings.
+jStrArray :: [String] -> String
+jStrArray = jArray jsString
+
+-- | @{ "k": "v", … }@ — a JSON object of string values, in the given
+-- association-list order (callers supply ascending where determinism
+-- matters).
+jStrMap :: [(String, String)] -> String
+jStrMap kvs = "{" ++ intercalate "," [ jsString k ++ ":" ++ jsString v | (k, v) <- kvs ] ++ "}"
+
+-- | @{ "k": [ "s", … ], … }@ — a JSON object of string-array values.
+jStrArrMap :: [(String, [String])] -> String
+jStrArrMap kvs = "{" ++ intercalate "," [ jsString k ++ ":" ++ jStrArray v | (k, v) <- kvs ] ++ "}"
+
 -- | Directories worth scanning for project sources, lifted from a
 -- canonicalised argv: every @-i@ \/ @--include-path@ value, plus the
 -- parent directory of any positional @*.agda@ \/ @*.lagda*@ source
@@ -142,13 +167,9 @@ candidateDirs = go
     go (a:rest)
       | a == "-i" || a == "--include-path"
       , v:rest' <- rest = v : go rest'
-      | Just v <- prefix "--include-path=" a = v : go rest
+      | Just v <- stripPrefix "--include-path=" a = v : go rest
       | looksLikeAgdaSource a = takeDirectory a : go rest
       | otherwise = go rest
-
-    prefix p s
-      | take (length p) s == p = Just (drop (length p) s)
-      | otherwise              = Nothing
 
 -- | True for paths that look like an Agda source file by extension.
 -- Used to recognise positional arguments to the executable and to

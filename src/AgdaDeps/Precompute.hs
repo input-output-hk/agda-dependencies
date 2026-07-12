@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | Pre-compute the module-level dependency graph by scanning Agda
@@ -25,7 +24,7 @@ module AgdaDeps.Precompute
 import Control.Exception ( catch, evaluate, IOException )
 import Control.Monad ( foldM )
 
-import Data.Char ( isAlphaNum, isSpace )
+import Data.Char ( isAlphaNum )
 import Data.List ( foldl' )
 import qualified Data.Set as Set
 
@@ -115,9 +114,9 @@ scanFile path = do
     case contentE of
       Left _  -> return Nothing
       Right c -> do
-        -- Force the whole file so lazy 'readFile' closes its handle now;
-        -- otherwise open handles accumulate across the corpus and exhaust
-        -- the fd limit before the results are drained.
+        -- Force the file so lazy 'readFile' closes its handle now; else
+        -- open handles accumulate across the corpus and exhaust the fd
+        -- limit.
         _ <- evaluate (length c)
         return (parseHeader path (stripBlockComments c))
 
@@ -136,7 +135,7 @@ parseHeader path body =
   in fmap (\m -> (normaliseAnonymous m, Set.toList importsN)) moduleN
   where
     step acc@(mMod, !imps) line =
-      case words (dropWhile isSpace line) of
+      case words line of
         "module" : name : _
           | Nothing <- mMod -> (Just (sanitiseName name), imps)
           | otherwise       -> acc
@@ -166,9 +165,8 @@ stripBlockComments = go 0
     go n (_:cs)         | n > 0 = go n cs
     go _ []             = []
 
--- Strip trailing punctuation Agda doesn't allow in module names
--- (semicolons, parentheses, … from compact one-liners). The trim is
--- ASCII-only but consistent across all scanned names.
+-- Strip trailing punctuation Agda disallows in module names
+-- (semicolons, parentheses, … from compact one-liners).
 sanitiseName :: String -> String
 sanitiseName =
   takeWhile (\c -> c == '.' || c == '_' || c == '\'' || c == '-' || isAlphaNum c)

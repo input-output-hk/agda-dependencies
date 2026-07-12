@@ -12,7 +12,7 @@ import qualified Data.Set as S
 import qualified Data.Text.Lazy as TL
 
 import Agda.Utils.Hash ( hashString )
-import Data.Graph.Inductive.Graph ( LNode, mkGraph )
+import Data.Graph.Inductive.Graph ( LNode, Node, UEdge, mkGraph )
 import Data.Graph.Inductive.PatriciaTree ( Gr )
 
 import Data.GraphViz
@@ -23,8 +23,6 @@ import Data.GraphViz.Attributes.Complete
 import Agda.Syntax.Abstract.Name ( QName )
 import Agda.Syntax.Internal ( qnameName )
 import Agda.Syntax.Common.Pretty ( prettyShow )
-
-import Data.Graph.Inductive.Graph ( Node, UEdge )
 
 import AgdaDeps.Deps    ( ADDef(..), hashQName, moduleKey )
 import AgdaDeps.Options ( ColorPalette, DefState(..), colorFor )
