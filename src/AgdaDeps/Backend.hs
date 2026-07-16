@@ -26,6 +26,7 @@ import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Control.DeepSeq ( force )
 
 import Data.IORef ( IORef, newIORef, readIORef, writeIORef )
+import Data.Word ( Word64 )
 import Data.Map ( Map )
 import qualified Data.Map as M
 import qualified Data.IntMap.Strict as IM
@@ -266,6 +267,8 @@ preCompileAD opts = do
   resetIgnoredEdges
   resetMethodProviders
   liftIO $ writeIORef recompiledRef False
+  -- Compute the run's fragment fingerprint once (constant across modules).
+  liftIO $ writeIORef optsFingerprintRef (optionsFingerprint opts)
   when (optIncremental opts && optKeepGoing opts) $
     info ("agda-deps: --incremental is disabled under --keep-going "
        ++ "(fragments are only cached from fully-checked runs).")
@@ -326,8 +329,9 @@ moduleSetup opts isMain tlmn _ = do
     if useFragmentCache opts
       then do
         iface <- curIF
+        fp <- curOptsFingerprint
         let path = fragmentFileFor (cacheDirFor opts) (prettyShow tlmn)
-        readFragment path (optionsFingerprint opts) (iFullHash iface)
+        readFragment path fp (iFullHash iface)
       else return Nothing
   case mCached of
     Just frag -> do
@@ -373,6 +377,19 @@ precomputedGraphRef = unsafePerformIO $ newIORef emptyGraph
 {-# NOINLINE recompiledRef #-}
 recompiledRef :: IORef Bool
 recompiledRef = unsafePerformIO $ newIORef False
+
+-- | The run's fragment-cache options fingerprint ('optionsFingerprint'),
+-- computed once in 'preCompileAD' and read per module in 'moduleSetup' /
+-- the fragment write — it is constant for the whole run (a pure function
+-- of the options), so re-deriving it per module (a 'show' + hash over the
+-- option tuple, incl. the @--exclude@ list) is wasted work.
+{-# NOINLINE optsFingerprintRef #-}
+optsFingerprintRef :: IORef Word64
+optsFingerprintRef = unsafePerformIO $ newIORef 0
+
+-- | The memoised run fingerprint (see 'optsFingerprintRef').
+curOptsFingerprint :: TCM Word64
+curOptsFingerprint = liftIO (readIORef optsFingerprintRef)
 
 
 postModuleAD
@@ -432,15 +449,78 @@ postModuleAD opts env isMain tlmn defs = do
             providersAll
             (envProvidersBefore env)
           path = fragmentFileFor (cacheDirFor opts) (prettyShow tlmn)
-      writeFragment path (optionsFingerprint opts) (iFullHash iface)
+      fp <- curOptsFingerprint
+      writeFragment path fp (iFullHash iface)
         (FragmentData (catMaybes result) ignoredFrag providersFrag)
 
   return result
 
 -- | After all modules are compiled, build the per-format output.
+--
+-- The @--incremental@ monolithic no-op skip is decided up front, here,
+-- before the graph is built: it depends only on the options, the live
+-- module set and the on-disk manifest (serialise cache active, nothing
+-- recompiled this run, a matching output token, the file already on
+-- disk) — never on the graph itself — so when it fires the entire
+-- contraction / private-scan / external-classification / layout pipeline
+-- in 'emitFullGraph' is skipped, not just the final write. The decision
+-- is identical to the per-format 'monoOutputUnchanged' check inside
+-- 'emitFullGraph' (same inputs); it is merely taken before the work. Only
+-- the monolithic-file formats (@deps.json@, non-lazy @deps.html@) carry a
+-- single output token; @--lazy@ (per-module content epochs) and @dot@
+-- (never skips) always fall through to the full pipeline.
 postCompileAD
   :: Options -> IsMain -> Map TopLevelModuleName [Maybe ADDef] -> TCM ()
 postCompileAD opts _ defMap = do
+  -- Forced to full NF under --incremental only (its inputs — the token
+  -- and GC — need it, and forcing here stops the thunk pinning @defMap@
+  -- through the render). A non-incremental run never consumes it, so the
+  -- bang forces only WHNF of the un-mapped list and the tail is dropped.
+  let !liveModules
+        | optIncremental opts = force (map prettyShow (M.keys defMap))
+        | otherwise           = map prettyShow (M.keys defMap)
+      cacheDir  = cacheDirFor opts
+      monoToken = outputToken opts liveModules
+  anyRecompiled <- liftIO $ readIORef recompiledRef
+  let monoSkippable = useSerialiseCache opts && not anyRecompiled
+  earlySkip <- liftIO $ hoistedMonoSkip opts cacheDir monoToken monoSkippable
+  case earlySkip of
+    Just slot -> do
+      info $ "agda-deps: --incremental: " ++ slot ++ " unchanged; skipped re-emit."
+      when (useFragmentCache opts) $ do
+        removed <- gcFragments cacheDir liveModules
+        when (removed > 0) $
+          info $ "agda-deps: --incremental: pruned " ++ show removed
+               ++ " stale fragment(s)."
+    Nothing ->
+      emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable
+
+-- | Whether the up-front monolithic no-op skip fires, and for which
+-- output file ('Nothing' = fall through to the full pipeline). Reuses
+-- 'monoOutputUnchanged' so this decision can't drift from the per-format
+-- check. Only @deps.json@ and non-lazy @deps.html@ carry a single token.
+hoistedMonoSkip :: Options -> FilePath -> Epoch -> Bool -> IO (Maybe String)
+hoistedMonoSkip opts cacheDir monoToken monoSkippable =
+  case (optOutDir opts, optFormat opts) of
+    (Just dir, FmtJson) -> check "deps.json" (dir </> "deps.json")
+    (Just dir, FmtHtml)
+      | not (optLazy opts) -> check "deps.html" (dir </> "deps.html")
+    _ -> pure Nothing
+  where
+    check slot path = do
+      ok <- monoOutputUnchanged monoSkippable cacheDir (optGzip opts) slot monoToken path
+      pure (if ok then Just slot else Nothing)
+
+-- | Build the per-format output — the full graph pipeline. Called by
+-- 'postCompileAD' when the up-front no-op skip did not fire; the skip
+-- inputs it already computed ('liveModules' / 'cacheDir' / 'monoToken' /
+-- 'monoSkippable') are threaded in rather than recomputed.
+emitFullGraph
+  :: Options
+  -> Map TopLevelModuleName [Maybe ADDef]
+  -> [String] -> FilePath -> Epoch -> Bool
+  -> TCM ()
+emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
   let rawDefs0 :: [ADDef]
       rawDefs0 = concatMap catMaybes (M.elems defMap)
 
@@ -629,20 +709,10 @@ postCompileAD opts _ defMap = do
     Just dir -> liftIO $ createDirectoryIfMissing True dir
     Nothing  -> return ()
 
-  -- '--incremental' serialise skip: an all-cache-hit run (nothing
-  -- recompiled) whose output context is unchanged produces
-  -- byte-identical monolithic output, so the re-emit can be skipped.
-  -- 'anyRecompiled' guards the def /content/; 'monoToken' guards the rest.
-  -- Force to full NF so this thunk stops pinning @defMap@ (and every
-  -- module's @[Maybe ADDef]@ spine) alive through the render — nothing
-  -- else forces @liveModules@ in a non-@--incremental@ run.
-  let !liveModules = force (map prettyShow (M.keys defMap))
-      cacheDir    = cacheDirFor opts
-      monoToken   = outputToken opts liveModules
-  anyRecompiled <- liftIO $ readIORef recompiledRef
-  let monoSkippable = useSerialiseCache opts && not anyRecompiled
-
-      -- The shared graph-data bundle for the JSON / HTML emitters. Each
+  -- ('liveModules' / 'cacheDir' / 'monoToken' / 'monoSkippable' are the
+  -- no-op-skip inputs 'postCompileAD' computed and passed in; the skip is
+  -- decided there, before this pipeline ran.)
+  let -- The shared graph-data bundle for the JSON / HTML emitters. Each
       -- render path overrides only its format-specific fields via record
       -- update (JSON: giReExports + giPackedAnalytical; HTML: giWithSource
       -- + giSnippetModules; lazy: also giLazy) instead of re-threading the

@@ -35,6 +35,7 @@ import Control.Monad ( filterM )
 import Control.Monad.IO.Class ( MonadIO, liftIO )
 import Data.Binary ( Binary(..) )
 import qualified Data.Binary as B
+import Data.Binary.Get ( runGetOrFail )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as L
 import Data.Word ( Word64 )
@@ -161,9 +162,19 @@ readFragment path fingerprint fullHash = liftIO $ do
            `E.catch` \ (_ :: E.IOException) -> pure Nothing
   case mbs of
     Nothing -> pure Nothing
-    Just bs -> case B.decodeOrFail (L.fromStrict bs) of
-      Right (_, _, (hdr, frag))
-        | hdr == header fingerprint fullHash -> pure (Just frag)
+    -- Decode the fixed-size header first and check it *before* touching the
+    -- payload: a stale header (fingerprint change, format bump, deleted
+    -- module) is the common invalidation case, and the payload's @[ADDef]@
+    -- list is the whole cost. The header is the leading field of the
+    -- serialised @(Header, FragmentData)@ tuple, so this is byte-compatible
+    -- with 'writeFragment' — @runGetOrFail get@ consumes exactly the header
+    -- and leaves the payload bytes in @rest@, decoded only on a hit.
+    Just bs -> case runGetOrFail B.get (L.fromStrict bs) of
+      Right (rest, _, hdr)
+        | hdr == header fingerprint fullHash ->
+            case runGetOrFail B.get rest of
+              Right (_, _, frag) -> pure (Just frag)
+              _                  -> pure Nothing
       _ -> pure Nothing
 
 -- | Write a fragment. Failures are reported as an info-channel
