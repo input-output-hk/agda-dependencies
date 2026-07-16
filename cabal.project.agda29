@@ -1,0 +1,13 @@
+-- Opt-in project for building against Agda 2.9.0. 2.9.0 is not yet on
+-- Hackage, so pin a specific upstream commit of agda/agda for a
+-- reproducible build. Bump this commit when moving to a newer 2.9
+-- release. Build with:
+--   cabal build --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps
+--
+-- (The default cabal.project builds against Agda 2.8.0 from Hackage.)
+packages: .
+
+source-repository-package
+  type: git
+  location: https://github.com/agda/agda.git
+  tag: 3b57742a311b3a90b755737968d437f1ef902318

@@ -26,7 +26,7 @@ explained) see [Examples.md](Examples.md). For shipped work see
 ## Prerequisites
 
 - GHC and `cabal-install` recent enough to satisfy `base >= 4.10 && < 4.23`.
-- The `Agda >= 2.8 && < 3` library is required. `agda-deps` builds against either Agda 2.8 or 2.9, selected by the cabal solver (no flag). The default `cabal.project` pins 2.9 to a specific upstream commit on `github.com/agda/agda` (2.9.0 isn't on Hackage yet); `cabal build` fetches and builds it automatically (one-time cost, a few minutes). To build against Agda 2.8.0 (from Hackage, on GHC 9.6) instead, use `cabal.project.agda28` — see [Build](#build).
+- The `Agda >= 2.8 && < 3` library is required. `agda-deps` builds against either Agda 2.8 or 2.9, selected by the cabal solver (no flag). The default `cabal.project` pins `Agda ==2.8.0` from Hackage (system GHC 9.12.4), so `cabal build` just works. To build against Agda 2.9.0 instead — pinned to an upstream `github.com/agda/agda` commit, since 2.9.0 isn't on Hackage yet — use `cabal.project.agda29` (a one-time cost of a few minutes to build Agda from source); see [Build](#build).
 
 A browser is needed to view HTML output; no server is required — the generated file works over `file://`.
 
@@ -36,15 +36,16 @@ A browser is needed to view HTML output; no server is required — the generated
 cabal build
 ```
 
-To build against Agda 2.8.0 (from Hackage, on GHC 9.6) instead of the
-default pinned 2.9:
+builds the default Agda 2.8.0. To build against Agda 2.9.0 instead
+(pinned to an upstream git commit, since 2.9.0 isn't on Hackage yet):
 
 ```
-cabal build --project-file=cabal.project.agda28 --builddir=dist-agda28 agda-deps
+cabal build --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps
 ```
 
 Both produce byte-identical graphs (apart from the build-specific
-`producer` fingerprint stamped into `graph.json`).
+`producer` fingerprint stamped into `graph.json`), and CI checks each
+against the same golden snapshot.
 
 ### Install a stable binary
 
@@ -60,7 +61,7 @@ This copies the binary to cabal's `installdir` (`~/.local/bin/` by
 default, or wherever your `~/.cabal/config` points; pass
 `--installdir=DIR` to override). Make sure that directory is on your
 `PATH`. The installed binary respects the project's `cabal.project`,
-so it builds against the pinned Agda 2.9 like `cabal build` does.
+so it builds against the default Agda 2.8.0 like `cabal build` does.
 
 Verify which build is on your `PATH` with `agda-deps --version` — it
 reports the git revision, build date, and GHC, so there's no need to

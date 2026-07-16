@@ -213,10 +213,12 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges rewrites kept defs' dep
   creates `optOutDir`.
 
 - **Agda 2.8 / 2.9 coupling.** `Agda >= 2.8 && < 3`. The default `cabal.project`
-  pins a 2.9 commit; `cabal.project.agda28` (GHC 9.6 + Hackage `Agda ==2.8.0`)
-  builds the 2.8 variant (`cabal build --project-file=cabal.project.agda28
-  --builddir=dist-agda28 agda-deps`). The solver picks the Agda — no flag. API
-  deltas are bridged with CPP on `MIN_VERSION_Agda(2,9,0)` in five modules:
+  pins `Agda ==2.8.0` from Hackage (system GHC 9.12.4); `cabal.project.agda29`
+  pins a 2.9 upstream git commit (2.9.0 isn't on Hackage) and builds the 2.9
+  variant (`cabal build --project-file=cabal.project.agda29
+  --builddir=dist-agda29 agda-deps`). The solver picks the Agda — no flag. Both
+  are gated in CI (the `build` and `build-agda29` jobs) against the same golden.
+  API deltas are bridged with CPP on `MIN_VERSION_Agda(2,9,0)` in five modules:
   - `Util.hs` — `funWith` is `Maybe QName` (2.8) vs `IsWithFunction QName` (2.9).
   - `Help.hs` — `usageInfo` gained a leading column-width arg in 2.9.
   - `Main.hs` — 2.8 has no `runAgdaArgs`; shimmed via `withArgs` + `runAgda'`.

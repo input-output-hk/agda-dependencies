@@ -1,9 +1,9 @@
 packages: .
 
--- Agda 2.9.0 is not yet on Hackage. Pin to a specific upstream commit
--- of agda/agda so the build is reproducible. Bump this commit when
--- moving to a newer 2.9 release.
-source-repository-package
-  type: git
-  location: https://github.com/agda/agda.git
-  tag: 3b57742a311b3a90b755737968d437f1ef902318
+-- Default build target: Agda 2.8.0 from Hackage, on the system GHC
+-- (9.12.4). Pinned for a reproducible build (and a stable golden).
+--
+-- To build against Agda 2.9.0 instead — a git pin, since 2.9.0 isn't on
+-- Hackage yet — use cabal.project.agda29:
+--   cabal build --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps
+constraints: Agda ==2.8.0

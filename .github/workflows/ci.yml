@@ -1,21 +1,16 @@
 # CI smoke test for agda-deps.
 #
-# Notes:
-# - The Agda source-repository-package pin in cabal.project means the
-#   first build on a fresh runner has to fetch and build Agda from
-#   source. That can take 10+ minutes — there's no quick way around it
-#   while 2.9 isn't on Hackage. We cache `~/.cabal/store` and
-#   `dist-newstyle` aggressively so subsequent runs are fast.
-# - Cache key includes the cabal.project hash (so an Agda commit bump
-#   invalidates the cache) and the cabal file (dep changes too).
-# - Agda's repo pulls std-lib + cubical as git submodules (its test
-#   corpus). They're not needed to build Agda as a library, and std-lib's
-#   `experimental`-branch pin rots upstream, so the "Skip Agda's
-#   test-corpus submodules" step below tells git to skip them.
+# Two jobs, one per supported Agda:
+# - `build` (default): Agda 2.8.0 from Hackage on GHC 9.12.4. This is the
+#   default `cabal.project`, so it's a plain Hackage build — no git fetch,
+#   no submodules. Runs the full check suite incl. the golden snapshot.
+# - `build-agda29` (opt-in): Agda 2.9.0 via `cabal.project.agda29`, which
+#   pins an upstream agda/agda git commit (2.9.0 isn't on Hackage yet).
+#   Builds Agda from source (slow, ~10 min on a cold cache) and re-runs the
+#   golden check, so the 2.8/2.9 output parity stays enforced.
 #
-# If maintenance of the Agda fetch path becomes painful, drop the
-# `Run agda-deps on the test corpus` step and keep just the `cabal
-# build` smoke test below it.
+# Both cache `~/.cabal/store` + their build dir aggressively; cache keys
+# include the relevant project file (Agda pin) and the cabal file (deps).
 name: CI
 
 on:
@@ -26,16 +21,17 @@ on:
 
 jobs:
   build:
+    name: build (Agda 2.8, GHC 9.12.4)
     runs-on: ubuntu-latest
 
     steps:
     - name: Check out the repository
       uses: actions/checkout@v4
 
-    - name: Set up Haskell (GHC 9.14.1 + cabal 3.16)
+    - name: Set up Haskell (GHC 9.12.4 + cabal 3.16)
       uses: haskell-actions/setup@v2
       with:
-        ghc-version: '9.14.1'
+        ghc-version: '9.12.4'
         cabal-version: '3.16'
 
     - name: Cache cabal store
@@ -45,35 +41,12 @@ jobs:
           ~/.cabal/store
           ~/.cabal/packages
           dist-newstyle
-        # cabal.project pins the Agda commit; agda-deps.cabal pins deps.
+        # cabal.project pins Agda ==2.8.0; agda-deps.cabal pins deps.
         # GHC version is part of the key so a future GHC bump invalidates
         # without manual nudging.
-        key: ${{ runner.os }}-ghc9.14.1-${{ hashFiles('cabal.project', 'agda-deps.cabal') }}
+        key: ${{ runner.os }}-ghc9.12.4-agda28-${{ hashFiles('cabal.project', 'agda-deps.cabal') }}
         restore-keys: |
-          ${{ runner.os }}-ghc9.14.1-
-
-    - name: Skip Agda's test-corpus submodules
-      # Agda's git repo carries std-lib + cubical as submodules (its own
-      # test corpus). cabal recurses into them when it fetches/syncs the
-      # source-repository-package, but std-lib tracks agda-stdlib's
-      # `experimental` branch, which is regularly rebased — so the pinned
-      # submodule commit gets garbage-collected upstream and the recursive
-      # fetch fails ("not our ref …"). These submodules aren't needed to
-      # build Agda as a library, so tell git to skip them globally.
-      #
-      # Two independent git operations recurse into submodules, and they're
-      # governed by different config knobs — both must be disabled:
-      #   * `cabal build` runs `git submodule update --init --force
-      #     --recursive`; `submodule.<name>.update = none` makes that a
-      #     clean no-op.
-      #   * `cabal update` runs `git fetch` on the cached source-repo, and
-      #     git's default `fetch.recurseSubmodules = on-demand` then tries
-      #     to fetch the (now-dead) pinned std-lib commit. `update = none`
-      #     does NOT stop fetch-time recursion — disable it explicitly.
-      run: |
-        git config --global submodule.std-lib.update none
-        git config --global submodule.cubical.update none
-        git config --global fetch.recurseSubmodules false
+          ${{ runner.os }}-ghc9.12.4-agda28-
 
     - name: Update Hackage index
       run: cabal update
@@ -84,8 +57,7 @@ jobs:
       run: cabal build --enable-tests --enable-benchmarks --dry-run
 
     - name: Build agda-deps
-      # First time through this is slow (Agda 2.9 from source).
-      # Subsequent runs hit the cache and finish quickly.
+      # Agda 2.8.0 from Hackage; first run builds it, then cache hits.
       run: cabal build
 
     - name: Run agda-deps on the bundled test corpus (all four formats)
@@ -248,3 +220,68 @@ jobs:
         name: agda-deps-ci-out
         path: ci-out/
         if-no-files-found: warn
+
+  # Opt-in Agda 2.9 build. Keeps the 2.8/2.9 output parity enforced: the
+  # graph must be byte-identical across both Agda versions (the golden was
+  # generated on 2.8, and this re-checks the 2.9 output against it). Builds
+  # Agda 2.9.0 from a git pin (cabal.project.agda29), so a cold cache is
+  # slow (~10 min); the store + dist-agda29 are cached to keep reruns fast.
+  build-agda29:
+    name: build (Agda 2.9, GHC 9.12.4)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out the repository
+      uses: actions/checkout@v4
+
+    - name: Set up Haskell (GHC 9.12.4 + cabal 3.16)
+      uses: haskell-actions/setup@v2
+      with:
+        ghc-version: '9.12.4'
+        cabal-version: '3.16'
+
+    - name: Cache cabal store (Agda 2.9)
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cabal/store
+          ~/.cabal/packages
+          dist-agda29
+        # Keyed on the 2.9 project file (Agda git commit) + the cabal file.
+        key: ${{ runner.os }}-ghc9.12.4-agda29-${{ hashFiles('cabal.project.agda29', 'agda-deps.cabal') }}
+        restore-keys: |
+          ${{ runner.os }}-ghc9.12.4-agda29-
+
+    - name: Skip Agda's test-corpus submodules
+      # Agda's git repo carries std-lib + cubical as submodules (its own
+      # test corpus). cabal recurses into them when it fetches/syncs the
+      # source-repository-package, but std-lib tracks agda-stdlib's
+      # `experimental` branch, which is regularly rebased — so the pinned
+      # submodule commit gets garbage-collected upstream and the recursive
+      # fetch fails ("not our ref …"). These submodules aren't needed to
+      # build Agda as a library, so tell git to skip them globally.
+      # `cabal build` runs `git submodule update` (governed by
+      # submodule.<name>.update) and `cabal update` runs `git fetch`
+      # (governed by fetch.recurseSubmodules) — both must be disabled.
+      run: |
+        git config --global submodule.std-lib.update none
+        git config --global submodule.cubical.update none
+        git config --global fetch.recurseSubmodules false
+
+    - name: Update Hackage index
+      run: cabal update
+
+    - name: Build agda-deps against Agda 2.9
+      # First time through this is slow (Agda 2.9 from git source).
+      run: cabal build --project-file=cabal.project.agda29 --builddir=dist-agda29
+
+    - name: Expanded output matches the golden (2.8/2.9 parity)
+      # Must run cold (dead-private recovery) — see the 2.8 job's note.
+      run: |
+        mkdir -p ci-out29
+        rm -rf test/*.agdai test/_build
+        cabal run -v0 --project-file=cabal.project.agda29 --builddir=dist-agda29 \
+          agda-deps -- --format=json --json-mode=expanded --with-signatures \
+          --with-term-hashes -i test/ -o ci-out29/expanded test/Test.agda
+        python3 schema/golden_check.py check ci-out29/expanded/deps.json \
+          test/golden/expanded.golden.json
