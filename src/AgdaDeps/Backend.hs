@@ -21,7 +21,7 @@ module AgdaDeps.Backend
   , ModuleRes
   ) where
 
-import Control.Monad ( when, unless )
+import Control.Monad ( when, unless, forM )
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Control.DeepSeq ( force )
 
@@ -29,6 +29,7 @@ import Data.IORef ( IORef, newIORef, readIORef, writeIORef )
 import Data.Word ( Word64 )
 import Data.Map ( Map )
 import qualified Data.Map as M
+import qualified Data.Map.Strict as MS ( insertWith )
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
 import Data.Maybe ( catMaybes, fromMaybe )
@@ -94,7 +95,7 @@ import System.IO.Unsafe ( unsafePerformIO )
 import AgdaDeps.Deps
   ( ADDef(..), NodeRef(..), DefAccess(..)
   , compileDefAD, collectAllQNames, nodeKey, moduleKey, hashQName
-  , nodeKeyOfQ, moduleKeyOfQ, nrSrcLoc
+  , mkRef, nodeKeyOfQ, moduleKeyOfQ, nrSrcLoc
   , optionEscapes
   , resetIgnoredEdges, contractIgnoredEdges
   , resetMethodProviders, addInstanceMethodEdges
@@ -415,9 +416,15 @@ postModuleAD opts env isMain tlmn defs = do
       sigDefs     = [ (qn, def)
                     | (qn, def) <- HMap.toList (fullSig ^. sigDefinitions)
                     , A.qnameModule qn == thisModule ]
-      visitedQNames = S.fromList [ nrKey (_name d) | Just d <- defs ]
-      missing       = [ def | (qn, def) <- sigDefs
-                            , not (nodeKeyOfQ qn `S.member` visitedQNames) ]
+      -- Membership by 'NodeRef' (its 'Ord' is hash-then-key), so a
+      -- signature def is 'missing' iff its 'mkRef' isn't already among the
+      -- visited defs' 'NodeRef's. 'mkRef' is a cache hit for every visited
+      -- def (compileDef already built it), so this drops the prettyShow +
+      -- liftAnonSegments the old 'nodeKeyOfQ' recomputed per signature def.
+      visitedRefs = S.fromList [ _name d | Just d <- defs ]
+  missing <- fmap catMaybes . forM sigDefs $ \ (qn, def) -> do
+               r <- mkRef qn
+               pure $! if r `S.member` visitedRefs then Nothing else Just def
   extras <- mapM (compileDefAD opts env isMain) missing
   let result = defs ++ extras
 
@@ -536,18 +543,16 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
   -- Back-fill '_access' by scanning each .agda file once for top-level
   -- @private@-block line ranges and matching each def's binding-site
   -- line against them (see 'backfillAccess', 'findPrivateRanges').
-  let defFile :: Map NodeRef FilePath
-      defFile = M.fromList
-        [ (_name d, fp)
-        | d <- defsWithInstances
-        , Just (fp, _ln) <- [nrSrcLoc (_name d)]
-        ]
-      filesToScan :: [FilePath]
-      filesToScan = S.toAscList (S.fromList (M.elems defFile))
+  -- Files to scan for @private@ ranges: every distinct binding-site file.
+  -- ('backfillAccess' reads each def's file straight off its 'NodeRef' —
+  -- see there — so no NodeRef->file indirection map is needed.)
+  let filesToScan :: [FilePath]
+      filesToScan = S.toAscList $ S.fromList
+        [ fp | d <- defsWithInstances, Just (fp, _ln) <- [nrSrcLoc (_name d)] ]
   privRanges <- liftIO $
     fmap M.fromList $
       mapM (\fp -> (,) fp <$> findPrivateRanges fp) filesToScan
-  let defs0 = map (backfillAccess privRanges defFile) defsWithInstances
+  let defs0 = map (backfillAccess privRanges) defsWithInstances
 
   let allQNames0 :: [NodeRef]
       allQNames0 = collectAllQNames defs0
@@ -562,8 +567,9 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
       -- endpoint pool and 'visitedImportEdges' below.
       importPairs :: [(String, String)]
       importPairs =
-        [ (prettyShow src, prettyShow tgt)
+        [ (srcS, prettyShow tgt)
         | (src, mi) <- M.toList visited
+        , let !srcS = prettyShow src   -- once per source module, not per target
         , (tgt, _hash) <- iImportedModules (miInterface mi)
         ]
       visitedImportEndpoints :: [String]
@@ -610,8 +616,12 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
       stateMap :: Map NodeRef DefState
       stateMap = M.fromList [ (_name d, _state d) | d <- defs ]
 
+      -- Only @--no-externals@ filters 'defs' (via 'dropExternalDefs'), so
+      -- only it needs a fresh QName pass; the default path's 'defs' is the
+      -- same value as 'defs0', so reuse 'allQNames0' rather than recompute.
       allQNames :: [NodeRef]
-      allQNames = collectAllQNames defs
+      allQNames | optNoExternals opts = collectAllQNames defs
+                | otherwise           = allQNames0
 
   mMain <- liftIO $ readIORef mainModuleRef
   let entryModule = fmap (prettyShow . fst) mMain
@@ -983,22 +993,30 @@ classifyExternalModules qns precomputedMF endpointModules = do
       isUnderRoot p = root `isPrefixOf` normalise p
       -- Per-module flag: at least one signal lands at an in-root
       -- source path.
+      -- Per-module flag: at least one signal lands at an in-root source
+      -- path. 'isUnderRoot' (a normalise + isPrefixOf) is memoised per
+      -- distinct FilePath in the @pc@ cache, so it runs once per source
+      -- file, not once per node (10k-100k nodes vs a few hundred files on a
+      -- large corpus). Strict inserts keep the @||@ accumulator a WHNF Bool.
       seedFromQNames :: Map String Bool
-      seedFromQNames = foldl' bumpQ M.empty qns
+      seedFromQNames = snd (foldl' bumpQ (M.empty, M.empty) qns)
         where
-          bumpQ !acc qn =
-            let !modName = moduleKey qn :: String
-                !inRoot  = case nrSrcLoc qn of
-                  Just (p, _) -> isUnderRoot p
-                  Nothing     -> False
-            in M.insertWith (||) modName inRoot acc
+          bumpQ (!pc, !acc) qn =
+            let !modName = moduleKey qn
+            in case nrSrcLoc qn of
+                 Nothing     -> (pc, MS.insertWith (||) modName False acc)
+                 Just (p, _) -> case M.lookup p pc of
+                   Just ir -> (pc, MS.insertWith (||) modName ir acc)
+                   Nothing -> let !ir = isUnderRoot p
+                              in ( M.insert p ir pc
+                                 , MS.insertWith (||) modName ir acc )
       seedFromPrecompute :: Map String Bool
       seedFromPrecompute = foldl' bumpP seedFromQNames precomputedMF
-        where bumpP !acc (m, p) = M.insertWith (||) m (isUnderRoot p) acc
+        where bumpP !acc (m, p) = MS.insertWith (||) m (isUnderRoot p) acc
       -- Endpoints with no other evidence default to "not in-root".
       inRootByModule :: Map String Bool
       inRootByModule = foldl' bumpE seedFromPrecompute endpointModules
-        where bumpE !acc m = M.insertWith (||) m False acc
+        where bumpE !acc m = MS.insertWith (||) m False acc
   return $ S.fromList
     [ m | (m, inRoot) <- M.toList inRootByModule, not inRoot ]
 
@@ -1009,9 +1027,13 @@ classifyExternalModules qns precomputedMF endpointModules = do
 dropExternalDefs :: Set String -> [ADDef] -> [ADDef]
 dropExternalDefs externals defs =
   let isExt qn = S.member (moduleKey qn) externals
-  in [ d { _deps = S.filter (not . isExt) (_deps d)
-         , _depsProv = M.filterWithKey (\qn _ -> not (isExt qn)) (_depsProv d)
-         }
+  -- Filter the provenance map once and derive '_deps' from its keys
+  -- ('M.keysSet' is a structural rebuild, no comparisons, no 'isExt'),
+  -- rather than running the external check over both '_deps' and
+  -- '_depsProv' — the @M.keysSet _depsProv == _deps@ invariant makes the
+  -- two results identical.
+  in [ let !prov' = M.filterWithKey (\qn _ -> not (isExt qn)) (_depsProv d)
+       in d { _deps = M.keysSet prov', _depsProv = prov' }
      | d <- defs, not (isExt (_name d))
      ]
 
@@ -1020,9 +1042,13 @@ dropExternalDefs externals defs =
 -- within a @private@-block range in its source file. Defs without a
 -- usable '_line' (synthetic names) keep 'Nothing' / fall back to
 -- public.
-backfillAccess :: Map FilePath [(Int, Int)] -> Map NodeRef FilePath -> ADDef -> ADDef
-backfillAccess privRanges defFile d =
-  let mFile = M.lookup (_name d) defFile
+backfillAccess :: Map FilePath [(Int, Int)] -> ADDef -> ADDef
+backfillAccess privRanges d =
+  -- 'nrFile' straight off the def's NodeRef, not a NodeRef->file lookup.
+  -- 'isPriv' fires only when '_line' (= 'nrLine (_name d)') is 'Just', and
+  -- 'nrLine' is 'Just' exactly when 'nrSrcLoc' was — so an 'nrFile'-only
+  -- (line-less) case falls through to public, matching the old defFile map.
+  let mFile = nrFile (_name d)
       mLine = _line d
       isPriv = case (mFile, mLine) of
         (Just fp, Just ln) -> case M.lookup fp privRanges of

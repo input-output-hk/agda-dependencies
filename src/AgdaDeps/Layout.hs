@@ -163,26 +163,30 @@ moduleGrouped nodes =
            , fromIntegral ty * tileSpacing
            )
 
-      subPositions m =
+      subPositionsAssoc m =
         let ids   = IM.findWithDefault [] m byMod
             (cx, cy) = tileCentre m
             k     = length ids
             side  = max 1 (ceiling (sqrt (fromIntegral k :: Double)))
             sp    = 40.0 :: Float
             half  = fromIntegral (side - 1) * sp / 2
-        in IM.fromList
-             [ ( nid
-               , Position
-                   (cx - half + fromIntegral (i `mod` side) * sp)
-                   (cy - half + fromIntegral (i `div` side) * sp)
-               )
-             | (i, nid) <- zip [0..] ids
-             ]
+        in [ ( nid
+             , Position
+                 (cx - half + fromIntegral (i `mod` side) * sp)
+                 (cy - half + fromIntegral (i `div` side) * sp)
+             )
+           | (i, nid) <- zip [0..] ids
+           ]
 
-      -- Build a global map then look up in input order.
+      -- Assemble the global map in a single O(V log V) build rather than M
+      -- throwaway 'IM.union's over the modules (O(V*M)). Node ids are
+      -- globally distinct ('hashQName' over the node set), so there are no
+      -- key conflicts; '(\_new old -> old)' still reproduces the old
+      -- left-biased 'IM.union' (earliest-module-wins) resolution exactly in
+      -- the degenerate collision case the surrounding code tolerates.
       allPos :: IM.IntMap Position
-      allPos = foldl' (\acc m -> IM.union acc (subPositions m))
-                      IM.empty orderedModules
+      allPos = IM.fromListWith (\_new old -> old)
+                 (concatMap subPositionsAssoc orderedModules)
   in [ IM.findWithDefault (Position 0 0) nid allPos
      | (nid, _) <- nodes
      ]

@@ -914,21 +914,21 @@ contractIgnoredEdges :: [ADDef] -> TCM [ADDef]
 contractIgnoredEdges defs = do
   hidden <- liftIO $ readIORef ignoredEdgesRef
   let memo = buildIgnoredClosure hidden
-      -- Expand each kept def's raw dep map through the hidden chain once
-      -- (pure). 'expandeds' is shared between the distinct-target scan and
-      -- the per-def rewrite, so 'contractWith' runs exactly once per def.
-      expandeds  = map (contractWith hidden memo . _depsProv) defs
-      allTargets = S.unions (map M.keysSet expandeds)
-      -- Each target's ignorability was precomputed into its 'NodeRef' at
-      -- the producer boundary ('mkRef' -> 'getConstInfo'), so this pass is
-      -- pure — no TCM lookup on rehydrated (cache-hit) defs.
-      !ignoredSet = S.filter nrIgnorable allTargets
-  pure (zipWith (rewrite ignoredSet) defs expandeds)
+  pure (map (rewriteOne hidden memo) defs)
   where
-    -- Drop the ignored targets from a contracted dep map, keeping the
-    -- surviving keys' 'EdgeProv' values.
-    rewrite ignoredSet d expanded =
-      let !keptProv = M.withoutKeys expanded ignoredSet
+    -- Expand a kept def's raw dep map through the hidden chain, then drop
+    -- the ignored targets in the SAME pass. Each target's ignorability was
+    -- precomputed into its 'NodeRef' at the producer boundary ('mkRef' ->
+    -- 'getConstInfo'), so the filter is a Bool field read and the pass is
+    -- pure (no TCM on rehydrated cache-hit defs). Fused: no global
+    -- 'allTargets' union, no 'ignoredSet', no per-def 'withoutKeys' merge.
+    -- 'M.filterWithKey' on 'nrIgnorable' is identical to the old
+    -- 'withoutKeys' against @S.filter nrIgnorable allTargets@ because every
+    -- expanded key is in allTargets, so its ignorability is decided by the
+    -- same 'nrIgnorable' bit either way.
+    rewriteOne hidden memo d =
+      let expanded  = contractWith hidden memo (_depsProv d)
+          !keptProv = M.filterWithKey (\ k _ -> not (nrIgnorable k)) expanded
       in d { _deps = M.keysSet keptProv, _depsProv = keptProv }
 
     -- One-shot expansion of a kept def's raw dep map: every QName that
