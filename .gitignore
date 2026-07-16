@@ -1,7 +1,7 @@
 _build
 dist
 dist-newstyle
-dist-agda28
+dist-agda29
 *~
 *.agdai
 *.hi
