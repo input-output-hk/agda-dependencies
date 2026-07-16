@@ -8,7 +8,7 @@
 -- classifies it as 'Defined' / 'Postulate' / 'Hole' ('classifyDef'),
 -- and filters compiler-generated definitions out of the graph
 -- ('ignoreDef'). Node identity is 'nodeKey' / 'hashQName'; edge
--- provenance is 'EdgeProv' / 'tagOne'.
+-- provenance is 'EdgeProv' / 'tagOneWith'.
 module AgdaDeps.Deps
   ( -- * Node identity
     NodeRef(..)
@@ -424,6 +424,10 @@ data NodeRef = NodeRef
   , nrShort     :: !String            -- ^ unqualified display name: last @.@-segment of @prettyShow@
   , nrIgnorable :: !Bool              -- ^ @ignoreDef <$> getConstInfo@, precomputed so
                                       --   'contractIgnoredEdges' needs no TCM on cached defs
+  , nrWhereHelper :: !Bool            -- ^ @"._." `isInfixOf` prettyShow@ — the where-block /
+                                      --   anonymous-module (module-local) marker, precomputed
+                                      --   so 'tagOne' needs no per-edge @prettyShow@. Serialised
+                                      --   (not derivable: 'nrKey' has the @._.@ stripped).
   }
 
 -- 'Eq'\/'Ord' compare the (hash, key) pair — hash first for speed, key to
@@ -439,16 +443,20 @@ instance Show NodeRef where
 instance Pretty NodeRef where
   pretty = pretty . nrKey
 instance NFData NodeRef where
-  rnf (NodeRef a b c d e f g) =
-    rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` rnf e `seq` rnf f `seq` rnf g
+  rnf (NodeRef a b c d e f g h) =
+    rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` rnf e `seq` rnf f
+      `seq` rnf g `seq` rnf h
 instance Binary NodeRef where
   -- 'nrHash' is derived (@hashString nrKey@), so it is not serialised; it
   -- is rebuilt on 'get' so (nrKey, nrHash) can never round-trip inconsistent.
-  put (NodeRef a _ c d e f g) =
-    B.put a >> B.put c >> B.put d >> B.put e >> B.put f >> B.put g
+  -- 'nrWhereHelper' (h) IS serialised — it can't be recovered from 'nrKey',
+  -- which has the @._.@ marker stripped by 'liftAnonSegments'.
+  put (NodeRef a _ c d e f g h) =
+    B.put a >> B.put c >> B.put d >> B.put e >> B.put f >> B.put g >> B.put h
   get = do
     a <- B.get; c <- B.get; d <- B.get; e <- B.get; f <- B.get; g <- B.get
-    pure (NodeRef a (hashString a) c d e f g)
+    h <- B.get
+    pure (NodeRef a (hashString a) c d e f g h)
 
 -- ** QName-level identity logic (producer boundary only)
 
@@ -473,7 +481,7 @@ nodeKeyOfQ qn = nodeKeyFromPretty (prettyShow qn) (bindingLineOfQ qn)
 -- than recomputing them inside a second 'nodeKeyOfQ' call.
 nodeKeyFromPretty :: String -> Maybe Int -> String
 nodeKeyFromPretty raw mbLine
-  | "._." `isInfixOf` raw          -- 'isWhereHelperName', inlined to reuse 'raw'
+  | "._." `isInfixOf` raw          -- where-helper marker (cf. 'nrWhereHelper'), reusing 'raw'
   , Just ln <- mbLine = lifted ++ "@" ++ show ln
   | otherwise         = lifted
   where lifted = liftAnonSegments raw
@@ -518,6 +526,7 @@ mkRef qn = do
           !mbLn  = bindingLineOfQ qn
           !key   = nodeKeyFromPretty raw mbLn
           !short = (reverse . takeWhile (/= '.') . reverse) raw
+          !isWH  = "._." `isInfixOf` raw   -- where-helper marker, reusing 'raw'
           !r = NodeRef
             { nrKey       = key
             , nrHash      = hashString key
@@ -526,6 +535,7 @@ mkRef qn = do
             , nrFile      = fst <$> srcLocOfQ qn
             , nrShort     = short
             , nrIgnorable = ign
+            , nrWhereHelper = isWH
             }
       liftIO $ modifyIORef' nodeRefCacheRef (M.insert qn r)
       return r
@@ -601,12 +611,10 @@ computeDefAD opts def@Defn{..} = do
       !withTarget = case theDef of
         Function { funWith = w } -> isWithFun' w
         _                        -> Nothing
-      !depsProv = M.fromSet (tagOne sigNames bodyNames withTarget) deps
   -- Reuse the raw (pre-exclude) name walks: a synthetic @unsolved#meta.*@
   -- name in an excluded module must still flip the Hole classification.
   st <- classifyDefWith rawSig rawBody def
   let !kd      = classifyKind def
-      !lineMb  = bindingLineOfQ defName
       !termPairs = if optWithTermHashes opts
                      then Just (concatMap (subtermHashes (optMinTermDepth opts))
                                           (definitionTerms def))
@@ -637,7 +645,17 @@ computeDefAD opts def@Defn{..} = do
   -- Convert the QName-keyed working sets to precomputed 'NodeRef's at the
   -- producer boundary: everything downstream is identity-as-data.
   nameRef  <- mkRef defName
-  provPairs <- mapM (\ (q, p) -> (\ r -> (r, p)) <$> mkRef q) (M.toList depsProv)
+  -- Tag each edge as its 'NodeRef' is built (one pass), so the module-local
+  -- test reads the precomputed 'nrWhereHelper' bit instead of a per-edge
+  -- 'prettyShow'. 'S.toAscList deps' reproduces the old @M.toList depsProv@
+  -- key order, so 'M.fromList''s last-wins on colliding NodeRefs is
+  -- unchanged, and the tag is identical (nrWhereHelper == the old
+  -- isWhereHelperName over the same QName).
+  provPairs <- mapM (\ q -> do
+                       r <- mkRef q
+                       let !p = tagOneWith sigNames bodyNames withTarget q (nrWhereHelper r)
+                       pure (r, p))
+                    (S.toAscList deps)
   let !depsProvR = M.fromList provPairs
       !depsR     = M.keysSet depsProvR
   return ADDef
@@ -646,7 +664,7 @@ computeDefAD opts def@Defn{..} = do
     , _depsProv = depsProvR
     , _state  = st
     , _kind   = kd
-    , _line   = lineMb
+    , _line   = nrLine nameRef
     , _access = Nothing  -- back-filled in postCompile from iScope
     , _subtermHashes = termHs
     , _subtermDepths = termDs
@@ -667,26 +685,24 @@ definitionTerms Defn{..} = unEl defType : bodyTerms theDef
     bodyTerms _                                  = []
 
 -- | Tag a single outgoing edge by precedence:
--- signature > with > module-local > body > unknown.
-tagOne
+-- signature > with > module-local > body > unknown. The module-local
+-- (where-block / anonymous-module helper) test is the target NodeRef's
+-- precomputed 'nrWhereHelper' bit (@"._." `isInfixOf` prettyShow@), passed
+-- in, so no per-edge 'prettyShow' is paid. 'nrWhereHelper' matches
+-- @Where._.sq@, @Where._.go@; not mixfix operators like @_+_@ / @_∧_@.
+tagOneWith
   :: S.Set QName        -- ^ names from @defType@
   -> S.Set QName        -- ^ names from @theDef@
   -> Maybe QName        -- ^ @funWith@ helper, if any
   -> QName              -- ^ the dep to tag
+  -> Bool               -- ^ target's 'nrWhereHelper'
   -> EdgeProv
-tagOne sigNames bodyNames withTarget qn
+tagOneWith sigNames bodyNames withTarget qn isWhere
   | qn `S.member` sigNames        = ESignature
   | Just qn == withTarget         = EWith
-  | isWhereHelperName qn          = EModuleLocal
+  | isWhere                       = EModuleLocal
   | qn `S.member` bodyNames       = EBody
   | otherwise                     = EUnknown
-
--- | True when a 'QName' is a where-block / anonymous-module helper:
--- 'prettyShow' contains the @"._."@ anonymous-module marker. Matches
--- @Where._.sq@, @Where._.go@; does NOT match mixfix operators like
--- @_+_@ or @_∧_@ (a single dotted segment with no enclosing dots).
-isWhereHelperName :: QName -> Bool
-isWhereHelperName qn = "._." `isInfixOf` prettyShow qn
 
 -- | 1-indexed start line of a 'QName''s binding site, if Agda recorded a
 -- usable range for it. Synthetic names (e.g. @unsolved#meta.*@,
@@ -723,10 +739,14 @@ compileDefAD opts _ _ def@Defn{..}
           !withTarget = case theDef of
             Function { funWith = w } -> isWithFun' w
             _                        -> Nothing
-          !rawProv = M.fromSet (tagOne sigNames bodyNames withTarget) raw
-      -- Convert to NodeRef at the boundary (see 'computeDefAD').
+      -- Convert to NodeRef at the boundary (see 'computeDefAD'); tag each
+      -- edge inline off the precomputed 'nrWhereHelper' bit.
       nameRef  <- mkRef defName
-      provPairs <- mapM (\ (q, p) -> (\ r -> (r, p)) <$> mkRef q) (M.toList rawProv)
+      provPairs <- mapM (\ q -> do
+                           r <- mkRef q
+                           let !p = tagOneWith sigNames bodyNames withTarget q (nrWhereHelper r)
+                           pure (r, p))
+                        (S.toAscList raw)
       recordIgnoredDef nameRef (M.fromList provPairs)
       return Nothing
   | isExcludedModule excludes (moduleKeyOfQ defName) = return Nothing

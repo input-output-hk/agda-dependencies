@@ -80,8 +80,10 @@ instance Binary FragmentData where
 -- 5: derived fields dropped from the payload ('ADDef._deps',
 --    'NodeRef.nrHash', both rebuilt on decode); 'NodeRef' stores the
 --    unqualified display name, not the full 'prettyShow'.
+-- 6: 'NodeRef' gained the serialised 'nrWhereHelper' bit (the module-local
+--    marker; not derivable from 'nrKey', which has @._.@ stripped).
 fragmentFormatVersion :: Word64
-fragmentFormatVersion = 5
+fragmentFormatVersion = 6
 
 -- | Fingerprint of every option that changes fragment /content/.
 -- Rendering-only options (format, view, colours, externals filtering,
