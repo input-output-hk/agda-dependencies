@@ -398,11 +398,16 @@ instance Binary UnsafeTag where
     _ -> fail "UnsafeTag"
 
 instance Binary ADDef where
-  put (ADDef n d dp s k l a sh sd sg u) =
-       B.put n *> B.put d *> B.put dp *> B.put s *> B.put k *> B.put l
+  -- '_deps' is derived (@M.keysSet _depsProv@ — an ADDef invariant), so it
+  -- is not serialised; it is rebuilt on 'get' so the two can never
+  -- round-trip inconsistent.
+  put (ADDef n _ dp s k l a sh sd sg u) =
+       B.put n *> B.put dp *> B.put s *> B.put k *> B.put l
     *> B.put a *> B.put sh *> B.put sd *> B.put sg *> B.put u
-  get = ADDef <$> B.get <*> B.get <*> B.get <*> B.get <*> B.get <*> B.get
-              <*> B.get <*> B.get <*> B.get <*> B.get <*> B.get
+  get = do
+    n <- B.get; dp <- B.get; s <- B.get; k <- B.get; l <- B.get
+    a <- B.get; sh <- B.get; sd <- B.get; sg <- B.get; u <- B.get
+    pure (ADDef n (M.keysSet dp) dp s k l a sh sd sg u)
 
 -- | Precomputed, serialisable node identity. Replaces the raw 'QName'
 -- as the identity carried through 'ADDef', the two side-channels and the
@@ -416,7 +421,7 @@ data NodeRef = NodeRef
   , nrModule    :: !String            -- ^ 'moduleKey' — owning-module attribution
   , nrLine      :: !(Maybe Int)       -- ^ 'bindingLine' — 1-indexed binding-site line
   , nrFile      :: !(Maybe FilePath)  -- ^ binding-site source file (for 'nrSrcLoc')
-  , nrPretty    :: !String            -- ^ @prettyShow@ (unqualified name taken at use sites)
+  , nrShort     :: !String            -- ^ unqualified display name: last @.@-segment of @prettyShow@
   , nrIgnorable :: !Bool              -- ^ @ignoreDef <$> getConstInfo@, precomputed so
                                       --   'contractIgnoredEdges' needs no TCM on cached defs
   }
@@ -437,9 +442,13 @@ instance NFData NodeRef where
   rnf (NodeRef a b c d e f g) =
     rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` rnf e `seq` rnf f `seq` rnf g
 instance Binary NodeRef where
-  put (NodeRef a b c d e f g) =
-    B.put a >> B.put b >> B.put c >> B.put d >> B.put e >> B.put f >> B.put g
-  get = NodeRef <$> B.get <*> B.get <*> B.get <*> B.get <*> B.get <*> B.get <*> B.get
+  -- 'nrHash' is derived (@hashString nrKey@), so it is not serialised; it
+  -- is rebuilt on 'get' so (nrKey, nrHash) can never round-trip inconsistent.
+  put (NodeRef a _ c d e f g) =
+    B.put a >> B.put c >> B.put d >> B.put e >> B.put f >> B.put g
+  get = do
+    a <- B.get; c <- B.get; d <- B.get; e <- B.get; f <- B.get; g <- B.get
+    pure (NodeRef a (hashString a) c d e f g)
 
 -- ** QName-level identity logic (producer boundary only)
 
@@ -457,13 +466,17 @@ instance Binary NodeRef where
 -- onto one node and lose their edges. 'moduleKeyOfQ' is the matching
 -- module-attribution function.
 nodeKeyOfQ :: QName -> String
-nodeKeyOfQ qn
-  | "._." `isInfixOf` raw     -- 'isWhereHelperName', inlined to reuse 'raw'
-  , Just ln <- bindingLineOfQ qn = lifted ++ "@" ++ show ln
-  | otherwise                    = lifted
-  where
-    raw    = prettyShow qn
-    lifted = liftAnonSegments raw
+nodeKeyOfQ qn = nodeKeyFromPretty (prettyShow qn) (bindingLineOfQ qn)
+
+-- | 'nodeKeyOfQ' with the @prettyShow@ string and binding line already in
+-- hand — 'mkRef' needs both for other fields, so it feeds them here rather
+-- than recomputing them inside a second 'nodeKeyOfQ' call.
+nodeKeyFromPretty :: String -> Maybe Int -> String
+nodeKeyFromPretty raw mbLine
+  | "._." `isInfixOf` raw          -- 'isWhereHelperName', inlined to reuse 'raw'
+  , Just ln <- mbLine = lifted ++ "@" ++ show ln
+  | otherwise         = lifted
+  where lifted = liftAnonSegments raw
 
 -- | Canonical owning-module string for a 'QName', with anonymous
 -- sub-modules lifted away via 'liftAnonSegments' so attribution lands on
@@ -474,8 +487,9 @@ moduleKeyOfQ :: QName -> String
 moduleKeyOfQ = liftAnonSegments . prettyShow . qnameModule
 
 -- | @(source file, 1-indexed line)@ of a 'QName''s binding occurrence.
--- Inlined from 'AgdaDeps.Source.srcLocOf' to avoid a @Deps -> Source@
--- import edge; kept in sync with it.
+-- The sole copy: 'Deps' cannot import 'AgdaDeps.Source' (that module
+-- imports 'Deps'), so this binding-site primitive lives here, at the
+-- lower layer, and 'Source' consumes it via 'nrSrcLoc'.
 srcLocOfQ :: QName -> Maybe (FilePath, Word32)
 srcLocOfQ qn = do
   let bindRange = nameBindingSite (qnameName qn)
@@ -485,37 +499,40 @@ srcLocOfQ qn = do
   p  <- rStart bindRange
   return (filePath (rangeFilePath rf), posLine p)
 
--- | Build the precomputed 'NodeRef' for a 'QName'. TCM only for the one
--- 'ignoreDependency' (@getConstInfo@) lookup, memoised per 'QName' so the
--- cost stays once-per-distinct-name across a run.
+-- | Build the precomputed 'NodeRef' for a 'QName', memoised per 'QName'.
+-- A 'NodeRef' is a deterministic function of its 'QName' — the one impure
+-- input, 'ignoreDependency' (@getConstInfo@), is process-stable — so the
+-- whole bundle is built once per /distinct/ name however many edges
+-- reference it: neither the TCM lookup nor the projections ('prettyShow',
+-- hashing, module attribution, binding site) repeat per occurrence.
+-- Process-lived: 'QName' identity is stable, so there is nothing to reset
+-- between runs in the same process.
 mkRef :: QName -> TCM NodeRef
 mkRef qn = do
-  ign <- memoIgnorable qn
-  let !key = nodeKeyOfQ qn
-  return NodeRef
-    { nrKey       = key
-    , nrHash      = hashString key
-    , nrModule    = moduleKeyOfQ qn
-    , nrLine      = bindingLineOfQ qn
-    , nrFile      = fst <$> srcLocOfQ qn
-    , nrPretty    = prettyShow qn
-    , nrIgnorable = ign
-    }
-
--- | Memoised 'ignoreDependency'. Reset alongside the side-channels.
-memoIgnorable :: QName -> TCM Bool
-memoIgnorable qn = do
-  cache <- liftIO (readIORef ignorableCacheRef)
+  cache <- liftIO (readIORef nodeRefCacheRef)
   case M.lookup qn cache of
-    Just b  -> return b
+    Just r  -> return r
     Nothing -> do
-      b <- ignoreDependency qn
-      liftIO $ modifyIORef' ignorableCacheRef (M.insert qn b)
-      return b
+      ign <- ignoreDependency qn
+      let !raw   = prettyShow qn
+          !mbLn  = bindingLineOfQ qn
+          !key   = nodeKeyFromPretty raw mbLn
+          !short = (reverse . takeWhile (/= '.') . reverse) raw
+          !r = NodeRef
+            { nrKey       = key
+            , nrHash      = hashString key
+            , nrModule    = moduleKeyOfQ qn
+            , nrLine      = mbLn
+            , nrFile      = fst <$> srcLocOfQ qn
+            , nrShort     = short
+            , nrIgnorable = ign
+            }
+      liftIO $ modifyIORef' nodeRefCacheRef (M.insert qn r)
+      return r
 
-{-# NOINLINE ignorableCacheRef #-}
-ignorableCacheRef :: IORef (Map QName Bool)
-ignorableCacheRef = unsafePerformIO (newIORef M.empty)
+{-# NOINLINE nodeRefCacheRef #-}
+nodeRefCacheRef :: IORef (Map QName NodeRef)
+nodeRefCacheRef = unsafePerformIO (newIORef M.empty)
 
 -- ** Blessed identity accessors (NodeRef; used everywhere downstream)
 

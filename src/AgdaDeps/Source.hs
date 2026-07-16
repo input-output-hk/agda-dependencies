@@ -10,9 +10,6 @@ module AgdaDeps.Source
   ( -- * Snippets
     Snippet(..)
 
-    -- * Locating a binding site
-  , srcLocOf
-
     -- * Top-level helper
   , collectHighlightedSnippets
 
@@ -68,19 +65,6 @@ data Snippet = Snippet
   { snippetStartLine :: !Int
   , snippetText      :: !String
   } deriving (Show)
-
--- | Resolve a 'QName' to @(source file path, 1-indexed line number)@ of
--- its *binding* occurrence. 'Nothing' for names with no associated
--- source range (synthetic / generated names) or whose range carries no
--- file (built-ins).
-srcLocOf :: QName -> Maybe (FilePath, Word32)
-srcLocOf qn = do
-  let bindRange = nameBindingSite (qnameName qn)
-  rf <- case rangeFile bindRange of
-          Strict.Just rf -> Just rf
-          Strict.Nothing -> Nothing
-  p  <- rStart bindRange
-  return (filePath (rangeFilePath rf), posLine p)
 
 -- | Generate Agda's syntax-highlighted HTML for every visited module
 -- and, for each given 'QName', slice out a highlighted snippet

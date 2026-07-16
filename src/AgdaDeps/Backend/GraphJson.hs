@@ -108,7 +108,7 @@ buildExternalsSummary externals defs =
             M.insertWith
               (++)   -- 'new' is always a singleton, so '(++)' == 'head new : old'
               m
-              [shortNameOf (nrPretty (_name d))]
+              [nrShort (_name d)]
               acc
         where
           !m     = moduleKey (_name d)
@@ -120,10 +120,6 @@ buildExternalsSummary externals defs =
        { esModules            = externals
        , esPostulatesByModule = byMod
        }
-  where
-    -- Unqualified name: last dot-component, or the whole name if no dot.
-    shortNameOf :: String -> String
-    shortNameOf = reverse . takeWhile (/= '.') . reverse
 
 -- | JSON for 'ExternalsSummary' (packed / @--lazy@ path). The expanded
 -- path emits the same shape via @AgdaDeps.Backend.Wire@ — keep the two

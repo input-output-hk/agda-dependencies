@@ -100,7 +100,7 @@ import AgdaDeps.Deps
   , IgnoredEdgeMap, readIgnoredEdges, mergeIgnoredEdges
   , MethodProviderMap, readMethodProviders, mergeMethodProviders )
 import AgdaDeps.FragmentCache
-  ( FragmentData(..), fragmentCacheSupported
+  ( FragmentData(..)
   , optionsFingerprint, fragmentFileFor, readFragment, writeFragment
   , gcFragments )
 import AgdaDeps.SerialiseCache
@@ -259,17 +259,13 @@ backendWithSeed seed = Backend'
 
 -- | Pre-compile hook. Clears the side-channels (edges through ignored
 -- definitions; instance-method providers) so repeated runs in the same
--- process start fresh, and surfaces the @--incremental@ availability
--- caveats once per run.
+-- process start fresh, and surfaces the @--incremental@ + @--keep-going@
+-- caveat once per run.
 preCompileAD :: Options -> TCM Options
 preCompileAD opts = do
   resetIgnoredEdges
   resetMethodProviders
   liftIO $ writeIORef recompiledRef False
-  when (optIncremental opts && not fragmentCacheSupported) $
-    liftIO $ hPutStrLn stderr $
-      "agda-deps: --incremental requires Agda >= 2.9 (this build cannot "
-      ++ "serialise fragments); running without the cache."
   when (optIncremental opts && optKeepGoing opts) $
     info ("agda-deps: --incremental is disabled under --keep-going "
        ++ "(fragments are only cached from fully-checked runs).")
@@ -278,7 +274,7 @@ preCompileAD opts = do
 -- | Whether the fragment cache is active this run.
 useFragmentCache :: Options -> Bool
 useFragmentCache opts =
-  optIncremental opts && not (optKeepGoing opts) && fragmentCacheSupported
+  optIncremental opts && not (optKeepGoing opts)
 
 -- | Where fragments + the serialise manifest live. @--cache-dir@
 -- overrides; otherwise under the output dir (or the working directory —
@@ -289,10 +285,9 @@ cacheDirFor opts = case optCacheDir opts of
   Just dir -> dir
   Nothing  -> fromMaybe "." (optOutDir opts) </> ".agda-deps-cache"
 
--- | Whether the @--incremental@ serialise cache is active. Independent
--- of 'fragmentCacheSupported' (the manifest is plain text, so it works
--- on 2.8), though the monolithic no-op skip also needs the fragment
--- cache to detect \"nothing recompiled\". Disabled under @--keep-going@.
+-- | Whether the @--incremental@ serialise cache is active. The monolithic
+-- no-op skip also needs the fragment cache to detect \"nothing
+-- recompiled\". Disabled under @--keep-going@.
 useSerialiseCache :: Options -> Bool
 useSerialiseCache opts = optIncremental opts && not (optKeepGoing opts)
 
@@ -900,7 +895,7 @@ writeJsonMaybeGz gz path content = do
 -- "external" when no signal places its source under root. Three signals
 -- are pooled:
 --
---   * 'srcLocOf' for every known QName (def names + dep targets); a
+--   * 'nrSrcLoc' for every known QName (def names + dep targets); a
 --     QName with @rangeFile = Nothing@ (builtins) gives no evidence.
 --   * The pre-compute @module → file@ map ('precomputedModuleFiles').
 --   * Module names appearing as import-edge endpoints, so endpoint-only

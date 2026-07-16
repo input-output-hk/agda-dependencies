@@ -38,8 +38,7 @@ renderDot palette stateMap failed defs =
 data DotLabel = DotQ NodeRef | DotFailedModule String
 
 dotLabelText :: DotLabel -> String
-dotLabelText (DotQ r)              = shortNameOf (nrPretty r)
-  where shortNameOf = reverse . takeWhile (/= '.') . reverse
+dotLabelText (DotQ r)              = nrShort r
 dotLabelText (DotFailedModule mod_) = mod_
 
 -- | Cluster key: the lifted owning-module string ('moduleKey'), so

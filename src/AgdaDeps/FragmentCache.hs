@@ -22,8 +22,7 @@
 -- payload is plain data: no Agda 'EmbPrj', and identical on Agda 2.8 and
 -- 2.9 (the cache works on both).
 module AgdaDeps.FragmentCache
-  ( fragmentCacheSupported
-  , FragmentData(..)
+  ( FragmentData(..)
   , optionsFingerprint
   , fragmentFileFor
   , readFragment
@@ -76,9 +75,12 @@ instance Binary FragmentData where
 -- entries no module name prefixes.
 --
 -- 4: identity is 'NodeRef' serialised via 'Data.Binary' (was a 'QName'
--- 'EmbPrj' wire form).
+--    'EmbPrj' wire form).
+-- 5: derived fields dropped from the payload ('ADDef._deps',
+--    'NodeRef.nrHash', both rebuilt on decode); 'NodeRef' stores the
+--    unqualified display name, not the full 'prettyShow'.
 fragmentFormatVersion :: Word64
-fragmentFormatVersion = 4
+fragmentFormatVersion = 5
 
 -- | Fingerprint of every option that changes fragment /content/.
 -- Rendering-only options (format, view, colours, externals filtering,
@@ -132,13 +134,6 @@ gcFragments cacheDir liveModules = liftIO $ do
     tryRemove p =
       (removeFile p >> pure True)
         `E.catch` \ (_ :: E.IOException) -> pure False
-
--- | Whether this build can actually cache. Always 'True' now: the wire
--- form is plain 'Data.Binary', so it no longer depends on the Agda
--- version's serialiser (was Agda >= 2.9 only under the old 'EmbPrj'
--- path). Kept as a value so callers read intent, not a bare literal.
-fragmentCacheSupported :: Bool
-fragmentCacheSupported = True
 
 -- ** Key header
 

@@ -234,8 +234,7 @@ data Options = Options
   , optIncremental    :: Bool
     -- ^ @--incremental@: per-module fragment cache for the
     -- per-definition backend walk, keyed on the interface hash.
-    -- Opt-in; requires Agda >= 2.9 ('fragmentCacheSupported') and is
-    -- disabled under @--keep-going@. See 'AgdaDeps.FragmentCache'.
+    -- Opt-in; disabled under @--keep-going@. See 'AgdaDeps.FragmentCache'.
   , optCacheDir       :: Maybe FilePath
     -- ^ @--cache-dir=PATH@: override the @--incremental@ cache
     -- location (fragments + serialise manifest). Default:
