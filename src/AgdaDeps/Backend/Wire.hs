@@ -181,12 +181,25 @@ objectSchemaOf fs =
 
 -- | Encode an object from a field table, in field-table (byte) order.
 -- 'Optional' fields whose encoder yields 'Nothing' are omitted.
+--
+-- The table is fixed, so each field's @"name":@ prefix ('jsString' over
+-- the static field name) is precomputed once and shared across every
+-- record encoded with this table (the definitions / reexports arrays run
+-- this per row) instead of being re-escaped per record. Written as
+-- @encodeObject fs = \\a -> …@ so @prepared@ is bound to @fs@ and floated
+-- out of the per-record loop; byte-identical to the per-field @emit@.
 encodeObject :: [Field a] -> a -> String
-encodeObject fs a = "{" ++ intercalate "," (mapMaybe emit fs) ++ "}"
+encodeObject fs = \a -> "{" ++ intercalate "," (mapMaybe (emit a) prepared) ++ "}"
   where
-    emit (Required n _ e) = Just (jsString n ++ ":" ++ e a)
-    emit (Additive n _ e) = Just (jsString n ++ ":" ++ e a)
-    emit (Optional n _ e) = (\v -> jsString n ++ ":" ++ v) <$> e a
+    -- (type left to inference: a local @a@ signature would be a fresh
+    -- variable without ScopedTypeVariables and not unify with the outer a.)
+    prepared =
+      [ case f of
+          Required n _ e -> (jsString n ++ ":", Just . e)
+          Additive n _ e -> (jsString n ++ ":", Just . e)
+          Optional n _ e -> (jsString n ++ ":", e)
+      | f <- fs ]
+    emit a (pfx, enc) = (pfx ++) <$> enc a
 
 -- * Encoder helpers
 

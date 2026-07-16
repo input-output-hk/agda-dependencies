@@ -59,7 +59,7 @@ import AgdaDeps.Deps    ( ADDef(..), NodeRef(..), DefKind(..), DefAccess(..)
 import BuildInfo        ( buildFingerprint )
 import AgdaDeps.Layout  ( Position(..) )
 import AgdaDeps.Options ( DefState(..) )
-import AgdaDeps.Util    ( jsString, jStrArray, jStrMap, jStrArrMap )
+import AgdaDeps.Util    ( jsString, jsB64Raw, jStrArray, jStrMap, jStrArrMap )
 import AgdaDeps.Backend.Wire
   ( ExpandedGraph(..), WireDef(..), WireEdge(..), WireExternals(..)
   , encodeExpanded, validateExpanded )
@@ -841,7 +841,7 @@ packedAnalyticalJson defsList defs =
               flatH = concat perHashes :: [Word64]
               flatD = map fromIntegral (concat perDepths) :: [Int32]
           in ",\"subtermOffsets\":" ++ jsB64Int32 offs
-          ++ ",\"subtermHashes\":"  ++ jsString (encodeWord64LE flatH)
+          ++ ",\"subtermHashes\":"  ++ jsB64Raw (encodeWord64LE flatH)
           ++ ",\"subtermDepths\":"  ++ jsB64Int32 flatD
 
 -- | JSON array of strings-or-@null@ (one per def, parallel to names).
@@ -885,14 +885,18 @@ intArrayArrayJson xss = "[" ++ intercalate "," (map row xss) ++ "]"
   where
     row xs = "[" ++ intercalate "," (map show xs) ++ "]"
 
+-- The 'encode*LE' helpers emit base64 ('AgdaDeps.Csr.b64', RFC 4648
+-- alphabet + @=@ padding), which needs no JSON escaping, so quote it with
+-- 'jsB64Raw' rather than paying 'jsString''s per-char escape dispatch over
+-- these arrays (the packed output's dominant byte mass).
 jsB64Int32 :: [Int32] -> String
-jsB64Int32 = jsString . encodeInt32LE
+jsB64Int32 = jsB64Raw . encodeInt32LE
 
 jsB64Int8 :: [Int8] -> String
-jsB64Int8 = jsString . encodeInt8LE
+jsB64Int8 = jsB64Raw . encodeInt8LE
 
 jsB64Float32 :: [Float] -> String
-jsB64Float32 = jsString . encodeFloat32LE
+jsB64Float32 = jsB64Raw . encodeFloat32LE
 
 -- ** State encoding
 

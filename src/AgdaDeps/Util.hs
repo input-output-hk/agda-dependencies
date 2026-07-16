@@ -23,6 +23,7 @@ module AgdaDeps.Util
 
     -- * JSON helpers
   , jsString
+  , jsB64Raw
   , jArray
   , jStrArray
   , jStrMap
@@ -115,25 +116,41 @@ liftAnonSegments = intercalate "." . filter (/= "_") . splitDots
 -- | JSON-escape a Haskell 'String' and wrap it in double quotes. The
 -- escapes (including @<@ \/ @>@ \/ @&@) make the result safe inside
 -- both a @<script>@ block and a standalone @.json@ file.
+--
+-- Built as a 'ShowS' fold: each unescaped char costs one @cons@ (not a
+-- singleton list + @concatMap@ append), and the closing quote is the
+-- fold's base accumulator, so there is no trailing @++ "\\\""@ pass over
+-- the whole escaped string. jsString sits on every JSON/HTML/DOT string
+-- emitted, so this multiplies across the entire output. Byte-for-byte
+-- identical to the previous @concatMap esc@ form.
 jsString :: String -> String
-jsString s = '"' : concatMap esc s ++ "\""
+jsString s = '"' : foldr escS "\"" s
   where
-    esc '"'  = "\\\""
-    esc '\\' = "\\\\"
-    esc '\n' = "\\n"
-    esc '\r' = "\\r"
-    esc '\t' = "\\t"
-    esc '\b' = "\\b"
-    esc '\f' = "\\f"
-    esc '<'  = "\\u003c"
-    esc '>'  = "\\u003e"
-    esc '&'  = "\\u0026"
-    esc '\'' = "\\u0027"
-    esc c
-      | c < '\x20' = "\\u" ++ pad4 (showHex (fromEnum c) "")
-      | otherwise  = [c]
+    escS :: Char -> ShowS
+    escS '"'  r = '\\' : '"'  : r
+    escS '\\' r = '\\' : '\\' : r
+    escS '\n' r = '\\' : 'n'  : r
+    escS '\r' r = '\\' : 'r'  : r
+    escS '\t' r = '\\' : 't'  : r
+    escS '\b' r = '\\' : 'b'  : r
+    escS '\f' r = '\\' : 'f'  : r
+    escS '<'  r = '\\' : 'u' : '0' : '0' : '3' : 'c' : r
+    escS '>'  r = '\\' : 'u' : '0' : '0' : '3' : 'e' : r
+    escS '&'  r = '\\' : 'u' : '0' : '0' : '2' : '6' : r
+    escS '\'' r = '\\' : 'u' : '0' : '0' : '2' : '7' : r
+    escS c    r
+      | c < '\x20' = '\\' : 'u' : pad4 (showHex (fromEnum c) "") ++ r
+      | otherwise  = c : r
 
     pad4 xs = replicate (4 - length xs) '0' ++ xs
+
+-- | Quote a string known to contain only JSON-safe characters (the
+-- base64 alphabet @[A-Za-z0-9+/=]@), skipping the per-char escape
+-- dispatch 'jsString' would run for nothing. Use ONLY for base64 payloads
+-- (the packed graph's typed arrays), which dominate that output's byte
+-- mass — a non-base64 string could smuggle an unescaped quote.
+jsB64Raw :: String -> String
+jsB64Raw s = '"' : s ++ "\""
 
 -- | @[ f x, … ]@ — a JSON array rendered with a per-element encoder.
 -- The single source of the @[…]@/@,@ layout the wire depends on; shared

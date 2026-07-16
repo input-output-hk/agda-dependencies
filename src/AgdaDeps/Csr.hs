@@ -27,6 +27,8 @@ module AgdaDeps.Csr
   ) where
 
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Unsafe as BSU ( unsafeIndex )
+import Data.ByteString.Internal ( w2c )
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Builder as B
 import Data.Bits ( shiftL, shiftR, (.&.), (.|.) )
@@ -127,28 +129,35 @@ b64 bs = go 0
   where
     n = BS.length bs
 
+    -- 'BSU.unsafeIndex' is sound here: 'enc' is only ever called with a
+    -- 6-bit value (masked/shifted to [0,63]) and 'alphabetBS' has 64
+    -- bytes, and each 'byteAt' offset is guarded < n by the case below.
+    -- 'w2c' avoids the 'toEnum . fromIntegral' Int box per char.
     enc :: Int -> Char
-    enc i = toEnum (fromIntegral (BS.index alphabetBS i))
+    enc i = w2c (BSU.unsafeIndex alphabetBS i)
+
+    byteAt :: Int -> Int
+    byteAt i = fromIntegral (BSU.unsafeIndex bs i)
 
     go :: Int -> String
     go !i
       | i >= n    = []
       | i + 1 == n =
-          let a' = fromIntegral (BS.index bs i) :: Int
+          let a' = byteAt i
               c0 = a' `shiftR` 2
               c1 = (a' .&. 0x03) `shiftL` 4
           in [enc c0, enc c1, '=', '=']
       | i + 2 == n =
-          let a' = fromIntegral (BS.index bs i)       :: Int
-              b' = fromIntegral (BS.index bs (i + 1)) :: Int
+          let a' = byteAt i
+              b' = byteAt (i + 1)
               c0 = a' `shiftR` 2
               c1 = ((a' .&. 0x03) `shiftL` 4) .|. (b' `shiftR` 4)
               c2 = (b' .&. 0x0F) `shiftL` 2
           in [enc c0, enc c1, enc c2, '=']
       | otherwise =
-          let a' = fromIntegral (BS.index bs i)       :: Int
-              b' = fromIntegral (BS.index bs (i + 1)) :: Int
-              c' = fromIntegral (BS.index bs (i + 2)) :: Int
+          let a' = byteAt i
+              b' = byteAt (i + 1)
+              c' = byteAt (i + 2)
               c0 = a' `shiftR` 2
               c1 = ((a' .&. 0x03) `shiftL` 4) .|. (b' `shiftR` 4)
               c2 = ((b' .&. 0x0F) `shiftL` 2) .|. (c' `shiftR` 6)
