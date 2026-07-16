@@ -57,6 +57,8 @@ module AgdaDeps.Options
 
 import Control.DeepSeq ( NFData(..) )
 import Control.Monad.Except ( MonadError(throwError) )
+import Data.Binary ( Binary(..) )
+import qualified Data.Binary as B
 import Data.List ( isPrefixOf )
 
 import AgdaDeps.Util ( isValidHexColor )
@@ -151,6 +153,19 @@ instance NFData DefState where
   rnf Postulate = ()
   rnf Hole      = ()
   rnf Failed    = ()
+
+-- | Tagged 'Word8' encoding for the @--incremental@ fragment cache.
+instance Binary DefState where
+  put Defined   = B.putWord8 0
+  put Postulate = B.putWord8 1
+  put Hole      = B.putWord8 2
+  put Failed    = B.putWord8 3
+  get = B.getWord8 >>= \w -> case w of
+    0 -> pure Defined
+    1 -> pure Postulate
+    2 -> pure Hole
+    3 -> pure Failed
+    _ -> fail "DefState"
 
 -- | Hex (\"#rrggbb\") colours for each 'DefState'.
 data ColorPalette = ColorPalette

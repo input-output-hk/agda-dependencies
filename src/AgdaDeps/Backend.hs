@@ -91,8 +91,9 @@ import Agda.Syntax.Common ( IsMain(..) )
 import System.IO.Unsafe ( unsafePerformIO )
 
 import AgdaDeps.Deps
-  ( ADDef(..), DefAccess(..)
+  ( ADDef(..), NodeRef(..), DefAccess(..)
   , compileDefAD, collectAllQNames, nodeKey, moduleKey, hashQName
+  , nodeKeyOfQ, moduleKeyOfQ, nrSrcLoc
   , optionEscapes
   , resetIgnoredEdges, contractIgnoredEdges
   , resetMethodProviders, addInstanceMethodEdges
@@ -129,7 +130,7 @@ import AgdaDeps.Precompute ( PrecomputedGraph(..), emptyGraph )
 import qualified Codec.Compression.GZip as GZip
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BLC
-import AgdaDeps.Source ( Snippet, collectHighlightedSnippets, srcLocOf )
+import AgdaDeps.Source ( Snippet, collectHighlightedSnippets )
 import AgdaDeps.Backend.Dot  ( renderDot )
 import AgdaDeps.Backend.GraphJson ( GraphInput(..), ExternalsSummary, buildExternalsSummary )
 import AgdaDeps.Backend.Html ( renderHtml, renderLazyHtml, LazyOutput(..) )
@@ -402,9 +403,9 @@ postModuleAD opts env isMain tlmn defs = do
       sigDefs     = [ (qn, def)
                     | (qn, def) <- HMap.toList (fullSig ^. sigDefinitions)
                     , A.qnameModule qn == thisModule ]
-      visitedQNames = S.fromList [ _name d | Just d <- defs ]
+      visitedQNames = S.fromList [ nrKey (_name d) | Just d <- defs ]
       missing       = [ def | (qn, def) <- sigDefs
-                            , not (qn `S.member` visitedQNames) ]
+                            , not (nodeKeyOfQ qn `S.member` visitedQNames) ]
   extras <- mapM (compileDefAD opts env isMain) missing
   let result = defs ++ extras
 
@@ -460,11 +461,11 @@ postCompileAD opts _ defMap = do
   -- Back-fill '_access' by scanning each .agda file once for top-level
   -- @private@-block line ranges and matching each def's binding-site
   -- line against them (see 'backfillAccess', 'findPrivateRanges').
-  let defFile :: Map QName FilePath
+  let defFile :: Map NodeRef FilePath
       defFile = M.fromList
         [ (_name d, fp)
         | d <- defsWithInstances
-        , Just (fp, _ln) <- [srcLocOf (_name d)]
+        , Just (fp, _ln) <- [nrSrcLoc (_name d)]
         ]
       filesToScan :: [FilePath]
       filesToScan = S.toAscList (S.fromList (M.elems defFile))
@@ -473,7 +474,7 @@ postCompileAD opts _ defMap = do
       mapM (\fp -> (,) fp <$> findPrivateRanges fp) filesToScan
   let defs0 = map (backfillAccess privRanges defFile) defsWithInstances
 
-  let allQNames0 :: [QName]
+  let allQNames0 :: [NodeRef]
       allQNames0 = collectAllQNames defs0
 
   -- Pool every module-name signal before classification so modules
@@ -531,10 +532,10 @@ postCompileAD opts _ defMap = do
           then (dropExternalDefs externals0 defs0, S.empty)
           else (defs0, externals0)
 
-      stateMap :: Map QName DefState
+      stateMap :: Map NodeRef DefState
       stateMap = M.fromList [ (_name d, _state d) | d <- defs ]
 
-      allQNames :: [QName]
+      allQNames :: [NodeRef]
       allQNames = collectAllQNames defs
 
   mMain <- liftIO $ readIORef mainModuleRef
@@ -615,7 +616,7 @@ postCompileAD opts _ defMap = do
         | qn <- allQNames
         , let modName = moduleKey qn
         , keep modName
-        , Just (p, _line) <- [srcLocOf qn]
+        , Just (p, _line) <- [nrSrcLoc qn]
         ]
 
       sourceFiles :: [FilePath]
@@ -728,7 +729,7 @@ postCompileAD opts _ defMap = do
 -- | Compute (x, y) positions per definition QName. Each node id is
 -- paired with an integer module id so the grid fallback keeps a
 -- module's definitions together. Uses 'hashQName' as the node id.
-computeQNamePositions :: [QName] -> [ADDef] -> IO (Map QName Position)
+computeQNamePositions :: [NodeRef] -> [ADDef] -> IO (Map NodeRef Position)
 computeQNamePositions allQNames defs = do
   let moduleNamesSet :: S.Set String
       moduleNamesSet =
@@ -738,7 +739,7 @@ computeQNamePositions allQNames defs = do
       moduleIx = M.fromList (zip (S.toAscList moduleNamesSet) [(0 :: Int)..])
       moduleIdOf qn = M.findWithDefault 0 (moduleKey qn) moduleIx
       nodesByMod = [ (hashQName qn, moduleIdOf qn) | qn <- allQNames ]
-      qnameById :: IM.IntMap QName
+      qnameById :: IM.IntMap NodeRef
       qnameById = IM.fromList (zip (map fst nodesByMod) allQNames)
       idSet :: IS.IntSet
       idSet = IS.fromList (map fst nodesByMod)
@@ -793,7 +794,7 @@ monoOutputUnchanged skippable cacheDir gz slot token path
 -- monolithic no-op skip.
 writeHtmlOutput
   :: FilePath -> Options -> SerialiseCtx
-  -> Map QName Snippet   -- ^ per-definition source snippets (@--with-source@)
+  -> Map NodeRef Snippet -- ^ per-definition source snippets (@--with-source@)
   -> GraphInput          -- ^ shared graph data (from 'postCompileAD')
   -> IO ()
 writeHtmlOutput dir opts sc snippetMap gi
@@ -907,7 +908,7 @@ writeJsonMaybeGz gz path content = do
 --
 -- Returns the complement: every seen module with no in-root path.
 classifyExternalModules
-  :: [QName]                  -- ^ every QName referenced in the graph
+  :: [NodeRef]                -- ^ every node referenced in the graph
   -> [(String, FilePath)]     -- ^ module → file map from precompute
   -> [String]                 -- ^ all module names seen as endpoints
   -> IO (Set String)
@@ -922,7 +923,7 @@ classifyExternalModules qns precomputedMF endpointModules = do
         where
           bumpQ !acc qn =
             let !modName = moduleKey qn :: String
-                !inRoot  = case srcLocOf qn of
+                !inRoot  = case nrSrcLoc qn of
                   Just (p, _) -> isUnderRoot p
                   Nothing     -> False
             in M.insertWith (||) modName inRoot acc
@@ -954,7 +955,7 @@ dropExternalDefs externals defs =
 -- within a @private@-block range in its source file. Defs without a
 -- usable '_line' (synthetic names) keep 'Nothing' / fall back to
 -- public.
-backfillAccess :: Map FilePath [(Int, Int)] -> Map QName FilePath -> ADDef -> ADDef
+backfillAccess :: Map FilePath [(Int, Int)] -> Map NodeRef FilePath -> ADDef -> ADDef
 backfillAccess privRanges defFile d =
   let mFile = M.lookup (_name d) defFile
       mLine = _line d
@@ -1028,7 +1029,7 @@ collectReExports :: Interface -> [(String, String, String, Maybe String)]
 collectReExports i =
   let hostMod  = prettyShow (iTopLevelModuleName i)
       thisModN = iModuleName i
-  in [ (hostMod, srcMod, nodeKey qn, alias)
+  in [ (hostMod, srcMod, nodeKeyOfQ qn, alias)
      | scope <- M.elems (iScope i)
      , ns <- [ ImportedNS, PublicNS ]
      , let nsBag = scopeNameSpace ns scope
@@ -1041,9 +1042,9 @@ collectReExports i =
      , let qn = anameName an
 #endif
      , qnameModule qn /= thisModN  -- skip own definitions
-       -- 'moduleKey' lifts anonymous (where/section) sub-modules to the
+       -- 'moduleKeyOfQ' lifts anonymous (where/section) sub-modules to the
        -- named owner, so the re-export points at the definition site.
-     , let srcMod = moduleKey qn
+     , let srcMod = moduleKeyOfQ qn
        -- Lifting can collapse a host-owned section onto the host; that's
        -- not a re-export from elsewhere, so drop it.
      , srcMod /= hostMod

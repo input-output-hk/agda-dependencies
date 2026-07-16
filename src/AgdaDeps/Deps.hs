@@ -10,8 +10,13 @@
 -- ('ignoreDef'). Node identity is 'nodeKey' / 'hashQName'; edge
 -- provenance is 'EdgeProv' / 'tagOne'.
 module AgdaDeps.Deps
-  ( -- * The per-definition record
-    ADDef(..)
+  ( -- * Node identity
+    NodeRef(..)
+  , mkRef
+  , nrSrcLoc
+
+    -- * The per-definition record
+  , ADDef(..)
   , DefKind(..)
   , DefAccess(..)
   , UnsafeTag(..)
@@ -25,12 +30,15 @@ module AgdaDeps.Deps
   , provPrec
   , provTag
 
-    -- * Hashing & QName collection
+    -- * Hashing & node collection
   , nodeKey
   , moduleKey
   , nodeKeyVersion
   , hashQName
   , collectAllQNames
+    -- ** QName-level identity (producer-side: live interface QNames)
+  , nodeKeyOfQ
+  , moduleKeyOfQ
 
     -- * Building 'ADDef's
   , computeDefAD
@@ -66,8 +74,10 @@ module AgdaDeps.Deps
   ) where
 
 import Control.DeepSeq ( NFData(..) )
-import Control.Monad ( filterM, when )
+import Control.Monad ( when )
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
+import Data.Binary ( Binary )
+import qualified Data.Binary as B
 import Data.IORef ( IORef, modifyIORef', newIORef, readIORef, writeIORef )
 import Data.List ( foldl', isInfixOf, isPrefixOf )
 import Data.Maybe ( isJust, mapMaybe )
@@ -79,7 +89,7 @@ import Data.Set ( Set )
 import qualified Data.Set as S
 import Data.Sequence ( Seq, (|>) )
 import qualified Data.Sequence as Seq
-import Data.Word ( Word64 )
+import Data.Word ( Word32, Word64 )
 import System.IO.Unsafe ( unsafePerformIO )
 
 import Agda.Utils.Hash ( hashString )
@@ -95,7 +105,9 @@ import Agda.Syntax.Internal
   )
 import Agda.Syntax.Internal.Names ( namesIn )
 import Agda.Syntax.Internal.MetaVars ( allMetasList )
-import Agda.Syntax.Position ( rStart, posLine )
+import Agda.Syntax.Position ( rStart, posLine, rangeFile, rangeFilePath )
+import Agda.Utils.FileName ( filePath )
+import qualified Agda.Utils.Maybe.Strict as Strict
 
 import Agda.Syntax.Common.Pretty ( Pretty(..), prettyShow, render, (<+>), vcat, pshow )
 
@@ -278,9 +290,9 @@ provTag EUnknown     = "unknown"
 -- @M.keysSet _depsProv == _deps@; every kept dep carries exactly one
 -- 'EdgeProv' tag.
 data ADDef = ADDef
-  { _name   :: QName            -- ^ name of the definition
-  , _deps   :: !(Set QName)     -- ^ its dependencies (named free variables)
-  , _depsProv :: !(Map QName EdgeProv)
+  { _name   :: NodeRef          -- ^ identity of the definition
+  , _deps   :: !(Set NodeRef)   -- ^ its dependencies (named free variables)
+  , _depsProv :: !(Map NodeRef EdgeProv)
                                 -- ^ per-dep provenance tag.
                                 -- Invariant: @M.keysSet _depsProv == _deps@.
   , _state  :: !DefState        -- ^ classification used for node colouring
@@ -325,6 +337,112 @@ instance Pretty ADDef where
                           , pshow "DepsProv:" <+> pshow (M.toAscList _depsProv)
                           , pshow "Unsafe:" <+> pshow _unsafe ]
 
+-- ** 'Binary' instances for the @--incremental@ fragment cache.
+-- The whole payload is plain data (identity is 'NodeRef', not 'QName'),
+-- so it serialises with 'Data.Binary' — no Agda 'EmbPrj', no version
+-- coupling. Enums are tagged 'Word8's; an out-of-range tag @fail@s the
+-- decode, which the cache treats as a miss.
+
+instance Binary EdgeProv where
+  put = B.putWord8 . \case
+    ESignature -> 0
+    EBody -> 1
+    EModuleLocal -> 2
+    EWith -> 3
+    EUnknown -> 4
+  get = B.getWord8 >>= \case
+    0 -> pure ESignature
+    1 -> pure EBody
+    2 -> pure EModuleLocal
+    3 -> pure EWith
+    4 -> pure EUnknown
+    _ -> fail "EdgeProv"
+
+instance Binary DefKind where
+  put = B.putWord8 . \case
+    DKFunction -> 0
+    DKProjection -> 1
+    DKDatatype -> 2
+    DKRecord -> 3
+    DKConstructor -> 4
+    DKPostulate -> 5
+    DKPrimitive -> 6
+    DKOther -> 7
+  get = B.getWord8 >>= \case
+    0 -> pure DKFunction
+    1 -> pure DKProjection
+    2 -> pure DKDatatype
+    3 -> pure DKRecord
+    4 -> pure DKConstructor
+    5 -> pure DKPostulate
+    6 -> pure DKPrimitive
+    7 -> pure DKOther
+    _ -> fail "DefKind"
+
+instance Binary DefAccess where
+  put = B.putWord8 . \case
+    AccPrivate -> 0
+    AccPublic -> 1
+  get = B.getWord8 >>= \case
+    0 -> pure AccPrivate
+    1 -> pure AccPublic
+    _ -> fail "DefAccess"
+
+instance Binary UnsafeTag where
+  put = B.putWord8 . \case
+    UNonTerminating -> 0
+    UTrustMe -> 1
+  get = B.getWord8 >>= \case
+    0 -> pure UNonTerminating
+    1 -> pure UTrustMe
+    _ -> fail "UnsafeTag"
+
+instance Binary ADDef where
+  put (ADDef n d dp s k l a sh sd sg u) =
+       B.put n *> B.put d *> B.put dp *> B.put s *> B.put k *> B.put l
+    *> B.put a *> B.put sh *> B.put sd *> B.put sg *> B.put u
+  get = ADDef <$> B.get <*> B.get <*> B.get <*> B.get <*> B.get <*> B.get
+              <*> B.get <*> B.get <*> B.get <*> B.get <*> B.get
+
+-- | Precomputed, serialisable node identity. Replaces the raw 'QName'
+-- as the identity carried through 'ADDef', the two side-channels and the
+-- graph emitters. Everything downstream of the per-module walk consumes
+-- only these projections — never a live 'QName' or a TCM lookup — so a
+-- cached fragment round-trips identity as plain 'Binary' data with no
+-- 'EmbPrj'. Built once, at the producer boundary, by 'mkRef'.
+data NodeRef = NodeRef
+  { nrKey       :: !String            -- ^ 'nodeKey' — the canonical identity string
+  , nrHash      :: !Word64            -- ^ @hashString nrKey@ (fast 'Eq'\/'Ord', and 'hashQName')
+  , nrModule    :: !String            -- ^ 'moduleKey' — owning-module attribution
+  , nrLine      :: !(Maybe Int)       -- ^ 'bindingLine' — 1-indexed binding-site line
+  , nrFile      :: !(Maybe FilePath)  -- ^ binding-site source file (for 'nrSrcLoc')
+  , nrPretty    :: !String            -- ^ @prettyShow@ (unqualified name taken at use sites)
+  , nrIgnorable :: !Bool              -- ^ @ignoreDef <$> getConstInfo@, precomputed so
+                                      --   'contractIgnoredEdges' needs no TCM on cached defs
+  }
+
+-- 'Eq'\/'Ord' compare the (hash, key) pair — hash first for speed, key to
+-- break the rare collision. This keeps container operations Int-fast (as
+-- with 'QName''s 'NameId' 'Ord') while making a 'Live' and a rehydrated
+-- 'Cached' ref with the same identity compare equal.
+instance Eq NodeRef where
+  a == b = nrHash a == nrHash b && nrKey a == nrKey b
+instance Ord NodeRef where
+  compare a b = compare (nrHash a) (nrHash b) <> compare (nrKey a) (nrKey b)
+instance Show NodeRef where
+  show = nrKey
+instance Pretty NodeRef where
+  pretty = pretty . nrKey
+instance NFData NodeRef where
+  rnf (NodeRef a b c d e f g) =
+    rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` rnf e `seq` rnf f `seq` rnf g
+instance Binary NodeRef where
+  put (NodeRef a b c d e f g) =
+    B.put a >> B.put b >> B.put c >> B.put d >> B.put e >> B.put f >> B.put g
+  get = NodeRef <$> B.get <*> B.get <*> B.get <*> B.get <*> B.get <*> B.get <*> B.get
+
+-- ** QName-level identity logic (producer boundary only)
+
 -- | Canonical node-identity string for a 'QName'. Anonymous-module
 -- segments (the @._.@ marker Agda uses for both @where@-block helpers and
 -- @module _ (…) where@ section members) are lifted into the nearest named
@@ -333,16 +451,16 @@ instance Pretty ADDef where
 -- are disambiguated by binding-site line (@Mod.helper\@15@); a helper with
 -- no recorded binding site falls back to the bare lifted name.
 --
--- Single source of truth for node identity: 'hashQName' is its hash, and
--- the JSON wire @"name"@ field and edge endpoints are this exact string.
+-- Single source of truth for node identity: it is stored as 'nrKey', the
+-- JSON wire @"name"@ field and edge endpoints are this exact string.
 -- Do not revert to bare 'prettyShow': same-named @where@-helpers collapse
--- onto one node and lose their edges. 'moduleKey' is the matching
+-- onto one node and lose their edges. 'moduleKeyOfQ' is the matching
 -- module-attribution function.
-nodeKey :: QName -> String
-nodeKey qn
+nodeKeyOfQ :: QName -> String
+nodeKeyOfQ qn
   | "._." `isInfixOf` raw     -- 'isWhereHelperName', inlined to reuse 'raw'
-  , Just ln <- bindingLine qn = lifted ++ "@" ++ show ln
-  | otherwise                 = lifted
+  , Just ln <- bindingLineOfQ qn = lifted ++ "@" ++ show ln
+  | otherwise                    = lifted
   where
     raw    = prettyShow qn
     lifted = liftAnonSegments raw
@@ -352,30 +470,92 @@ nodeKey qn
 -- the nearest named module (@Mod._@ ↦ @Mod@). Every place that derives a
 -- module name from a 'QName' for the graph must route through this, or
 -- phantom @Mod._@ module nodes surface and set/index/membership drift.
-moduleKey :: QName -> String
-moduleKey = liftAnonSegments . prettyShow . qnameModule
+moduleKeyOfQ :: QName -> String
+moduleKeyOfQ = liftAnonSegments . prettyShow . qnameModule
 
--- | Version of the node-key convention emitted by 'nodeKey'. Stamped
+-- | @(source file, 1-indexed line)@ of a 'QName''s binding occurrence.
+-- Inlined from 'AgdaDeps.Source.srcLocOf' to avoid a @Deps -> Source@
+-- import edge; kept in sync with it.
+srcLocOfQ :: QName -> Maybe (FilePath, Word32)
+srcLocOfQ qn = do
+  let bindRange = nameBindingSite (qnameName qn)
+  rf <- case rangeFile bindRange of
+          Strict.Just rf -> Just rf
+          Strict.Nothing -> Nothing
+  p  <- rStart bindRange
+  return (filePath (rangeFilePath rf), posLine p)
+
+-- | Build the precomputed 'NodeRef' for a 'QName'. TCM only for the one
+-- 'ignoreDependency' (@getConstInfo@) lookup, memoised per 'QName' so the
+-- cost stays once-per-distinct-name across a run.
+mkRef :: QName -> TCM NodeRef
+mkRef qn = do
+  ign <- memoIgnorable qn
+  let !key = nodeKeyOfQ qn
+  return NodeRef
+    { nrKey       = key
+    , nrHash      = hashString key
+    , nrModule    = moduleKeyOfQ qn
+    , nrLine      = bindingLineOfQ qn
+    , nrFile      = fst <$> srcLocOfQ qn
+    , nrPretty    = prettyShow qn
+    , nrIgnorable = ign
+    }
+
+-- | Memoised 'ignoreDependency'. Reset alongside the side-channels.
+memoIgnorable :: QName -> TCM Bool
+memoIgnorable qn = do
+  cache <- liftIO (readIORef ignorableCacheRef)
+  case M.lookup qn cache of
+    Just b  -> return b
+    Nothing -> do
+      b <- ignoreDependency qn
+      liftIO $ modifyIORef' ignorableCacheRef (M.insert qn b)
+      return b
+
+{-# NOINLINE ignorableCacheRef #-}
+ignorableCacheRef :: IORef (Map QName Bool)
+ignorableCacheRef = unsafePerformIO (newIORef M.empty)
+
+-- ** Blessed identity accessors (NodeRef; used everywhere downstream)
+
+-- | Canonical node-identity string. See 'nodeKeyOfQ'.
+nodeKey :: NodeRef -> String
+nodeKey = nrKey
+
+-- | Owning-module attribution string. See 'moduleKeyOfQ'.
+moduleKey :: NodeRef -> String
+moduleKey = nrModule
+
+-- | 1-indexed binding-site line, if any.
+bindingLine :: NodeRef -> Maybe Int
+bindingLine = nrLine
+
+-- | @(source file, line)@ of the binding occurrence, if fully known.
+nrSrcLoc :: NodeRef -> Maybe (FilePath, Word32)
+nrSrcLoc r = (,) <$> nrFile r <*> (fromIntegral <$> nrLine r)
+
+-- | Version of the node-key convention emitted by 'nodeKeyOfQ'. Stamped
 -- into @graph.json@ so a consumer can detect a stale-format cached graph.
--- Bump whenever 'nodeKey' changes shape. Currently 3 (anonymous-module
+-- Bump whenever the key shape changes. Currently 3 (anonymous-module
 -- segments lifted into the nearest named ancestor).
 nodeKeyVersion :: Int
 nodeKeyVersion = 3
 
--- | Stable integer ID for a 'QName', shared by every renderer. The hash
--- of 'nodeKey', so distinct same-named @where@/anonymous-module helpers
--- hash to distinct ids.
-hashQName :: QName -> Int
-hashQName = fromIntegral . hashString . nodeKey
+-- | Stable integer ID for a node, shared by every renderer. The hash of
+-- 'nodeKey', so distinct same-named @where@/anonymous-module helpers hash
+-- to distinct ids.
+hashQName :: NodeRef -> Int
+hashQName = fromIntegral . nrHash
 
--- | Every 'QName' that appears in the graph (definition names plus
+-- | Every node that appears in the graph (definition identities plus
 -- their dependencies), deduplicated by 'hashQName'. Result is in
 -- ascending hashQName order. 'IM.insert' is "last write wins" on hash
 -- collision.
-collectAllQNames :: [ADDef] -> [QName]
+collectAllQNames :: [ADDef] -> [NodeRef]
 collectAllQNames defs = IM.elems (foldl' addDef IM.empty defs)
   where
-    addDef :: IM.IntMap QName -> ADDef -> IM.IntMap QName
+    addDef :: IM.IntMap NodeRef -> ADDef -> IM.IntMap NodeRef
     addDef !acc ADDef{..} =
       let !acc1 = IM.insert (hashQName _name) _name acc
       in S.foldl' (\ !m qn -> IM.insert (hashQName qn) qn m) acc1 _deps
@@ -391,7 +571,7 @@ collectAllQNames defs = IM.elems (foldl' addDef IM.empty defs)
 computeDefAD :: Options -> Definition -> TCM ADDef
 computeDefAD opts def@Defn{..} = do
   let excludes = optExcludeModules opts
-      notExcluded qn = not (isExcludedModule excludes (moduleKey qn))
+      notExcluded qn = not (isExcludedModule excludes (moduleKeyOfQ qn))
       -- Walk 'defType' and 'theDef' separately to record which set each
       -- name came from. Raw walks are shared with 'classifyDefWith' so
       -- each tree is traversed once. 'ignoreDependency' is applied later
@@ -409,7 +589,7 @@ computeDefAD opts def@Defn{..} = do
   -- name in an excluded module must still flip the Hole classification.
   st <- classifyDefWith rawSig rawBody def
   let !kd      = classifyKind def
-      !lineMb  = bindingLine defName
+      !lineMb  = bindingLineOfQ defName
       !termPairs = if optWithTermHashes opts
                      then Just (concatMap (subtermHashes (optMinTermDepth opts))
                                           (definitionTerms def))
@@ -435,12 +615,18 @@ computeDefAD opts def@Defn{..} = do
   let termTag = case theDef of
         Function{ funTerminates = Just False } -> [UNonTerminating]
         _                                      -> []
-      usesTrustMe = any ((== trustMeNodeKey) . nodeKey) (rawSig ++ rawBody)
+      usesTrustMe = any ((== trustMeNodeKey) . nodeKeyOfQ) (rawSig ++ rawBody)
       !unsafeTags = termTag ++ [ UTrustMe | usesTrustMe ]
+  -- Convert the QName-keyed working sets to precomputed 'NodeRef's at the
+  -- producer boundary: everything downstream is identity-as-data.
+  nameRef  <- mkRef defName
+  provPairs <- mapM (\ (q, p) -> (\ r -> (r, p)) <$> mkRef q) (M.toList depsProv)
+  let !depsProvR = M.fromList provPairs
+      !depsR     = M.keysSet depsProvR
   return ADDef
-    { _name   = defName
-    , _deps   = deps
-    , _depsProv = depsProv
+    { _name   = nameRef
+    , _deps   = depsR
+    , _depsProv = depsProvR
     , _state  = st
     , _kind   = kd
     , _line   = lineMb
@@ -488,8 +674,8 @@ isWhereHelperName qn = "._." `isInfixOf` prettyShow qn
 -- | 1-indexed start line of a 'QName''s binding site, if Agda recorded a
 -- usable range for it. Synthetic names (e.g. @unsolved#meta.*@,
 -- generated helpers we kept) typically return 'Nothing'.
-bindingLine :: QName -> Maybe Int
-bindingLine qn =
+bindingLineOfQ :: QName -> Maybe Int
+bindingLineOfQ qn =
   let r = nameBindingSite (qnameName qn)
   in fromIntegral . posLine <$> rStart r
 
@@ -513,7 +699,7 @@ compileDefAD opts _ _ def@Defn{..}
       -- 'ignoreDependency' (references to other ignored defs are kept
       -- so the closure pass can chain through). Module-exclusion still
       -- applies.
-      let notExcluded qn = not (isExcludedModule excludes (moduleKey qn))
+      let notExcluded qn = not (isExcludedModule excludes (moduleKeyOfQ qn))
           !sigNames  = S.fromList (filter notExcluded (namesIn defType))
           !bodyNames = S.fromList (filter notExcluded (namesIn theDef))
           !raw       = S.union sigNames bodyNames
@@ -521,9 +707,12 @@ compileDefAD opts _ _ def@Defn{..}
             Function { funWith = w } -> isWithFun' w
             _                        -> Nothing
           !rawProv = M.fromSet (tagOne sigNames bodyNames withTarget) raw
-      recordIgnoredDef defName rawProv
+      -- Convert to NodeRef at the boundary (see 'computeDefAD').
+      nameRef  <- mkRef defName
+      provPairs <- mapM (\ (q, p) -> (\ r -> (r, p)) <$> mkRef q) (M.toList rawProv)
+      recordIgnoredDef nameRef (M.fromList provPairs)
       return Nothing
-  | isExcludedModule excludes (moduleKey defName) = return Nothing
+  | isExcludedModule excludes (moduleKeyOfQ defName) = return Nothing
   | otherwise = do
       recordInstanceMethods def
       Just <$> computeDefAD opts def
@@ -543,8 +732,10 @@ recordInstanceMethods :: Definition -> TCM ()
 recordInstanceMethods Defn{..} =
   let isInstance = isJust defInstance
       methods    = projectionMethods theDef
-  in when (isInstance || not (null methods)) $
-       recordMethodProviders defName methods
+  in when (isInstance || not (null methods)) $ do
+       binderRef  <- mkRef defName
+       methodRefs <- mapM mkRef methods
+       recordMethodProviders binderRef methodRefs
   where
     -- Pull the projection QName off the head pattern of every clause.
     -- The @R ∋ λ where@ shape has one ProjP per clause; anything else
@@ -572,7 +763,7 @@ recordInstanceMethods Defn{..} =
 -- tagging as kept defs; contraction discards the inside-the-chain
 -- provenance and inherits the kept def's tag towards the chain entry
 -- (see 'contractWith').
-type IgnoredEdgeMap = Map QName (Map QName EdgeProv)
+type IgnoredEdgeMap = Map NodeRef (Map NodeRef EdgeProv)
 
 {-# NOINLINE ignoredEdgesRef #-}
 ignoredEdgesRef :: IORef IgnoredEdgeMap
@@ -584,7 +775,7 @@ resetIgnoredEdges :: MonadIO m => m ()
 resetIgnoredEdges = liftIO $ writeIORef ignoredEdgesRef M.empty
 
 -- | Record an ignored def's out-edges (strict 'modifyIORef'').
-recordIgnoredDef :: MonadIO m => QName -> Map QName EdgeProv -> m ()
+recordIgnoredDef :: MonadIO m => NodeRef -> Map NodeRef EdgeProv -> m ()
 recordIgnoredDef qn deps =
   liftIO $ modifyIORef' ignoredEdgesRef (M.insert qn deps)
 
@@ -610,7 +801,7 @@ mergeIgnoredEdges extra =
 -- | Method @QName@ -> list of instance binders that provide it.
 -- A method may be implemented by several binders; the list preserves
 -- insertion order, matching Agda's compile order.
-type MethodProviderMap = Map QName [QName]
+type MethodProviderMap = Map NodeRef [NodeRef]
 
 {-# NOINLINE methodProvidersRef #-}
 methodProvidersRef :: IORef MethodProviderMap
@@ -636,7 +827,7 @@ mergeMethodProviders extra =
 -- | Append @binder@ to the providers list for each of @methods@. An
 -- empty @methods@ list is a no-op (the binder is still recorded by the
 -- defInstance-marker path when its method names can't be recovered).
-recordMethodProviders :: MonadIO m => QName -> [QName] -> m ()
+recordMethodProviders :: MonadIO m => NodeRef -> [NodeRef] -> m ()
 recordMethodProviders binder methods =
   liftIO $ modifyIORef' methodProvidersRef $ \m ->
     foldl' (\acc method ->
@@ -671,7 +862,7 @@ addInstanceMethodEdges defs = do
                                     (M.fromSet (const EUnknown) extra)
              in d { _deps = newDeps, _depsProv = newProv }
 
-    collect :: MethodProviderMap -> Set QName -> QName -> Set QName
+    collect :: MethodProviderMap -> Set NodeRef -> NodeRef -> Set NodeRef
     collect providers !acc qn = case M.lookup qn providers of
       Nothing -> acc
       Just bs -> foldl' (flip S.insert) acc bs
@@ -683,7 +874,7 @@ addInstanceMethodEdges defs = do
 --
 -- Thin wrapper around 'bfsClosure'. Production code uses
 -- 'contractIgnoredEdges' instead, which memoises across many calls.
-expandThroughIgnored :: MonadIO m => Set QName -> m (Set QName)
+expandThroughIgnored :: MonadIO m => Set NodeRef -> m (Set NodeRef)
 expandThroughIgnored frontier0 = do
   hidden <- liftIO $ readIORef ignoredEdgesRef
   pure $ bfsClosure hidden frontier0
@@ -711,10 +902,10 @@ contractIgnoredEdges defs = do
       -- the per-def rewrite, so 'contractWith' runs exactly once per def.
       expandeds  = map (contractWith hidden memo . _depsProv) defs
       allTargets = S.unions (map M.keysSet expandeds)
-  -- 'ignoreDependency' is a pure function of its 'QName' (a signature
-  -- lookup), so run it once per distinct contracted target.
-  ignored <- filterM ignoreDependency (S.toList allTargets)
-  let !ignoredSet = S.fromList ignored
+      -- Each target's ignorability was precomputed into its 'NodeRef' at
+      -- the producer boundary ('mkRef' -> 'getConstInfo'), so this pass is
+      -- pure — no TCM lookup on rehydrated (cache-hit) defs.
+      !ignoredSet = S.filter nrIgnorable allTargets
   pure (zipWith (rewrite ignoredSet) defs expandeds)
   where
     -- Drop the ignored targets from a contracted dep map, keeping the
@@ -730,9 +921,9 @@ contractIgnoredEdges defs = do
     -- reached by two paths, 'provPrec' picks the higher-precedence tag.
     contractWith
       :: IgnoredEdgeMap
-      -> Map QName (Set QName)
-      -> Map QName EdgeProv
-      -> Map QName EdgeProv
+      -> Map NodeRef (Set NodeRef)
+      -> Map NodeRef EdgeProv
+      -> Map NodeRef EdgeProv
     contractWith hidden memo srcMap =
       M.foldlWithKey' step M.empty srcMap
       where
@@ -757,15 +948,15 @@ contractIgnoredEdges defs = do
 -- fallback in 'contractIgnoredEdges'. @frontier0@ is the set of
 -- starting QNames; the result is every reachable QName that's *not* an
 -- ignored-def key. 'EdgeProv' tags inside the closure are discarded.
-bfsClosure :: IgnoredEdgeMap -> Set QName -> Set QName
+bfsClosure :: IgnoredEdgeMap -> Set NodeRef -> Set NodeRef
 bfsClosure hidden frontier0 =
-  let initial :: Seq QName
+  let initial :: Seq NodeRef
       initial = Seq.fromList (S.toList frontier0)
       (_, kept) = go initial IS.empty S.empty
   in kept
   where
-    go :: Seq QName -> IS.IntSet -> Set QName
-       -> (IS.IntSet, Set QName)
+    go :: Seq NodeRef -> IS.IntSet -> Set NodeRef
+       -> (IS.IntSet, Set NodeRef)
     go q !visited !kept = case Seq.viewl q of
       Seq.EmptyL -> (visited, kept)
       qn Seq.:< rest ->
@@ -796,24 +987,24 @@ bfsClosure hidden frontier0 =
 -- Each key's adjacency is partitioned once into
 -- @(hiddenDeps, nonHiddenDeps)@; the DP step at key @k@ is
 -- @closure[k] = nonHiddenDeps[k] ∪ ⋃ closure[d] for d in hiddenDeps[k]@.
-buildIgnoredClosure :: IgnoredEdgeMap -> Map QName (Set QName)
+buildIgnoredClosure :: IgnoredEdgeMap -> Map NodeRef (Set NodeRef)
 buildIgnoredClosure hidden = withCycles
   where
-    keys :: Set QName
+    keys :: Set NodeRef
     keys = M.keysSet hidden
 
     -- Forward adjacency partitioned once into (hiddenDeps, nonHiddenDeps);
     -- per-edge provenance inside the chain is discarded.
-    adj :: Map QName (Set QName, Set QName)
+    adj :: Map NodeRef (Set NodeRef, Set NodeRef)
     adj = M.map partitionEntry hidden
       where
-        partitionEntry :: Map QName EdgeProv -> (Set QName, Set QName)
+        partitionEntry :: Map NodeRef EdgeProv -> (Set NodeRef, Set NodeRef)
         partitionEntry m =
           let !ks = M.keysSet m
           in S.partition (`S.member` keys) ks
 
     -- Reverse adjacency on the hidden→hidden subgraph.
-    revAdj :: Map QName (Set QName)
+    revAdj :: Map NodeRef (Set NodeRef)
     revAdj = M.foldlWithKey' addRev M.empty adj
       where
         addRev !m k (hDeps, _) =
@@ -822,18 +1013,18 @@ buildIgnoredClosure hidden = withCycles
             m hDeps
 
     -- Initial out-degree: number of hidden deps each key has.
-    outDeg0 :: Map QName Int
+    outDeg0 :: Map NodeRef Int
     outDeg0 = M.map (S.size . fst) adj
 
     -- Seed Kahn's with every node whose hidden-deps set is empty.
-    seed :: Seq QName
+    seed :: Seq NodeRef
     seed = Seq.fromList
       [ k | (k, (h, _)) <- M.toList adj, S.null h ]
 
     -- Bottom-up DP. By the Kahn invariant, every hidden dep of @k@ is
     -- in @memo@ when @k@ is popped, so the union is a straight lookup.
-    kahn :: Map QName (Set QName) -> Map QName Int -> Seq QName
-         -> Map QName (Set QName)
+    kahn :: Map NodeRef (Set NodeRef) -> Map NodeRef Int -> Seq NodeRef
+         -> Map NodeRef (Set NodeRef)
     kahn !memo !deg q = case Seq.viewl q of
       Seq.EmptyL    -> memo
       k Seq.:< rest ->
@@ -857,10 +1048,10 @@ buildIgnoredClosure hidden = withCycles
     -- Cycle fallback: any key not emitted by Kahn (out-degree > 0) is
     -- part of a directed cycle in the hidden subgraph; compute its
     -- closure with 'bfsClosure'.
-    cycleMembers :: Set QName
+    cycleMembers :: Set NodeRef
     cycleMembers = keys `S.difference` M.keysSet partial
 
-    withCycles :: Map QName (Set QName)
+    withCycles :: Map NodeRef (Set NodeRef)
     withCycles
       | S.null cycleMembers = partial
       | otherwise           =

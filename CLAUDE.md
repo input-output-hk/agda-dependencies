@@ -76,9 +76,11 @@ src/AgdaDeps/
                           so postCompile gets def-level data for every elaborated
                           module. Every stage guarded; postCompile always runs.
   FragmentCache.hs        --incremental per-module fragment cache
-                          (EmbPrj-serialised ADDefs + side-channel slices), keyed
-                          on iFullHash + option fingerprint + nodeKeyVersion.
-                          Agda >= 2.9 only; no-op on 2.8. Also gcFragments.
+                          (Data.Binary-serialised ADDefs + side-channel slices),
+                          keyed on iFullHash + option fingerprint + nodeKeyVersion.
+                          Works on both Agda 2.8 and 2.9 (identity is the
+                          serialisable NodeRef, not a QName — no EmbPrj, no CPP).
+                          Also gcFragments.
   SerialiseCache.hs       --incremental serialise: a plain-text manifest of
                           content epochs, letting a rebuild skip re-emitting
                           unchanged output (monolithic + per-module lazy skips).
@@ -165,9 +167,21 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges rewrites kept defs' dep
   set), not per-def: raw hidden refs must survive for the contraction pass to
   expand them, else edges through with-/where-helpers are lost.
 
-- **Node identity is `nodeKey`** (`hashQName = hashString . nodeKey`); the wire
-  `"name"` and all edge endpoints derive from it, and the expanded-edge filter
-  resolves by the canonical string, not `QName` `Ord`. Not the alternatives:
+- **Node identity is a `NodeRef`, built once at the producer boundary.**
+  `ADDef` and both side-channels are keyed by `NodeRef` (a precomputed,
+  `Data.Binary`-serialisable bundle: `nodeKey` string + hash + `moduleKey` +
+  line + file + `prettyShow` + a precomputed `ignoreDef` flag), *not* a live
+  `QName`. `mkRef :: QName -> TCM NodeRef` does the conversion (the only
+  `getConstInfo` is folded into `nrIgnorable` here, so `contractIgnoredEdges`
+  needs no TCM and cache-hit defs need no live QName). The `...OfQ` helpers
+  (`nodeKeyOfQ` / `moduleKeyOfQ`) are the QName-level logic, used only by `mkRef`
+  and the producer-side sites that see live interface QNames (dead-private
+  recovery, `collectReExports`). This is why the fragment cache is a plain
+  `Data.Binary` payload with no `EmbPrj`/CPP and works on 2.8.
+- **Node identity string is `nodeKey`** (`hashQName = hashString . nodeKey`,
+  via `NodeRef`); the wire `"name"` and all edge endpoints derive from it, and
+  the expanded-edge filter resolves by the canonical string, not `NodeRef`/`QName`
+  `Ord`. Not the alternatives:
   - derived `Show` carries `NameId` metadata that differs between `iSignature`
     and `stSignature` sources — can't key nodes;
   - `prettyShow` alone over-collapses same-named `where`/anonymous-module helpers
@@ -302,10 +316,11 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges rewrites kept defs' dep
   `outputToken` (module set + output-affecting options + build identity). Drop
   either and it serves stale output, so `outputToken` must list every
   output-affecting option (same discipline as `NFData Options`). The lazy
-  per-module skip is content-epoch based (`mdjEpoch`). Serialisation rides Agda's
-  `EmbPrj`; the byte layer is 2.9-only (on 2.8 the flag warns + no-ops). Bump
-  `fragmentFormatVersion` on a payload-shape change; `optionsFingerprint` must
-  list every flag that changes fragment content. Disabled under `--keep-going`.
+  per-module skip is content-epoch based (`mdjEpoch`). Fragment serialisation is
+  plain `Data.Binary` over the `NodeRef`-keyed payload (works on 2.8 and 2.9
+  alike — no `EmbPrj`, no CPP). Bump `fragmentFormatVersion` on a payload-shape
+  change; `optionsFingerprint` must list every flag that changes fragment
+  content. Disabled under `--keep-going`.
 
 ## State semantics
 

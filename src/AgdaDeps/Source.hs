@@ -49,6 +49,8 @@ import qualified Agda.Utils.Maybe.Strict as Strict
 
 import Agda.Syntax.Common.Pretty ( prettyShow )
 
+import AgdaDeps.Deps ( NodeRef(..), nrSrcLoc )
+
 import Agda.Interaction.Highlighting.HTML.Base
   ( HtmlOptions(..), HtmlHighlight(..)
   , srcFileOfInterface, defaultPageGen, runLogHtmlWith )
@@ -99,7 +101,7 @@ collectHighlightedSnippets
   :: [String]     -- ^ Module-name prefixes to skip (from @--no-source-for@).
                   --   Matching modules are not rendered to HTML, and any
                   --   'QName' homed in one of them yields no snippet.
-  -> FilePath -> [QName] -> TCM (Map QName Snippet)
+  -> FilePath -> [NodeRef] -> TCM (Map NodeRef Snippet)
 collectHighlightedSnippets noSrcPrefixes outDir qns = do
   visited <- getVisitedModules
   let -- Keep modules that don't match any --no-source-for prefix;
@@ -152,10 +154,10 @@ collectHighlightedSnippets noSrcPrefixes outDir qns = do
 snippetFor
   :: Map TopLevelModuleName String                  -- per-module rendered <pre> body
   -> IORef.IORef (Map FilePath (Maybe [String]))    -- .agda source line cache
-  -> QName
-  -> IO (Maybe (QName, Snippet))
+  -> NodeRef
+  -> IO (Maybe (NodeRef, Snippet))
 snippetFor tlmHtmlMap srcCache qn =
-  case srcLocOf qn of
+  case nrSrcLoc qn of
     Nothing            -> return Nothing
     Just (path, line1) -> do
       mLines <- readFileCached srcCache path
@@ -164,7 +166,7 @@ snippetFor tlmHtmlMap srcCache qn =
         Just lns -> case paragraphBounds lns (fromIntegral line1) of
           Nothing       -> return Nothing
           Just (l1, l2) ->
-            case findTopLevelForQName (M.keys tlmHtmlMap) qn of
+            case findTopLevelForModule (M.keys tlmHtmlMap) (nrModule qn) of
               Nothing -> return Nothing
               Just tlmn ->
                 case M.lookup tlmn tlmHtmlMap of
@@ -176,10 +178,9 @@ snippetFor tlmHtmlMap srcCache qn =
 
 -- | Pick the top-level module name whose own 'ModuleName' is a prefix
 -- of the 'QName'\'s @qnameModule@. (Longest-match wins.)
-findTopLevelForQName :: [TopLevelModuleName] -> QName -> Maybe TopLevelModuleName
-findTopLevelForQName tlms qn =
-  let qmStr = prettyShow (qnameModule qn)
-      candidates = [ tlmn
+findTopLevelForModule :: [TopLevelModuleName] -> String -> Maybe TopLevelModuleName
+findTopLevelForModule tlms qmStr =
+  let candidates = [ tlmn
                    | tlmn <- tlms
                    , let s = prettyShow tlmn
                    , s == qmStr || (s ++ ".") `isPrefixOf` qmStr

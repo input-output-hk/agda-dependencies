@@ -26,10 +26,9 @@ import Data.Word ( Word64 )
 
 import Data.FileEmbed ( embedStringFile )
 
-import Agda.Syntax.Abstract.Name ( QName )
 import Agda.Utils.Hash ( hashString )
 
-import AgdaDeps.Deps    ( hashQName, moduleKey )
+import AgdaDeps.Deps    ( NodeRef, hashQName, moduleKey )
 import AgdaDeps.Options ( ColorPalette(..), View(..) )
 import AgdaDeps.Source  ( Snippet(..) )
 import AgdaDeps.Util    ( jsString )
@@ -50,7 +49,7 @@ renderHtml
   -> ColorPalette
   -> Bool                   -- ^ @--gzip@ enabled (passed through to template).
   -> Maybe FilePath         -- ^ @--agda-html-dir@ base (Nothing = no source links).
-  -> Map QName Snippet      -- ^ per-definition source snippets (@--with-source@)
+  -> Map NodeRef Snippet      -- ^ per-definition source snippets (@--with-source@)
   -> GraphInput             -- ^ shared graph data (from "AgdaDeps.Backend")
   -> String
 renderHtml view palette gzipEnabled agdaHtmlDir snippetMap gi =
@@ -92,7 +91,7 @@ renderLazyHtml
   -> ColorPalette
   -> Bool                   -- ^ @--gzip@ enabled.
   -> Maybe FilePath         -- ^ @--agda-html-dir@ base (Nothing = no source links).
-  -> Map QName Snippet      -- ^ per-definition source snippets (@--with-source@)
+  -> Map NodeRef Snippet      -- ^ per-definition source snippets (@--with-source@)
   -> GraphInput             -- ^ shared graph data (from "AgdaDeps.Backend")
   -> LazyOutput
 renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap giBase =
@@ -100,7 +99,7 @@ renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap giBase =
       -- bundle manifest keys match the graph.json module names. 'foldr'
       -- over 'M.toAscList' with 'insertWith (++)' keeps each module's
       -- entries in ascending-QName order.
-      snippetsByModule :: Map String [(QName, Snippet)]
+      snippetsByModule :: Map String [(NodeRef, Snippet)]
       snippetsByModule =
         foldr (\(qn, sn) -> M.insertWith (++) (moduleKey qn) [(qn, sn)])
               M.empty (M.toAscList snippetMap)
@@ -132,14 +131,14 @@ renderLazyHtml view palette gzipEnabled agdaHtmlDir snippetMap giBase =
        }
 
 -- | Sorted list of the modules that have at least one snippet.
-snippetModulesOf :: Map QName Snippet -> [String]
+snippetModulesOf :: Map NodeRef Snippet -> [String]
 snippetModulesOf snippetMap =
   S.toAscList . S.fromList $
     [ moduleKey qn | qn <- M.keys snippetMap ]
 
 -- | Serialise one module's snippets as a JSON object keyed by the
 -- node's 'hashQName'.
-renderBundleJson :: [(QName, Snippet)] -> String
+renderBundleJson :: [(NodeRef, Snippet)] -> String
 renderBundleJson entries =
   "{" ++ intercalate "," (map renderEntry entries) ++ "}"
   where
@@ -153,7 +152,7 @@ renderBundleJson entries =
 -- 'renderBundleJson''s inputs (node id + source + line) without
 -- building the JSON. Lets the incremental-serialise path skip
 -- rewriting an unchanged bundle.
-snippetBundleEpoch :: [(QName, Snippet)] -> Word64
+snippetBundleEpoch :: [(NodeRef, Snippet)] -> Word64
 snippetBundleEpoch entries =
   hashString $ concat
     [ show (hashQName qn) ++ "\v" ++ show (snippetStartLine sn)

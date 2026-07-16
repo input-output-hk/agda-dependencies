@@ -20,11 +20,7 @@ import Data.GraphViz.Attributes.Colors ( Color(RGB), toWC )
 import Data.GraphViz.Attributes.Complete
   ( Attribute(FillColor, Style), StyleItem(SItem), StyleName(Filled) )
 
-import Agda.Syntax.Abstract.Name ( QName )
-import Agda.Syntax.Internal ( qnameName )
-import Agda.Syntax.Common.Pretty ( prettyShow )
-
-import AgdaDeps.Deps    ( ADDef(..), hashQName, moduleKey )
+import AgdaDeps.Deps    ( ADDef(..), NodeRef(..), hashQName, moduleKey )
 import AgdaDeps.Options ( ColorPalette, DefState(..), colorFor )
 import AgdaDeps.Util    ( parseHexColor )
 
@@ -33,16 +29,17 @@ import AgdaDeps.Util    ( parseHexColor )
 -- for colour lookup; dependency-only nodes (no 'ADDef' of their own)
 -- default to 'Defined'. Failed module names get a synthetic singleton
 -- node coloured by 'colorFailed'.
-renderDot :: ColorPalette -> Map QName DefState -> Set String -> [ADDef] -> TL.Text
+renderDot :: ColorPalette -> Map NodeRef DefState -> Set String -> [ADDef] -> TL.Text
 renderDot palette stateMap failed defs =
   printDotGraph $ buildDotGraph palette stateMap failed defs
 
 -- | DOT node label used for failed-module markers. Stored as the label
 -- so the cluster id and renderer share a single string.
-data DotLabel = DotQ QName | DotFailedModule String
+data DotLabel = DotQ NodeRef | DotFailedModule String
 
 dotLabelText :: DotLabel -> String
-dotLabelText (DotQ qn)             = prettyShow (qnameName qn)
+dotLabelText (DotQ r)              = shortNameOf (nrPretty r)
+  where shortNameOf = reverse . takeWhile (/= '.') . reverse
 dotLabelText (DotFailedModule mod_) = mod_
 
 -- | Cluster key: the lifted owning-module string ('moduleKey'), so
@@ -57,10 +54,10 @@ dotLabelModule (DotFailedModule _)   = Nothing
 failedModuleId :: String -> Node
 failedModuleId m = fromIntegral (hashString ("failed-module:" ++ m))
 
-buildDotGraph :: ColorPalette -> Map QName DefState -> Set String -> [ADDef] -> DotGraph Node
+buildDotGraph :: ColorPalette -> Map NodeRef DefState -> Set String -> [ADDef] -> DotGraph Node
 buildDotGraph palette stateMap failed defs =
   let
-    mkNode' :: QName -> LNode DotLabel
+    mkNode' :: NodeRef -> LNode DotLabel
     mkNode' qn = (hashQName qn, DotQ qn)
 
     mkNodes' :: ADDef -> [LNode DotLabel]

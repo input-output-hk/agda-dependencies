@@ -7,6 +7,33 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-07-16 — `agda-deps` — `--incremental` works on Agda 2.8; node identity is `NodeRef`
+
+The `--incremental` fragment cache was Agda ≥ 2.9 only: it serialised
+`QName`s through Agda's `EmbPrj`, whose byte layer 2.8 does not expose, so
+on 2.8 the flag warned and ran without the fragment cache.
+
+Root cause removed by making node identity a **`NodeRef`** — a precomputed,
+`Data.Binary`-serialisable bundle (`nodeKey` string, hash, `moduleKey`,
+binding line/file, `prettyShow`, and a precomputed `ignoreDef` flag). Every
+downstream pass already consumed the `QName` only through pure projections
+(`nodeKey` / `moduleKey` / `srcLocOf` / `bindingLine`); the one exception was
+`contractIgnoredEdges`, whose `ignoreDependency` (`getConstInfo`) is now
+folded into `NodeRef.nrIgnorable` at the producer boundary (`mkRef`). So no
+pass needs a live `QName`, and a cached fragment round-trips as plain data.
+
+- **Fragment cache works on 2.8 and 2.9 alike** — serialisation is plain
+  `Data.Binary`; the `EmbPrj` wire form and the `FragmentCache` CPP split
+  are gone. `fragmentFormatVersion` bumped 3 → 4.
+- **`ADDef`, `IgnoredEdgeMap`, `MethodProviderMap` are keyed by `NodeRef`.**
+  The `...OfQ` helpers (`nodeKeyOfQ` / `moduleKeyOfQ`) hold the QName-level
+  logic, used only at the producer boundary (dead-private recovery,
+  `collectReExports`).
+- **Output unchanged.** Byte-identical `graph.json` on 2.9 (golden + schema
+  + packed-analytical parity) and identical to the pre-change 2.8 output;
+  cold- and warm-cache runs remain byte-identical. `nodeKeyVersion` is
+  unchanged (3) — the node-key *string* convention did not move.
+
 ## 2026-07-10 — `agda-deps` — tag file-level `{-# OPTIONS #-}` soundness escapes (R15)
 
 Soundness-escape Phase 2, completing the Phase 1 per-def `unsafe` work

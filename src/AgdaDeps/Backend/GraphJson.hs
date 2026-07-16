@@ -46,8 +46,6 @@ import qualified Data.Sequence as Seq
 import Data.Set ( Set )
 import qualified Data.Set as S
 
-import Agda.Syntax.Abstract.Name ( QName )
-import Agda.Syntax.Common.Pretty ( prettyShow )
 import Agda.Utils.Hash ( hashString )
 
 import AgdaDeps.Csr
@@ -55,7 +53,7 @@ import AgdaDeps.Csr
   , encodeInt32LE, encodeInt8LE, encodeFloat32LE, encodeWord64LE
   , dedupSortedInt
   )
-import AgdaDeps.Deps    ( ADDef(..), DefKind(..), DefAccess(..)
+import AgdaDeps.Deps    ( ADDef(..), NodeRef(..), DefKind(..), DefAccess(..)
                         , EdgeProv(..), UnsafeTag(..)
                         , nodeKey, moduleKey, nodeKeyVersion, hashQName, collectAllQNames )
 import BuildInfo        ( buildFingerprint )
@@ -110,7 +108,7 @@ buildExternalsSummary externals defs =
             M.insertWith
               (++)   -- 'new' is always a singleton, so '(++)' == 'head new : old'
               m
-              [shortNameOf (prettyShow (_name d))]
+              [shortNameOf (nrPretty (_name d))]
               acc
         where
           !m     = moduleKey (_name d)
@@ -139,14 +137,14 @@ externalsSummaryJson (ExternalsSummary mods byMod) =
 -- | All the inputs the schema emitter needs.
 data GraphInput = GraphInput
   { giDefs            :: [ADDef]
-  , giStateMap        :: M.Map QName DefState
+  , giStateMap        :: M.Map NodeRef DefState
   , giImportEdges     :: [(String, String)]
   , giSourceFiles     :: [FilePath]
   , giModuleFile      :: M.Map String FilePath
   , giEntryModule     :: Maybe String
   , giExternalModules :: Set String
   , giFailedModules   :: Set String
-  , giPositions       :: M.Map QName Position
+  , giPositions       :: M.Map NodeRef Position
   , giWithSource      :: Bool
   , giSnippetModules  :: [String]
   , giLazy            :: Bool
@@ -201,11 +199,11 @@ data ModuleDetailJson = ModuleDetailJson
 
 -- ** Emission
 
--- | Deterministic definition list shared by both emitters: every QName
+-- | Deterministic definition list shared by both emitters: every NodeRef
 -- in the graph, sorted by 'hashQName' for stable byte output. Keeping it
 -- in one place is what makes 'buildGraphJson' and 'toExpandedGraph' agree
 -- node-for-node.
-graphDefsList :: [ADDef] -> [QName]
+graphDefsList :: [ADDef] -> [NodeRef]
 graphDefsList = sortOn hashQName . collectAllQNames
 
 -- | The module-name node set shared by both emitters: union of def
@@ -235,10 +233,10 @@ buildGraphJson GraphInput{..} =
       -- (1) Definition list ---------------------------------------------
       -- Sorted by hashQName for deterministic byte output across runs;
       -- shared with 'toExpandedGraph' via 'graphDefsList'.
-      defsList :: [QName]
+      defsList :: [NodeRef]
       defsList = graphDefsList giDefs
 
-      -- Edge endpoints index by canonical 'nodeKey' string, not 'QName'
+      -- Edge endpoints index by canonical 'nodeKey' string, not 'NodeRef' identity
       -- 'Ord' (which distinguishes same-key helpers and re-drops edges).
       defKeyIndexMap :: M.Map String Int
       defKeyIndexMap = M.fromList (zip (map nodeKey defsList) [0..])
@@ -268,7 +266,7 @@ buildGraphJson GraphInput{..} =
       nModules :: Int
       nModules = length modules
 
-      moduleOf :: QName -> Int
+      moduleOf :: NodeRef -> Int
       moduleOf qn = case M.lookup (moduleKey qn) moduleIndexMap of
         Just i  -> i
         Nothing -> -1
@@ -277,7 +275,7 @@ buildGraphJson GraphInput{..} =
       defModuleIdxs = [ fromIntegral (moduleOf qn) | qn <- defsList ]
 
       -- (3) Per-def states + positions ---------------------------------
-      defState :: QName -> DefState
+      defState :: NodeRef -> DefState
       defState qn = M.findWithDefault Defined qn giStateMap
 
       -- Per-def state, looked up once and shared by 'defStateBytes' and
@@ -642,8 +640,8 @@ buildGraphJson GraphInput{..} =
 -- * @"externalPostulates": […]@ — for @"external"@ modules that
 --   'ExternalsSummary' tagged. Absent otherwise.
 buildModuleDetails
-  :: [QName]
-  -> (QName -> Int)
+  :: [NodeRef]
+  -> (NodeRef -> Int)
   -> [(Int, [Int])]
   -> [Int8]
   -> [Float]
@@ -655,7 +653,7 @@ buildModuleDetails
   -> [ModuleDetailJson]
 buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
                    externalMods failedMods mExtSummary =
-  let defsArr     :: IM.IntMap QName
+  let defsArr     :: IM.IntMap NodeRef
       defsArr     = IM.fromList (zip [0..] defsList)
 
       statesArr   :: IM.IntMap Int8
@@ -803,11 +801,11 @@ defsObjectJson names mods states xs ys analytical =
 -- | The @--packed-analytical@ @defs@ suffix: per-definition kind / line
 -- / access arrays (always), the type array (under @--with-signatures@),
 -- and the CSR-packed subterm hashes\/depths (under @--with-term-hashes@).
--- Keyed by QName over @defsList@ via the shared 'mkDef*' lookups so it
+-- Keyed by NodeRef over @defsList@ via the shared 'mkDef*' lookups so it
 -- agrees with the expanded form node-for-node; @types@=@null@ /
 -- @access@=@0@ for QNames with no local 'ADDef' match expanded's
 -- omission of those keys.
-packedAnalyticalJson :: [QName] -> [ADDef] -> String
+packedAnalyticalJson :: [NodeRef] -> [ADDef] -> String
 packedAnalyticalJson defsList defs =
   ",\"kinds\":"  ++ jsB64Int8  kinds
   ++ ",\"lines\":"  ++ jsB64Int32 lns
@@ -942,51 +940,51 @@ encodeUnsafeByte = foldl' (\acc t -> acc .|. tagBit t) 0
     tagBit UNonTerminating = 1
     tagBit UTrustMe        = 2
 
--- ** Per-QName analytical lookups (shared by packed-analytical + expanded)
+-- ** Per-NodeRef analytical lookups (shared by packed-analytical + expanded)
 --
--- Both forms key these by 'QName' over the same @defsList@, so a QName
+-- Both forms key these by 'NodeRef' over the same @defsList@, so a NodeRef
 -- with no local 'ADDef' gets the same default in both — this is what
 -- keeps packed-analytical node-for-node identical to expanded. Do not
 -- inline these back per-form.
 
--- | Structural kind by QName; 'DKOther' for QNames with no 'ADDef'.
-mkDefKind :: [ADDef] -> (QName -> DefKind)
+-- | Structural kind by NodeRef; 'DKOther' for QNames with no 'ADDef'.
+mkDefKind :: [ADDef] -> (NodeRef -> DefKind)
 mkDefKind defs =
   let !m = M.fromList [ (_name d, _kind d) | d <- defs ]
   in \qn -> M.findWithDefault DKOther qn m
 
--- | Source line by QName; 'Nothing' for QNames with no 'ADDef' / no line.
-mkDefLine :: [ADDef] -> (QName -> Maybe Int)
+-- | Source line by NodeRef; 'Nothing' for QNames with no 'ADDef' / no line.
+mkDefLine :: [ADDef] -> (NodeRef -> Maybe Int)
 mkDefLine defs =
   let !m = M.fromList [ (_name d, ln) | d <- defs, Just ln <- [_line d] ]
   in (`M.lookup` m)
 
--- | Access by QName; 'Nothing' for QNames with no 'ADDef'.
-mkDefAccess :: [ADDef] -> (QName -> Maybe DefAccess)
+-- | Access by NodeRef; 'Nothing' for QNames with no 'ADDef'.
+mkDefAccess :: [ADDef] -> (NodeRef -> Maybe DefAccess)
 mkDefAccess defs =
   let !m = M.fromList [ (_name d, a) | d <- defs, Just a <- [_access d] ]
   in (`M.lookup` m)
 
--- | Rendered signature by QName ('--with-signatures'); 'Nothing' otherwise.
-mkDefSig :: [ADDef] -> (QName -> Maybe String)
+-- | Rendered signature by NodeRef ('--with-signatures'); 'Nothing' otherwise.
+mkDefSig :: [ADDef] -> (NodeRef -> Maybe String)
 mkDefSig defs =
   let !m = M.fromList [ (_name d, s) | d <- defs, Just s <- [_sig d] ]
   in (`M.lookup` m)
 
--- | Subterm-hash map by QName ('--with-term-hashes'); empty when off.
-mkDefHashes :: [ADDef] -> M.Map QName [Word64]
+-- | Subterm-hash map by NodeRef ('--with-term-hashes'); empty when off.
+mkDefHashes :: [ADDef] -> M.Map NodeRef [Word64]
 mkDefHashes defs =
   M.fromList [ (_name d, hs) | d <- defs, Just hs <- [_subtermHashes d] ]
 
--- | Subterm-depth map by QName, parallel to 'mkDefHashes'.
-mkDefDepths :: [ADDef] -> M.Map QName [Int]
+-- | Subterm-depth map by NodeRef, parallel to 'mkDefHashes'.
+mkDefDepths :: [ADDef] -> M.Map NodeRef [Int]
 mkDefDepths defs =
   M.fromList [ (_name d, ds) | d <- defs, Just ds <- [_subtermDepths d] ]
 
--- | Soundness-escape tags by QName; @[]@ for QNames with no 'ADDef'.
+-- | Soundness-escape tags by NodeRef; @[]@ for QNames with no 'ADDef'.
 -- Shared by packed-analytical and expanded so the two agree
 -- node-for-node.
-mkDefUnsafe :: [ADDef] -> (QName -> [UnsafeTag])
+mkDefUnsafe :: [ADDef] -> (NodeRef -> [UnsafeTag])
 mkDefUnsafe defs =
   let !m = M.fromList [ (_name d, _unsafe d) | d <- defs ]
   in \qn -> M.findWithDefault [] qn m
@@ -1364,10 +1362,10 @@ buildExpandedJson gi =
 -- check ('validateExpanded').
 toExpandedGraph :: GraphInput -> ExpandedGraph
 toExpandedGraph GraphInput{..} =
-  let defsList :: [QName]
+  let defsList :: [NodeRef]
       defsList = graphDefsList giDefs
 
-      defIndexMap :: M.Map QName Int
+      defIndexMap :: M.Map NodeRef Int
       defIndexMap = M.fromList (zip defsList [0..])
 
       -- Node set as wire-name strings. An edge survives iff its
@@ -1375,10 +1373,10 @@ toExpandedGraph GraphInput{..} =
       defKeySet :: S.Set String
       defKeySet = S.fromList (map nodeKey defsList)
 
-      defState :: QName -> DefState
+      defState :: NodeRef -> DefState
       defState qn = M.findWithDefault Defined qn giStateMap
 
-      -- Per-QName analytical lookups, shared with the packed-analytical
+      -- Per-NodeRef analytical lookups, shared with the packed-analytical
       -- path so the two forms agree node-for-node (incl. the default for
       -- QNames with no local ADDef).
       defKind   = mkDefKind   giDefs
@@ -1469,10 +1467,10 @@ toExpandedGraph GraphInput{..} =
       -- @"definitionSubtermHashes"@ / @"definitionSubtermDepths"@:
       -- arrays parallel to @"definitions"@, one @[Word64]@ / @[Int]@ per
       -- def's walked subterms. Both absent under no @--with-term-hashes@.
-      defHashesByQ :: M.Map QName [Word64]
+      defHashesByQ :: M.Map NodeRef [Word64]
       defHashesByQ = mkDefHashes giDefs
 
-      defDepthsByQ :: M.Map QName [Int]
+      defDepthsByQ :: M.Map NodeRef [Int]
       defDepthsByQ = mkDefDepths giDefs
 
   -- Assemble the typed wire value; encoding + structural validation are
