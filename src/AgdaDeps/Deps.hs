@@ -1138,17 +1138,35 @@ ignoreDependency qn = do
   def <- getConstInfo qn
   return $ ignoreDef def
 
+-- | True for the definitions Agda synthesises for a @variable@ block:
+-- the @GeneralizeTel@ record that bundles a generalised telescope, its
+-- @mkGeneralizeTel@ constructor, and the @generalizedField-*@
+-- projections. None are user-written, so they are dropped from the graph.
+--
+-- Agda 2.9 qualifies every one with a @NoName@ segment that 'prettyShow'
+-- renders as a leading @.@ (so the full name contains @..@); Agda 2.8
+-- spells @GeneralizeTel@ / @mkGeneralizeTel@ /without/ it (only the field
+-- projections keep the @.@). Matching the stable generated base name on
+-- 'qnameName' catches both spellings; the @..@ test is kept for any other
+-- @NoName@-qualified generated def. Pinned by @test/Test.agda@'s
+-- @variable a b : Set@ block (present on 2.8 and 2.9).
+isGeneralizeName :: QName -> Bool
+isGeneralizeName qn =
+     ".." `isInfixOf` prettyShow qn
+  || "GeneralizeTel" `isInfixOf` n
+  || "generalizedField-" `isInfixOf` n
+  where n = prettyShow (qnameName qn)
+
 ignoreDef :: Definition -> Bool
 -- Module-instantiation copies (Agda's 'defCopy' flag): alias nodes
 -- re-exporting the real definition under an importing module's
 -- namespace. Catches all kinds (Function/Record/Datatype/Constructor),
 -- not just the Function case 'funInline' covers.
 ignoreDef Defn{..} | defCopy = True
--- Auto-generated names for `variable` blocks (the `GeneralizeTel`
+-- Auto-generated names for `variable` blocks: the `GeneralizeTel`
 -- record, its `mkGeneralizeTel` constructor, and `generalizedField-*`
--- projections), identified by the anonymous NoName segment that
--- 'prettyShow' renders as a literal "..".
-ignoreDef Defn{..} | ".." `isInfixOf` prettyShow defName = True
+-- projections. See 'isGeneralizeName' for the 2.8/2.9 naming split.
+ignoreDef Defn{..} | isGeneralizeName defName = True
 ignoreDef Defn{..} = case theDef of
 
   -- Pattern-lambda / with-generated / Kan-op functions.

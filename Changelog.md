@@ -7,6 +7,22 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-07-16 — `agda-deps` — filter `variable`-block names on Agda 2.8 too
+
+`ignoreDef` dropped Agda's synthesised `variable`-block definitions
+(`GeneralizeTel` record, `mkGeneralizeTel` constructor, `generalizedField-*`
+projections) by testing for the `NoName` `..` marker in `prettyShow`. Agda 2.9
+qualifies all of them with that marker, but **2.8 names the record and
+constructor without it** (only the field projections keep it), so on 2.8 two
+extra nodes (`Test.GeneralizeTel` / `Test.mkGeneralizeTel`) leaked into the
+graph — the sole remaining 2.8-vs-2.9 output divergence.
+
+- **`isGeneralizeName`** now matches the stable generated base name on
+  `qnameName` (`GeneralizeTel` / `generalizedField-`) in addition to the `..`
+  marker, catching both spellings. Agda 2.8 and 2.9 now produce byte-identical
+  graphs (verified: both match the golden). Pinned by `test/Test.agda`'s
+  `variable a b : Set` block.
+
 ## 2026-07-16 — `agda-deps` — `--incremental` works on Agda 2.8; node identity is `NodeRef`
 
 The `--incremental` fragment cache was Agda ≥ 2.9 only: it serialised
