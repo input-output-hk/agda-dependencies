@@ -17,3 +17,6 @@ test/deps.html
 
 # Local Claude Code agent definitions
 .claude/
+
+# Local Claude Code doc-audit prompt
+ClaudeDocCheck.md

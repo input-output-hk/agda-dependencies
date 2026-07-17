@@ -1,34 +1,51 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Examples · agda-deps</title>
-<link rel="stylesheet" href="assets/pico.min.css">
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="theme/css/style.css">
 </head>
 <body>
-<header class="topbar"><div class="bar"><a class="brand" href="index.html">agda-deps</a><nav><a href="index.html">Home</a><a href="guide.html">Guide</a><a href="examples.html" class="active">Examples</a><a href="views/index.html">Views ↗</a><a href="changelog.html">Changelog</a><a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a></nav></div></header>
-<main><div class="layout"><aside class="toc"><div class="toc-inner"><div class="toc-title">On this page</div><nav><a class="lvl2" href="#setup">Setup</a><a class="lvl2" href="#dot-output-default">DOT output (default)</a><a class="lvl2" href="#html-output--interactive-viewer">HTML output — interactive viewer</a><a class="lvl2" href="#json-output--for-downstream-tooling">JSON output — for downstream tooling</a><a class="lvl2" href="#--no-externals--drop-stdlib-from-the-graph">--no-externals — drop stdlib from the graph</a><a class="lvl2" href="#--keep-going--survive-type-check-errors">--keep-going — survive type-check errors</a><a class="lvl2" href="#--skip-agda--module-level-graph-no-type-checking">--skip-agda — module-level graph, no type-checking</a><a class="lvl2" href="#--with-source----lazy--full-html-viewer-at-scale">--with-source + --lazy — full HTML viewer at scale</a><a class="lvl2" href="#--with-term-hashes--subterm-fingerprints">--with-term-hashes — subterm fingerprints</a><a class="lvl2" href="#--incremental--cache-per-module-work-across-rebuilds">--incremental — cache per-module work across rebuilds</a><a class="lvl2" href="#--packed-analytical--compact-json-without-losing-fidelity">--packed-analytical — compact JSON without losing fidelity</a></nav></div></aside><div class="prose"><h1 id="examples">Examples</h1>
+<header class="topbar"><div class="bar">
+<a class="brand" href="index.html">agda-deps</a>
+<nav>
+<a href="index.html">Home</a>
+<a href="guide.html">Guide</a>
+<a href="examples.html" class="active">Examples</a>
+<a href="views/index.html">Views ↗</a>
+<a href="changelog.html">Changelog</a>
+<a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a>
+</nav>
+</div></header>
+<main><div class="layout">
+<aside class="toc"><div class="toc-inner">
+<div class="toc-title">On this page</div>
+<nav><a class="lvl2" href="#setup">Setup</a><a class="lvl2" href="#dot-output-default">DOT output (default)</a><a class="lvl2" href="#html-output-interactive-viewer">HTML output — interactive viewer</a><a class="lvl2" href="#json-output-for-downstream-tooling">JSON output — for downstream tooling</a><a class="lvl2" href="#-no-externals-drop-stdlib-from-the-graph">--no-externals — drop stdlib from the graph</a><a class="lvl2" href="#-keep-going-survive-type-check-errors">--keep-going — survive type-check errors</a><a class="lvl2" href="#-skip-agda-module-level-graph-no-type-checking">--skip-agda — module-level graph, no type-checking</a><a class="lvl2" href="#-with-source-lazy-full-html-viewer-at-scale">--with-source + --lazy — full HTML viewer at scale</a><a class="lvl2" href="#-with-term-hashes-subterm-fingerprints">--with-term-hashes — subterm fingerprints</a><a class="lvl2" href="#-incremental-cache-per-module-work-across-rebuilds">--incremental — cache per-module work across rebuilds</a><a class="lvl2" href="#-packed-analytical-compact-json-without-losing-fidelity">--packed-analytical — compact JSON without losing fidelity</a></nav>
+</div></aside>
+<div class="prose"><h1 id="examples">Examples</h1>
 <p>Runnable recipes for <code>agda-deps</code>. Full flag reference: <a href="guide.html">README.md</a>.</p>
 <p><code>test/Test.agda</code> is the bundled fixture (one defined function, one postulate, one
 hole). Larger examples use a generic <code>path/to/your-project/…</code> — substitute your
 own include path and entry module.</p>
 <h2 id="setup">Setup</h2>
-<pre class="bash"><code>cabal build
-mkdir -p out</code></pre>
+<pre><code class="language-bash">cabal build
+mkdir -p out
+</code></pre>
 <p><code>agda-deps</code> is an Agda <code>Backend</code>, so the command line follows Agda's shape:
 <code>-i INCLUDE_PATH … &lt;entry-module&gt;</code>. When invoked through cabal, everything before
 <code>--</code> is for cabal; everything after is for the backend and Agda.</p>
 <h2 id="dot-output-default">DOT output (default)</h2>
-<pre class="bash"><code>cabal run agda-deps -- -i test/ -o out/ test/Test.agda
-dot -Tsvg out/deps.dot -o out/deps.svg</code></pre>
+<pre><code class="language-bash">cabal run agda-deps -- -i test/ -o out/ test/Test.agda
+dot -Tsvg out/deps.dot -o out/deps.svg
+</code></pre>
 <p>Right when the consumer is another graph tool (Graphviz, dot2tex, anything
 reading <code>digraph</code> syntax).</p>
-<h2 id="html-output--interactive-viewer">HTML output — interactive viewer</h2>
-<pre class="bash"><code>cabal run agda-deps -- --format=html --view=module-dag-pods \
+<h2 id="html-output-interactive-viewer">HTML output — interactive viewer</h2>
+<pre><code class="language-bash">cabal run agda-deps -- --format=html --view=module-dag-pods \
   -i test/ -o out/ test/Test.agda
-xdg-open out/deps.html</code></pre>
+xdg-open out/deps.html
+</code></pre>
 <p><code>module-dag-pods</code> (the default) is a top-down DAG of expandable module pods — the
 right start for projects under ~10k modules. Switch views:</p>
 <ul>
@@ -37,67 +54,82 @@ right start for projects under ~10k modules. Switch views:</p>
 <li><code>--view=ide-three-pane</code> / <code>--view=source-centric</code> — definition-level; want <code>--with-source</code>.</li>
 <li><code>--view=critical-path-holes</code> / <code>--view=progress-dashboard</code> — for in-progress proofs.</li>
 </ul>
-<h2 id="json-output--for-downstream-tooling">JSON output — for downstream tooling</h2>
-<pre class="bash"><code># Compact: base64 CSR. Right for huge graphs.
+<h2 id="json-output-for-downstream-tooling">JSON output — for downstream tooling</h2>
+<pre><code class="language-bash"># Compact: base64 CSR. Right for huge graphs.
 cabal run agda-deps -- --format=json --json-mode=packed -i test/ -o out/ test/Test.agda
 
 # Expanded: arrays of records, no decoder needed.
-cabal run agda-deps -- --format=json --json-mode=expanded -i test/ -o out/ test/Test.agda</code></pre>
+cabal run agda-deps -- --format=json --json-mode=expanded -i test/ -o out/ test/Test.agda
+</code></pre>
 <p><code>packed</code> (default) is ~5× smaller on large projects but needs a base64 + Int32-LE
 decoder; use <code>expanded</code> to consume from Python / TypeScript / shell.</p>
-<h2 id="--no-externals--drop-stdlib-from-the-graph"><code>--no-externals</code> — drop stdlib from the graph</h2>
-<pre class="bash"><code>cabal run agda-deps -- --format=json --json-mode=expanded --no-externals \
-  -i test/ -o out/ test/Test.agda</code></pre>
+<h2 id="-no-externals-drop-stdlib-from-the-graph"><code>--no-externals</code> — drop stdlib from the graph</h2>
+<pre><code class="language-bash">cabal run agda-deps -- --format=json --json-mode=expanded --no-externals \
+  -i test/ -o out/ test/Test.agda
+</code></pre>
 <p>Strips every module outside the project root (<code>Agda.Builtin</code>, <code>Data</code>, …). Cleaner
 than curating <code>--exclude</code> lists. The JSON keeps an <code>externals_summary</code> recording
 what was dropped.</p>
-<h2 id="--keep-going--survive-type-check-errors"><code>--keep-going</code> — survive type-check errors</h2>
-<pre class="bash"><code>cabal run agda-deps -- --keep-going -i test/ -o out/ test/Test.agda</code></pre>
+<h2 id="-keep-going-survive-type-check-errors"><code>--keep-going</code> — survive type-check errors</h2>
+<pre><code class="language-bash">cabal run agda-deps -- --keep-going -i test/ -o out/ test/Test.agda
+</code></pre>
 <p>Catches the <code>TCErr</code> and proceeds; failing modules surface as <code>F</code>-state markers.
 Use when commits contain <code>?</code> holes, when onboarding a broken project, or when one
 WIP module shouldn't hide the rest. Pair with <code>--lenient-imports</code> if Agda refuses
 to <em>import</em> a module with open metas.</p>
-<h2 id="--skip-agda--module-level-graph-no-type-checking"><code>--skip-agda</code> — module-level graph, no type-checking</h2>
-<pre class="bash"><code>cabal run agda-deps -- --skip-agda --format=html -i test/ -o out/ test/Test.agda</code></pre>
+<h2 id="-skip-agda-module-level-graph-no-type-checking"><code>--skip-agda</code> — module-level graph, no type-checking</h2>
+<pre><code class="language-bash">cabal run agda-deps -- --skip-agda --format=html -i test/ -o out/ test/Test.agda
+</code></pre>
 <p>Scans <code>module …</code> / <code>import …</code> lines and emits a module-level graph in
 milliseconds. Right when the project doesn't type-check, when you only care about
 the module DAG, or for a 1M+ module corpus. No D/P/H classification, no snippets,
 no definition-level edges.</p>
-<h2 id="--with-source----lazy--full-html-viewer-at-scale"><code>--with-source</code> + <code>--lazy</code> — full HTML viewer at scale</h2>
-<pre class="bash"><code>cabal run agda-deps -- --format=html --view=ide-three-pane --with-source --lazy \
+<h2 id="-with-source-lazy-full-html-viewer-at-scale"><code>--with-source</code> + <code>--lazy</code> — full HTML viewer at scale</h2>
+<pre><code class="language-bash">cabal run agda-deps -- --format=html --view=ide-three-pane --with-source --lazy \
   -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md
-cd out/ &amp;&amp; python3 -m http.server 8000</code></pre>
+cd out/ &amp;&amp; python3 -m http.server 8000
+</code></pre>
 <p><code>--with-source</code> embeds each definition's highlighted source (clicking a leaf
 opens it in a drawer); <code>--lazy</code> splits output into <code>graph.json</code> + per-module files
 so the initial load stays small. Lazy mode <strong>requires HTTP serving</strong>. Combine for
 anything bigger than ~5k defs; below that, inline HTML loads instantly.</p>
-<h2 id="--with-term-hashes--subterm-fingerprints"><code>--with-term-hashes</code> — subterm fingerprints</h2>
-<pre class="bash"><code>cabal run agda-deps -- --format=json --json-mode=expanded \
+<h2 id="-with-term-hashes-subterm-fingerprints"><code>--with-term-hashes</code> — subterm fingerprints</h2>
+<pre><code class="language-bash">cabal run agda-deps -- --format=json --json-mode=expanded \
   --with-term-hashes --min-term-depth=3 \
-  -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md</code></pre>
+  -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md
+</code></pre>
 <p>Emits canonical-form hashes for every elaborated subterm. Off by default (adds a
 Term walk, ~50–100% wire growth). <code>--min-term-depth=3</code> (the default) cuts trivial
 <code>Var</code>/<code>Lit</code>/<code>Sort</code> noise; <code>1</code> disables the filter.</p>
-<h2 id="--incremental--cache-per-module-work-across-rebuilds"><code>--incremental</code> — cache per-module work across rebuilds</h2>
-<pre class="bash"><code># First run: full work, writes out/.agda-deps-cache/. Later runs: unchanged
+<h2 id="-incremental-cache-per-module-work-across-rebuilds"><code>--incremental</code> — cache per-module work across rebuilds</h2>
+<pre><code class="language-bash"># First run: full work, writes out/.agda-deps-cache/. Later runs: unchanged
 # modules served from cache, no-op rebuilds skip re-emitting output.
 cabal run agda-deps -- --incremental --format=json --json-mode=expanded \
-  -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md</code></pre>
+  -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md
+</code></pre>
 <p>Two cache layers keyed on the interface hash: a <strong>fragment cache</strong> skips the
 per-definition walk, and an <strong>incremental-serialise</strong> layer skips rewriting
 unchanged output (whole file on a no-op; in <code>--lazy</code> mode, only changed
 <code>modules/&lt;M&gt;.json</code>). Output is byte-identical. Requires Agda ≥ 2.8; disabled
 under <code>--keep-going</code>; <code>--cache-dir=DIR</code> relocates the cache. The dominant warm
 rebuild cost is Agda's own interface load, which a backend can't avoid.</p>
-<h2 id="--packed-analytical--compact-json-without-losing-fidelity"><code>--packed-analytical</code> — compact JSON without losing fidelity</h2>
-<pre class="bash"><code>cabal run agda-deps -- --format=json --json-mode=packed --packed-analytical \
+<h2 id="-packed-analytical-compact-json-without-losing-fidelity"><code>--packed-analytical</code> — compact JSON without losing fidelity</h2>
+<pre><code class="language-bash">cabal run agda-deps -- --format=json --json-mode=packed --packed-analytical \
   --with-signatures --with-term-hashes \
-  -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md</code></pre>
+  -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md
+</code></pre>
 <p>Adds the per-def analytical fields (kind, line, access, type, subterm hashes)
 back to packed's <code>defs</code> as base64 typed arrays, so a downstream tool keeps
 packed's size win <em>and</em> expanded's fidelity — a decoded graph is node-for-node
-identical to expanded. Off by default; only affects <code>--json-mode=packed</code>.</p>
-</div></div></main>
-<footer class="site-footer"><div class="wrap"><div><a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div><div class="muted">Built from the repository’s Markdown by <code>docs/build.py</code>. <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div></div></footer>
+identical to expanded. Off by default; only affects <code>--json-mode=packed</code>.</p></div>
+</div>
+</main>
+<footer class="site-footer"><div class="wrap">
+<div>
+<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div>
+<div class="muted">Built from the repository’s Markdown with
+<a href="https://getpelican.com">Pelican</a>.
+<a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div>
+</div></footer>
 </body>
 </html>

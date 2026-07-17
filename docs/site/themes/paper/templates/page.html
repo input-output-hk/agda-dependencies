@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% set active_page = page.save_as %}
+{% block title %}{{ page.title }} · {{ SITENAME }}{% endblock %}
+{% block main %}
+<div class="layout">
+{% if page.toc_sidebar %}
+<aside class="toc"><div class="toc-inner">
+<div class="toc-title">On this page</div>
+<nav>{{ page.toc_sidebar | safe }}</nav>
+</div></aside>
+{% endif %}
+<div class="prose">{{ page.content }}</div>
+</div>
+{% endblock %}

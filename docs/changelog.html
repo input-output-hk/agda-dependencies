@@ -1,21 +1,35 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Changelog · agda-deps</title>
-<link rel="stylesheet" href="assets/pico.min.css">
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="theme/css/style.css">
 </head>
 <body>
-<header class="topbar"><div class="bar"><a class="brand" href="index.html">agda-deps</a><nav><a href="index.html">Home</a><a href="guide.html">Guide</a><a href="examples.html">Examples</a><a href="views/index.html">Views ↗</a><a href="changelog.html" class="active">Changelog</a><a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a></nav></div></header>
-<main><div class="layout"><aside class="toc"><div class="toc-inner"><div class="toc-title">On this page</div><nav><a class="lvl2" href="#2026-07-16--agda-deps--filter-variable-block-names-on-agda-28-too">2026-07-16 — agda-deps — filter variable-block names on Agda 2.8 too</a><a class="lvl2" href="#2026-07-16--agda-deps----incremental-works-on-agda-28-node-identity-is-noderef">2026-07-16 — agda-deps — --incremental works on Agda 2.8; node identity is NodeRef</a><a class="lvl2" href="#2026-07-10--agda-deps--tag-file-level---options---soundness-escapes-r15">2026-07-10 — agda-deps — tag file-level {-# OPTIONS #-} soundness escapes (R15)</a><a class="lvl2" href="#2026-07-09--agda-deps--tag-soundness-escapes-beyond-postulates-unsafe">2026-07-09 — agda-deps — tag soundness escapes beyond postulates (unsafe)</a><a class="lvl2" href="#2026-07-09--agda-deps--emit-renaming-aliases-on-public-re-exports">2026-07-09 — agda-deps — emit renaming aliases on public re-exports</a><a class="lvl2" href="#2026-06-30--agda-deps--fix-wiki-backlinks-view-backforward-navigation">2026-06-30 — agda-deps — fix: wiki-backlinks view back/forward navigation</a><a class="lvl2" href="#2026-06-30--agda-deps--lift-anonymous-module-definitions-into-their-parent-nodekeyversion-3">2026-06-30 — agda-deps — lift anonymous-module definitions into their parent (nodeKeyVersion 3)</a><a class="lvl2" href="#2026-06-18--agda-deps--rebuild-memory-reductions">2026-06-18 — agda-deps — rebuild-memory reductions</a><a class="lvl2" href="#2026-06-13--agda-deps----packed-analytical-consumer-usable-packed-form">2026-06-13 — agda-deps — --packed-analytical (consumer-usable packed form)</a><a class="lvl2" href="#2026-06-13--agda-deps--incremental-serialise-p2-cache-gc----cache-dir-re-export-hub-externals">2026-06-13 — agda-deps — incremental serialise (P2), cache GC + --cache-dir, re-export-hub externals</a><a class="lvl3" href="#incremental-serialise-p2">Incremental serialise (P2)</a><a class="lvl3" href="#fragment-cache-gc----cache-dir">Fragment cache GC + --cache-dir</a><a class="lvl3" href="#classifyexternalmodules-sees-re-export-hubs">classifyExternalModules sees re-export hubs</a><a class="lvl2" href="#2026-06-12--agda-deps----keep-going-hardening-a-graph-is-always-emitted">2026-06-12 — agda-deps — --keep-going hardening: a graph is always emitted</a><a class="lvl2" href="#2026-06-12--agda-deps----incremental-per-module-fragment-cache">2026-06-12 — agda-deps — --incremental: per-module fragment cache</a><a class="lvl2" href="#2026-06-12--agda-deps--golden-snapshot-regenerated-from-a-cold-run">2026-06-12 — agda-deps — golden snapshot regenerated from a cold run</a><a class="lvl2" href="#2026-06-12--agda-deps--expanded-graph-invariants--golden-snapshot-phase-3">2026-06-12 — agda-deps — expanded-graph invariants + golden snapshot (phase 3)</a><a class="lvl2" href="#2026-06-12--agda-deps--expanded-emission-routed-through-the-schema-source-of-truth-phase-2">2026-06-12 — agda-deps — expanded emission routed through the schema source of truth (phase 2)</a><a class="lvl2" href="#2026-06-12--agda-deps--expanded-schema-single-source-of-truth--drift-check-phase-1">2026-06-12 — agda-deps — expanded-schema single source of truth + drift check (phase 1)</a><a class="lvl2" href="#2026-06-12--agda-deps----version-reports-the-build-fingerprint-install-recipe">2026-06-12 — agda-deps — --version reports the build fingerprint; install recipe</a><a class="lvl2" href="#2026-06-05--agda-deps--build-provenance-stamped-into-graphjson">2026-06-05 — agda-deps — build provenance stamped into graph.json</a><a class="lvl2" href="#2026-06-05--agda-deps--same-named-helpers-no-longer-collapse-e1-node-collision">2026-06-05 — agda-deps — same-named helpers no longer collapse (E1 node collision)</a><a class="lvl2" href="#2026-06-05--agda-deps--opt-in-normalised--implicit-signatures">2026-06-05 — agda-deps — opt-in normalised / implicit signatures</a><a class="lvl2" href="#2026-06-04--agda-deps--rendered-type-signatures---with-signatures">2026-06-04 — agda-deps — rendered type signatures (--with-signatures)</a><a class="lvl2" href="#2026-06-01--agda-deps----agda-html-dir--sunburst-open-source">2026-06-01 — agda-deps — --agda-html-dir + sunburst &quot;Open source&quot;</a><a class="lvl2" href="#2026-05-29--agda-deps----lenient-imports-docs---resolve-deps-partial---keep-going-emission">2026-05-29 — agda-deps — --lenient-imports docs, --resolve-deps, partial --keep-going emission</a><a class="lvl3" href="#--lenient-imports----safe-incompatibility-documented">--lenient-imports × --safe incompatibility documented</a><a class="lvl3" href="#--resolve-deps-flag">--resolve-deps flag</a><a class="lvl3" href="#partial-def-level-emission-under---keep-going">Partial def-level emission under --keep-going</a><a class="lvl2" href="#2026-05-29--agda-deps--remove-the-14-view-shortcut-boolean-flags">2026-05-29 — agda-deps — remove the 14 view-shortcut boolean flags</a><a class="lvl2" href="#2026-05-28--agda-deps--round-6-p3-ast-subterm-fingerprinting">2026-05-28 — agda-deps — round-6 P3 (AST subterm fingerprinting)</a><a class="lvl2" href="#2026-05-27--agda-deps--yaml-config-agda-depsyml">2026-05-27 — agda-deps — YAML config (.agda-deps.yml)</a><a class="lvl2" href="#2026-05-27--agda-deps--edge-provenance-tagging">2026-05-27 — agda-deps — edge-provenance tagging</a><a class="lvl2" href="#2026-05-27--agda-deps--lazy-mode-placeholder-detail-files-for-modules-with-no-kept-defs">2026-05-27 — agda-deps — lazy-mode placeholder detail files for modules with no kept defs</a><a class="lvl2" href="#2026-05-26--agda-deps----no-externals-actually-drops-externals--externals_summary">2026-05-26 — agda-deps — --no-externals actually drops externals + externals_summary</a><a class="lvl3" href="#--no-externals-actually-drops-externals">--no-externals actually drops externals</a><a class="lvl3" href="#externals_summary-top-level-field">externals_summary top-level field</a><a class="lvl2" href="#2026-05-26--agda-deps--per-definition-line-access-instance-reverse-edges">2026-05-26 — agda-deps — per-definition line, access, instance reverse edges</a><a class="lvl2" href="#2026-05-25--agda-deps--node-identity-and-dead-private-recovery-fixes">2026-05-25 — agda-deps — node-identity and dead-private recovery fixes</a><a class="lvl2" href="#2026-05-23--feature-batch-for-re-exports--kind--edge-contraction">2026-05-23 — Feature batch for re-exports / kind / edge contraction</a><a class="lvl3" href="#edge-contraction-through-ignored-defs">Edge contraction through ignored defs</a><a class="lvl3" href="#kind-discriminator-on-definitions">kind discriminator on definitions</a><a class="lvl3" href="#reexports-in-expanded-json">reexports[] in expanded JSON</a><a class="lvl2" href="#2026-05-22--g12--external-feature-request-batch">2026-05-22 — G12 · external feature-request batch</a><a class="lvl2" href="#g11----skip-agda">G11 — --skip-agda</a><a class="lvl2" href="#g10--scaling-to-1m-defs--100k-modules">G10 — Scaling to ~1M defs / 100k modules</a><a class="lvl2" href="#g9--multi-view-html-system">G9 — Multi-view HTML system</a><a class="lvl2" href="#g8--custom---help-agdadepshelp">G8 — Custom --help (AgdaDeps.Help)</a><a class="lvl2" href="#g7--partial-compilation-under---keep-going">G7 — Partial compilation under --keep-going</a><a class="lvl2" href="#g6--auto-discover-agda-lib-for-non-cwd-invocations">G6 — Auto-discover .agda-lib for non-cwd invocations</a><a class="lvl2" href="#g5--bump-to-agda-29">G5 — Bump to Agda 2.9</a><a class="lvl2" href="#g4--linked-source-view---with-source">G4 — Linked source view (--with-source)</a><a class="lvl2" href="#g3--node-colouring-by-state">G3 — Node colouring by state</a><a class="lvl2" href="#g2--html-interactive-backend">G2 — HTML interactive backend</a><a class="lvl2" href="#g1--remove-nix-scaffolding">G1 — Remove nix scaffolding</a></nav></div></aside><div class="prose"><h1 id="changelog">Changelog</h1>
+<header class="topbar"><div class="bar">
+<a class="brand" href="index.html">agda-deps</a>
+<nav>
+<a href="index.html">Home</a>
+<a href="guide.html">Guide</a>
+<a href="examples.html">Examples</a>
+<a href="views/index.html">Views ↗</a>
+<a href="changelog.html" class="active">Changelog</a>
+<a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a>
+</nav>
+</div></header>
+<main><div class="layout">
+<aside class="toc"><div class="toc-inner">
+<div class="toc-title">On this page</div>
+<nav><a class="lvl2" href="#2026-07-16-agda-deps-filter-variable-block-names-on-agda-28-too">2026-07-16 — agda-deps — filter variable-block names on Agda 2.8 too</a><a class="lvl2" href="#2026-07-16-agda-deps-incremental-works-on-agda-28-node-identity-is-noderef">2026-07-16 — agda-deps — --incremental works on Agda 2.8; node identity is NodeRef</a><a class="lvl2" href="#2026-07-10-agda-deps-tag-file-level-options-soundness-escapes-r15">2026-07-10 — agda-deps — tag file-level {-# OPTIONS #-} soundness escapes (R15)</a><a class="lvl2" href="#2026-07-09-agda-deps-tag-soundness-escapes-beyond-postulates-unsafe">2026-07-09 — agda-deps — tag soundness escapes beyond postulates (unsafe)</a><a class="lvl2" href="#2026-07-09-agda-deps-emit-renaming-aliases-on-public-re-exports">2026-07-09 — agda-deps — emit renaming aliases on public re-exports</a><a class="lvl2" href="#2026-06-30-agda-deps-fix-wiki-backlinks-view-backforward-navigation">2026-06-30 — agda-deps — fix: wiki-backlinks view back/forward navigation</a><a class="lvl2" href="#2026-06-30-agda-deps-lift-anonymous-module-definitions-into-their-parent-nodekeyversion-3">2026-06-30 — agda-deps — lift anonymous-module definitions into their parent (nodeKeyVersion 3)</a><a class="lvl2" href="#2026-06-18-agda-deps-rebuild-memory-reductions">2026-06-18 — agda-deps — rebuild-memory reductions</a><a class="lvl2" href="#2026-06-13-agda-deps-packed-analytical-consumer-usable-packed-form">2026-06-13 — agda-deps — --packed-analytical (consumer-usable packed form)</a><a class="lvl2" href="#2026-06-13-agda-deps-incremental-serialise-p2-cache-gc-cache-dir-re-export-hub-externals">2026-06-13 — agda-deps — incremental serialise (P2), cache GC + --cache-dir, re-export-hub externals</a><a class="lvl3" href="#incremental-serialise-p2">Incremental serialise (P2)</a><a class="lvl3" href="#fragment-cache-gc-cache-dir">Fragment cache GC + --cache-dir</a><a class="lvl3" href="#classifyexternalmodules-sees-re-export-hubs">classifyExternalModules sees re-export hubs</a><a class="lvl2" href="#2026-06-12-agda-deps-keep-going-hardening-a-graph-is-always-emitted">2026-06-12 — agda-deps — --keep-going hardening: a graph is always emitted</a><a class="lvl2" href="#2026-06-12-agda-deps-incremental-per-module-fragment-cache">2026-06-12 — agda-deps — --incremental: per-module fragment cache</a><a class="lvl2" href="#2026-06-12-agda-deps-golden-snapshot-regenerated-from-a-cold-run">2026-06-12 — agda-deps — golden snapshot regenerated from a cold run</a><a class="lvl2" href="#2026-06-12-agda-deps-expanded-graph-invariants-golden-snapshot-phase-3">2026-06-12 — agda-deps — expanded-graph invariants + golden snapshot (phase 3)</a><a class="lvl2" href="#2026-06-12-agda-deps-expanded-emission-routed-through-the-schema-source-of-truth-phase-2">2026-06-12 — agda-deps — expanded emission routed through the schema source of truth (phase 2)</a><a class="lvl2" href="#2026-06-12-agda-deps-expanded-schema-single-source-of-truth-drift-check-phase-1">2026-06-12 — agda-deps — expanded-schema single source of truth + drift check (phase 1)</a><a class="lvl2" href="#2026-06-12-agda-deps-version-reports-the-build-fingerprint-install-recipe">2026-06-12 — agda-deps — --version reports the build fingerprint; install recipe</a><a class="lvl2" href="#2026-06-05-agda-deps-build-provenance-stamped-into-graphjson">2026-06-05 — agda-deps — build provenance stamped into graph.json</a><a class="lvl2" href="#2026-06-05-agda-deps-same-named-helpers-no-longer-collapse-e1-node-collision">2026-06-05 — agda-deps — same-named helpers no longer collapse (E1 node collision)</a><a class="lvl2" href="#2026-06-05-agda-deps-opt-in-normalised-implicit-signatures">2026-06-05 — agda-deps — opt-in normalised / implicit signatures</a><a class="lvl2" href="#2026-06-04-agda-deps-rendered-type-signatures-with-signatures">2026-06-04 — agda-deps — rendered type signatures (--with-signatures)</a><a class="lvl2" href="#2026-06-01-agda-deps-agda-html-dir-sunburst-open-source">2026-06-01 — agda-deps — --agda-html-dir + sunburst "Open source"</a><a class="lvl2" href="#2026-05-29-agda-deps-lenient-imports-docs-resolve-deps-partial-keep-going-emission">2026-05-29 — agda-deps — --lenient-imports docs, --resolve-deps, partial --keep-going emission</a><a class="lvl3" href="#-lenient-imports-safe-incompatibility-documented">--lenient-imports × --safe incompatibility documented</a><a class="lvl3" href="#-resolve-deps-flag">--resolve-deps flag</a><a class="lvl3" href="#partial-def-level-emission-under-keep-going">Partial def-level emission under --keep-going</a><a class="lvl2" href="#2026-05-29-agda-deps-remove-the-14-view-shortcut-boolean-flags">2026-05-29 — agda-deps — remove the 14 view-shortcut boolean flags</a><a class="lvl2" href="#2026-05-28-agda-deps-round-6-p3-ast-subterm-fingerprinting">2026-05-28 — agda-deps — round-6 P3 (AST subterm fingerprinting)</a><a class="lvl2" href="#2026-05-27-agda-deps-yaml-config-agda-depsyml">2026-05-27 — agda-deps — YAML config (.agda-deps.yml)</a><a class="lvl2" href="#2026-05-27-agda-deps-edge-provenance-tagging">2026-05-27 — agda-deps — edge-provenance tagging</a><a class="lvl2" href="#2026-05-27-agda-deps-lazy-mode-placeholder-detail-files-for-modules-with-no-kept-defs">2026-05-27 — agda-deps — lazy-mode placeholder detail files for modules with no kept defs</a><a class="lvl2" href="#2026-05-26-agda-deps-no-externals-actually-drops-externals-externals_summary">2026-05-26 — agda-deps — --no-externals actually drops externals + externals_summary</a><a class="lvl3" href="#-no-externals-actually-drops-externals">--no-externals actually drops externals</a><a class="lvl3" href="#externals_summary-top-level-field">externals_summary top-level field</a><a class="lvl2" href="#2026-05-26-agda-deps-per-definition-line-access-instance-reverse-edges">2026-05-26 — agda-deps — per-definition line, access, instance reverse edges</a><a class="lvl2" href="#2026-05-25-agda-deps-node-identity-and-dead-private-recovery-fixes">2026-05-25 — agda-deps — node-identity and dead-private recovery fixes</a><a class="lvl2" href="#2026-05-23-feature-batch-for-re-exports-kind-edge-contraction">2026-05-23 — Feature batch for re-exports / kind / edge contraction</a><a class="lvl3" href="#edge-contraction-through-ignored-defs">Edge contraction through ignored defs</a><a class="lvl3" href="#kind-discriminator-on-definitions">kind discriminator on definitions</a><a class="lvl3" href="#reexports-in-expanded-json">reexports[] in expanded JSON</a><a class="lvl2" href="#2026-05-22-g12-external-feature-request-batch">2026-05-22 — G12 · external feature-request batch</a><a class="lvl2" href="#g11-skip-agda">G11 — --skip-agda</a><a class="lvl2" href="#g10-scaling-to-1m-defs-100k-modules">G10 — Scaling to ~1M defs / 100k modules</a><a class="lvl2" href="#g9-multi-view-html-system">G9 — Multi-view HTML system</a><a class="lvl2" href="#g8-custom-help-agdadepshelp">G8 — Custom --help (AgdaDeps.Help)</a><a class="lvl2" href="#g7-partial-compilation-under-keep-going">G7 — Partial compilation under --keep-going</a><a class="lvl2" href="#g6-auto-discover-agda-lib-for-non-cwd-invocations">G6 — Auto-discover .agda-lib for non-cwd invocations</a><a class="lvl2" href="#g5-bump-to-agda-29">G5 — Bump to Agda 2.9</a><a class="lvl2" href="#g4-linked-source-view-with-source">G4 — Linked source view (--with-source)</a><a class="lvl2" href="#g3-node-colouring-by-state">G3 — Node colouring by state</a><a class="lvl2" href="#g2-html-interactive-backend">G2 — HTML interactive backend</a><a class="lvl2" href="#g1-remove-nix-scaffolding">G1 — Remove nix scaffolding</a></nav>
+</div></aside>
+<div class="prose"><h1 id="changelog">Changelog</h1>
 <p>History of notable changes to <code>agda-deps</code>. Reverse-chronological. For
 runnable recipes see <a href="examples.html">Examples.md</a>; for forward-looking
 work see <a href="roadmap.html">TODO.md</a>; for deferred / refused ideas see
 <a href="backlog.html">Backlog.md</a>.</p>
-<hr />
-<h2 id="2026-07-16--agda-deps--filter-variable-block-names-on-agda-28-too">2026-07-16 — <code>agda-deps</code> — filter <code>variable</code>-block names on Agda 2.8 too</h2>
+<hr>
+<h2 id="2026-07-16-agda-deps-filter-variable-block-names-on-agda-28-too">2026-07-16 — <code>agda-deps</code> — filter <code>variable</code>-block names on Agda 2.8 too</h2>
 <p><code>ignoreDef</code> dropped Agda's synthesised <code>variable</code>-block definitions
 (<code>GeneralizeTel</code> record, <code>mkGeneralizeTel</code> constructor, <code>generalizedField-*</code>
 projections) by testing for the <code>NoName</code> <code>..</code> marker in <code>prettyShow</code>. Agda 2.9
@@ -25,12 +39,12 @@ extra nodes (<code>Test.GeneralizeTel</code> / <code>Test.mkGeneralizeTel</code>
 graph — the sole remaining 2.8-vs-2.9 output divergence.</p>
 <ul>
 <li><strong><code>isGeneralizeName</code></strong> now matches the stable generated base name on
-<code>qnameName</code> (<code>GeneralizeTel</code> / <code>generalizedField-</code>) in addition to the <code>..</code>
-marker, catching both spellings. Agda 2.8 and 2.9 now produce byte-identical
-graphs (verified: both match the golden). Pinned by <code>test/Test.agda</code>'s
-<code>variable a b : Set</code> block.</li>
+  <code>qnameName</code> (<code>GeneralizeTel</code> / <code>generalizedField-</code>) in addition to the <code>..</code>
+  marker, catching both spellings. Agda 2.8 and 2.9 now produce byte-identical
+  graphs (verified: both match the golden). Pinned by <code>test/Test.agda</code>'s
+  <code>variable a b : Set</code> block.</li>
 </ul>
-<h2 id="2026-07-16--agda-deps----incremental-works-on-agda-28-node-identity-is-noderef">2026-07-16 — <code>agda-deps</code> — <code>--incremental</code> works on Agda 2.8; node identity is <code>NodeRef</code></h2>
+<h2 id="2026-07-16-agda-deps-incremental-works-on-agda-28-node-identity-is-noderef">2026-07-16 — <code>agda-deps</code> — <code>--incremental</code> works on Agda 2.8; node identity is <code>NodeRef</code></h2>
 <p>The <code>--incremental</code> fragment cache was Agda ≥ 2.9 only: it serialised
 <code>QName</code>s through Agda's <code>EmbPrj</code>, whose byte layer 2.8 does not expose, so
 on 2.8 the flag warned and ran without the fragment cache.</p>
@@ -44,20 +58,18 @@ folded into <code>NodeRef.nrIgnorable</code> at the producer boundary (<code>mkR
 pass needs a live <code>QName</code>, and a cached fragment round-trips as plain data.</p>
 <ul>
 <li><strong>Fragment cache works on 2.8 and 2.9 alike</strong> — serialisation is plain
-<code>Data.Binary</code>; the <code>EmbPrj</code> wire form and the <code>FragmentCache</code> CPP split
-are gone. <code>fragmentFormatVersion</code> bumped 3 → 4.</li>
+  <code>Data.Binary</code>; the <code>EmbPrj</code> wire form and the <code>FragmentCache</code> CPP split
+  are gone. <code>fragmentFormatVersion</code> bumped 3 → 4.</li>
 <li><strong><code>ADDef</code>, <code>IgnoredEdgeMap</code>, <code>MethodProviderMap</code> are keyed by <code>NodeRef</code>.</strong>
-The <code>...OfQ</code> helpers (<code>nodeKeyOfQ</code> / <code>moduleKeyOfQ</code>) hold the QName-level
-logic, used only at the producer boundary (dead-private recovery,
-<code>collectReExports</code>).</li>
-<li><strong>Output unchanged.</strong> Byte-identical <code>graph.json</code> on 2.9 (golden + schema
-<ul>
+  The <code>...OfQ</code> helpers (<code>nodeKeyOfQ</code> / <code>moduleKeyOfQ</code>) hold the QName-level
+  logic, used only at the producer boundary (dead-private recovery,
+  <code>collectReExports</code>).</li>
+<li><strong>Output unchanged.</strong> Byte-identical <code>graph.json</code> on 2.9 (golden + schema</li>
 <li>packed-analytical parity) and identical to the pre-change 2.8 output;
-cold- and warm-cache runs remain byte-identical. <code>nodeKeyVersion</code> is
-unchanged (3) — the node-key <em>string</em> convention did not move.</li>
-</ul></li>
+  cold- and warm-cache runs remain byte-identical. <code>nodeKeyVersion</code> is
+  unchanged (3) — the node-key <em>string</em> convention did not move.</li>
 </ul>
-<h2 id="2026-07-10--agda-deps--tag-file-level---options---soundness-escapes-r15">2026-07-10 — <code>agda-deps</code> — tag file-level <code>{-# OPTIONS #-}</code> soundness escapes (R15)</h2>
+<h2 id="2026-07-10-agda-deps-tag-file-level-options-soundness-escapes-r15">2026-07-10 — <code>agda-deps</code> — tag file-level <code>{-# OPTIONS #-}</code> soundness escapes (R15)</h2>
 <p>Soundness-escape Phase 2, completing the Phase 1 per-def <code>unsafe</code> work
 (2026-07-09). Phase 1 covered per-def escapes (<code>NON_TERMINATING</code>,
 <code>primTrustMe</code>), but a <em>whole-module</em> escape via a file pragma
@@ -65,87 +77,89 @@ unchanged (3) — the node-key <em>string</em> convention did not move.</li>
 …) left every def in the module as plain <code>state: "D"</code>, so a graph-derived
 <code>agda --safe</code> audit still missed it.</p>
 <ul>
-<li><strong>New optional top-level <code>moduleOptionEscapes</code></strong> — a <code>Map module [String]</code> (object keyed by module name; values the offending flag
-tokens). Read from each visited interface's <strong><code>iFilePragmaOptions</code></strong> —
-the file's own <code>OPTIONS</code> tokens — in <code>postCompileAD</code>, keeping only the
-safety-relevant flags (<code>AgdaDeps.Deps.safetyRelevantOptionFlags</code>, the
-unconditional single-flag set of Agda's own <code>unsafePragmaOptions</code>).</li>
+<li><strong>New optional top-level <code>moduleOptionEscapes</code></strong> — a <code>Map module
+  [String]</code> (object keyed by module name; values the offending flag
+  tokens). Read from each visited interface's <strong><code>iFilePragmaOptions</code></strong> —
+  the file's own <code>OPTIONS</code> tokens — in <code>postCompileAD</code>, keeping only the
+  safety-relevant flags (<code>AgdaDeps.Deps.safetyRelevantOptionFlags</code>, the
+  unconditional single-flag set of Agda's own <code>unsafePragmaOptions</code>).</li>
 <li><strong>File-level, not resolved.</strong> Deliberately <code>iFilePragmaOptions</code> and NOT
-<code>iOptionsUsed</code> (the fully-resolved per-module options): <code>iOptionsUsed</code>
-folds in command-line + library-default options, so it would
-misattribute e.g. <code>--lenient-imports</code> (⇒ <code>--allow-unsolved-metas</code>) or a
-library <code>.agda-lib</code> default to <em>every</em> module. The file scan is
-pollution-immune and exactly "what this file declared".</li>
+  <code>iOptionsUsed</code> (the fully-resolved per-module options): <code>iOptionsUsed</code>
+  folds in command-line + library-default options, so it would
+  misattribute e.g. <code>--lenient-imports</code> (⇒ <code>--allow-unsolved-metas</code>) or a
+  library <code>.agda-lib</code> default to <em>every</em> module. The file scan is
+  pollution-immune and exactly "what this file declared".</li>
 <li><strong>Boundary (verified, documented).</strong> A per-block <code>{-# NO_POSITIVITY_CHECK #-}</code>
-is a <em>declaration</em> pragma, not an <code>OPTIONS</code> pragma, so it never appears in
-<code>iFilePragmaOptions</code> and is not captured; nor are combination-conditional
-escapes (<code>--without-K</code> + <code>--flat-split</code>, …). Pinned by
-<code>test/OptionEscapes.agda</code>, whose file-level <code>--type-in-type</code> surfaces
-while its block <code>NO_POSITIVITY_CHECK</code> does not.</li>
+  is a <em>declaration</em> pragma, not an <code>OPTIONS</code> pragma, so it never appears in
+  <code>iFilePragmaOptions</code> and is not captured; nor are combination-conditional
+  escapes (<code>--without-K</code> + <code>--flat-split</code>, …). Pinned by
+  <code>test/OptionEscapes.agda</code>, whose file-level <code>--type-in-type</code> surfaces
+  while its block <code>NO_POSITIVITY_CHECK</code> does not.</li>
 <li>Emitted in expanded + packed + lazy <code>graph.json</code>, module-level (orthogonal
-to per-def <code>unsafe</code>), omitted when empty so escape-free corpora stay
-byte-identical. Additive wire field: <code>schemaVersion</code> stays 2,
-<code>nodeKeyVersion</code> stays 3. Schema oracle updated from <code>Wire.hs</code>; golden
-regenerated cold (<code>Holes</code>/<code>Test</code> carry their real <code>--allow-unsolved-metas</code>,
-<code>OptionEscapes</code> its <code>--type-in-type</code>). No <code>--incremental</code> fragment bump:
-escapes are recomputed from the visited interfaces every run, not cached.</li>
+  to per-def <code>unsafe</code>), omitted when empty so escape-free corpora stay
+  byte-identical. Additive wire field: <code>schemaVersion</code> stays 2,
+  <code>nodeKeyVersion</code> stays 3. Schema oracle updated from <code>Wire.hs</code>; golden
+  regenerated cold (<code>Holes</code>/<code>Test</code> carry their real <code>--allow-unsolved-metas</code>,
+  <code>OptionEscapes</code> its <code>--type-in-type</code>). No <code>--incremental</code> fragment bump:
+  escapes are recomputed from the visited interfaces every run, not cached.</li>
 <li>Both Agda 2.8 and 2.9 builds compile unchanged — <code>iFilePragmaOptions</code> /
-<code>OptionsPragma</code> are identical across the range, so no CPP.</li>
+  <code>OptionsPragma</code> are identical across the range, so no CPP.</li>
 </ul>
-<h2 id="2026-07-09--agda-deps--tag-soundness-escapes-beyond-postulates-unsafe">2026-07-09 — <code>agda-deps</code> — tag soundness escapes beyond postulates (<code>unsafe</code>)</h2>
+<h2 id="2026-07-09-agda-deps-tag-soundness-escapes-beyond-postulates-unsafe">2026-07-09 — <code>agda-deps</code> — tag soundness escapes beyond postulates (<code>unsafe</code>)</h2>
 <p>Acting on external feedback: the graph flags postulates (<code>state: "P"</code>) and
 unsolved holes (<code>"H"</code>), but a <code>{-# NON_TERMINATING #-}</code> function or a body
 built on <code>primTrustMe</code> emitted as plain <code>state: "D"</code> — indistinguishable
 from safe code, so a graph-derived <code>agda --safe</code>-style audit missed them.</p>
 <ul>
 <li><strong>New optional per-def <code>unsafe</code> array</strong> — the escapes a definition uses
-<strong>directly</strong> (not transitively): <code>non-terminating</code> (a
-<code>{-# NON_TERMINATING #-}</code> function, <code>funTerminates = Just False</code>) and
-<code>trustme</code> (the body/type references <code>primTrustMe</code>). Orthogonal to
-<code>state</code>: a def can be <code>D</code> and still carry an escape. Always computed (no
-flag; the signals are already in hand during the per-def walk), omitted
-when empty, so escape-free corpora produce byte-identical output.</li>
+  <strong>directly</strong> (not transitively): <code>non-terminating</code> (a
+  <code>{-# NON_TERMINATING #-}</code> function, <code>funTerminates = Just False</code>) and
+  <code>trustme</code> (the body/type references <code>primTrustMe</code>). Orthogonal to
+  <code>state</code>: a def can be <code>D</code> and still carry an escape. Always computed (no
+  flag; the signals are already in hand during the per-def walk), omitted
+  when empty, so escape-free corpora produce byte-identical output.</li>
 <li><strong>Packed-analytical parity:</strong> a dense <code>unsafe</code> <code>Int8</code> bitmask array
-(bit 0 = <code>non-terminating</code>, bit 1 = <code>trustme</code>; <code>0</code> = none), so a decoded
-packed graph stays node-for-node identical to expanded
-(<code>schema/packed_analytical_check.py</code> extended to decode + compare it).</li>
+  (bit 0 = <code>non-terminating</code>, bit 1 = <code>trustme</code>; <code>0</code> = none), so a decoded
+  packed graph stays node-for-node identical to expanded
+  (<code>schema/packed_analytical_check.py</code> extended to decode + compare it).</li>
 <li><strong><code>{-# TERMINATING #-}</code> was deliberately dropped.</strong> Verified against the
-corpus that Agda's ordinary termination checker also writes
-<code>funTerminates = Just True</code> for every proven-terminating def, so the
-marker can't be told apart from a normal proof — it would fire on
-<code>Nat._+_</code>, <code>Test.sum</code>, and friends. <code>non-terminating</code> alone fixes the
-measured audit miss.</li>
+  corpus that Agda's ordinary termination checker also writes
+  <code>funTerminates = Just True</code> for every proven-terminating def, so the
+  marker can't be told apart from a normal proof — it would fire on
+  <code>Nat._+_</code>, <code>Test.sum</code>, and friends. <code>non-terminating</code> alone fixes the
+  measured audit miss.</li>
 <li>Additive wire field: <code>schemaVersion</code> stays 2, <code>nodeKeyVersion</code> stays 3.
-Schema oracle regenerated from <code>Wire.hs</code>; golden regenerated cold.
-<code>--incremental</code> fragment format bumped 2 → 3 (tags ride the fragment, so
-a <code>Skip</code>ped module keeps them; older caches self-invalidate).</li>
+  Schema oracle regenerated from <code>Wire.hs</code>; golden regenerated cold.
+  <code>--incremental</code> fragment format bumped 2 → 3 (tags ride the fragment, so
+  a <code>Skip</code>ped module keeps them; older caches self-invalidate).</li>
 <li>Fixture: <code>test/Unsafe.agda</code> (<code>NON_TERMINATING</code>, <code>primTrustMe</code>, a
-<code>TERMINATING</code> control, and a plain function that must carry no tag).</li>
+  <code>TERMINATING</code> control, and a plain function that must carry no tag).</li>
 </ul>
-<h2 id="2026-07-09--agda-deps--emit-renaming-aliases-on-public-re-exports">2026-07-09 — <code>agda-deps</code> — emit <code>renaming</code> aliases on public re-exports</h2>
-<p>Acting on external feedback: <code>open import M public renaming (merge to combine)</code> re-exports <code>M.merge</code> under the in-scope name <code>combine</code>, but the
+<h2 id="2026-07-09-agda-deps-emit-renaming-aliases-on-public-re-exports">2026-07-09 — <code>agda-deps</code> — emit <code>renaming</code> aliases on public re-exports</h2>
+<p>Acting on external feedback: <code>open import M public renaming (merge to
+combine)</code> re-exports <code>M.merge</code> under the in-scope name <code>combine</code>, but the
 expanded <code>graph.json</code> <code>reexports[]</code> rows carried canonical FQNs only, so a
 consumer could not resolve <code>combine</code> back to <code>M.merge</code>. The alias was
 already computed in <code>collectReExports</code> and discarded.</p>
 <ul>
 <li><strong>New optional <code>renames</code> map</strong> on each expanded-mode <code>reexport</code> object:
-<code>{ alias-in-scope-name: canonical-nodeKey }</code>, where the canonical value
-is a member of that row's <code>names</code>. Omitted when the row has no renamed
-entries, so rename-free corpora produce byte-identical output.</li>
+  <code>{ alias-in-scope-name: canonical-nodeKey }</code>, where the canonical value
+  is a member of that row's <code>names</code>. Omitted when the row has no renamed
+  entries, so rename-free corpora produce byte-identical output.</li>
 <li>Expanded-only — packed and <code>--lazy</code> never emitted <code>reexports</code>, so there
-is no packed-analytical or lazy work, and no fragment-format bump
-(re-exports are derived in <code>postCompile</code>, not cached).</li>
+  is no packed-analytical or lazy work, and no fragment-format bump
+  (re-exports are derived in <code>postCompile</code>, not cached).</li>
 <li>Additive wire field: <code>schemaVersion</code> stays 2, <code>nodeKeyVersion</code> stays 3.
-Schema oracle regenerated from <code>Wire.hs</code>; golden regenerated cold.</li>
+  Schema oracle regenerated from <code>Wire.hs</code>; golden regenerated cold.</li>
 <li>Fixture: <code>test/RenamedReexport.agda</code>
-(<code>open import Nat public renaming (Nat to Number)</code>).</li>
+  (<code>open import Nat public renaming (Nat to Number)</code>).</li>
 </ul>
-<h2 id="2026-06-30--agda-deps--fix-wiki-backlinks-view-backforward-navigation">2026-06-30 — <code>agda-deps</code> — fix: <code>wiki-backlinks</code> view back/forward navigation</h2>
+<h2 id="2026-06-30-agda-deps-fix-wiki-backlinks-view-backforward-navigation">2026-06-30 — <code>agda-deps</code> — fix: <code>wiki-backlinks</code> view back/forward navigation</h2>
 <p>The <code>wiki-backlinks</code> view named its navigation stack <code>history</code>, which
 at global script scope aliases the read-only <code>window.history</code> — so the
 first <code>navigate(…, push)</code> threw <code>history.slice is not a function</code> and
 broke back/forward. Renamed the stack to <code>navHistory</code>. HTML-only.</p>
-<h2 id="2026-06-30--agda-deps--lift-anonymous-module-definitions-into-their-parent-nodekeyversion-3">2026-06-30 — <code>agda-deps</code> — lift anonymous-module definitions into their parent (nodeKeyVersion 3)</h2>
+<h2 id="2026-06-30-agda-deps-lift-anonymous-module-definitions-into-their-parent-nodekeyversion-3">2026-06-30 — <code>agda-deps</code> — lift anonymous-module definitions into their parent (nodeKeyVersion 3)</h2>
 <p>Fixes the anonymous-module blind spot: defs inside <code>where</code> blocks and
 <code>module _ (…) where</code> sections produced false module-level and provenance
 results. Agda desugars both into anonymous sub-modules (<code>Mod._</code>) and
@@ -153,89 +167,89 @@ lifts enclosing variables into each def's <code>defType</code>, so the dependenc
 edges were already correct — only naming/attribution/provenance was wrong.</p>
 <ul>
 <li><strong><code>nodeKey</code> lifts anonymous segments</strong> (<code>liftAnonSegments</code>):
-<code>Mod._.helper@15</code> ↦ <code>Mod.helper@15</code>, <code>Mod._._.deep</code> ↦ <code>Mod.deep</code>.
-The <code>@&lt;line&gt;</code> disambiguator is preserved; mixfix names (<code>_+_</code>) are
-untouched. <code>nodeKeyVersion</code> bumped 2 → 3.</li>
+  <code>Mod._.helper@15</code> ↦ <code>Mod.helper@15</code>, <code>Mod._._.deep</code> ↦ <code>Mod.deep</code>.
+  The <code>@&lt;line&gt;</code> disambiguator is preserved; mixfix names (<code>_+_</code>) are
+  untouched. <code>nodeKeyVersion</code> bumped 2 → 3.</li>
 <li><strong><code>moduleKey</code></strong> re-homes module attribution to the nearest <em>named</em>
-ancestor; every QName→module-string site routes through it, killing
-phantom <code>Mod._</code> nodes and their false <code>Mod ⇄ Mod._</code> cycles.</li>
+  ancestor; every QName→module-string site routes through it, killing
+  phantom <code>Mod._</code> nodes and their false <code>Mod ⇄ Mod._</code> cycles.</li>
 <li><strong>Provenance <code>where</code> → <code>module-local</code></strong>: the tag describes the target
-(an anonymous-module-local helper) rather than claiming an
-unrecoverable source-ownership relation. Packed int encoding unchanged
-(still <code>2</code>); expanded string + schema enum updated.</li>
+  (an anonymous-module-local helper) rather than claiming an
+  unrecoverable source-ownership relation. Packed int encoding unchanged
+  (still <code>2</code>); expanded string + schema enum updated.</li>
 </ul>
 <p><code>where</code> and section are represented identically post-scope-check, so
 they are not distinguished. Cold golden regenerated. New regression
 <code>test/AnonSection.agda</code>; <code>test/Collision.agda</code> still locks the <code>where</code> case.</p>
-<h2 id="2026-06-18--agda-deps--rebuild-memory-reductions">2026-06-18 — <code>agda-deps</code> — rebuild-memory reductions</h2>
+<h2 id="2026-06-18-agda-deps-rebuild-memory-reductions">2026-06-18 — <code>agda-deps</code> — rebuild-memory reductions</h2>
 <p>Memory pass on the producer's rebuild path. The dominant peak-RSS term
 is Agda's own interface-load floor (irreducible in a whole-program
 backend); of the removable remainder, copying-GC slack was the largest.
 Output is byte-identical.</p>
 <ul>
 <li><strong><code>-rtsopts -with-rtsopts=-F1.2</code></strong> (<code>agda-deps.cabal</code>). The binary had
-no <code>-rtsopts</code>, so <code>+RTS</code>/<code>GHCRTS</code> were ignored. <code>-F1.2</code> caps old-gen
-heap growth at 1.2× live (default 2.0×): ~11% lower peak RSS at no
-measurable wall cost, no hard ceiling. <code>-rtsopts</code> lets callers override.</li>
+  no <code>-rtsopts</code>, so <code>+RTS</code>/<code>GHCRTS</code> were ignored. <code>-F1.2</code> caps old-gen
+  heap growth at 1.2× live (default 2.0×): ~11% lower peak RSS at no
+  measurable wall cost, no hard ceiling. <code>-rtsopts</code> lets callers override.</li>
 <li><strong>Strict <code>_deps</code>/<code>_state</code> in <code>ADDef</code></strong> — the two fields that lacked
-<code>!</code>; a lazy <code>_state</code> thunk closed over the whole Agda <code>Definition</code>.</li>
+  <code>!</code>; a lazy <code>_state</code> thunk closed over the whole Agda <code>Definition</code>.</li>
 <li><strong>Force <code>liveModules</code></strong> (<code>Backend.hs</code>) — a lazy <code>[String]</code> pinned the
-entire <code>defMap</code> alive through the render in non-<code>--incremental</code> runs.</li>
+  entire <code>defMap</code> alive through the render in non-<code>--incremental</code> runs.</li>
 </ul>
 <p><code>--incremental</code> is a wall-time win, not a memory one.</p>
-<h2 id="2026-06-13--agda-deps----packed-analytical-consumer-usable-packed-form">2026-06-13 — <code>agda-deps</code> — <code>--packed-analytical</code> (consumer-usable packed form)</h2>
+<h2 id="2026-06-13-agda-deps-packed-analytical-consumer-usable-packed-form">2026-06-13 — <code>agda-deps</code> — <code>--packed-analytical</code> (consumer-usable packed form)</h2>
 <p>Packed <code>graph.json</code> is ~5× smaller than expanded but omitted every
 per-definition analytical field. <code>--packed-analytical</code> adds them so
 consumers no longer have to choose size or fidelity.</p>
 <ul>
 <li><strong>New arrays parallel to <code>defs.names</code></strong>: <code>defs.kinds</code> (Int8),
-<code>defs.lines</code> (Int32, <code>-1</code>=unknown), <code>defs.access</code> (Int8),
-<code>defs.types</code> (under <code>--with-signatures</code>), CSR-packed subterm
-offsets/hashes/depths (under <code>--with-term-hashes</code>). No topology change.</li>
+  <code>defs.lines</code> (Int32, <code>-1</code>=unknown), <code>defs.access</code> (Int8),
+  <code>defs.types</code> (under <code>--with-signatures</code>), CSR-packed subterm
+  offsets/hashes/depths (under <code>--with-term-hashes</code>). No topology change.</li>
 <li><strong><code>access</code> is 3-valued</strong> (<code>0</code>=unknown/absent, <code>1</code>=public,
-<code>2</code>=private): expanded <em>omits</em> <code>access</code> for QNames with no local
-<code>ADDef</code>, and <code>0</code> round-trips to that omission (<code>line</code>→<code>-1</code>, <code>type</code>→null
-likewise), so the two forms match exactly.</li>
+  <code>2</code>=private): expanded <em>omits</em> <code>access</code> for QNames with no local
+  <code>ADDef</code>, and <code>0</code> round-trips to that omission (<code>line</code>→<code>-1</code>, <code>type</code>→null
+  likewise), so the two forms match exactly.</li>
 <li><strong>Shared per-QName lookups</strong> guarantee parity between the expanded
-emitter and the packed arrays — don't inline them back per-form.</li>
+  emitter and the packed arrays — don't inline them back per-form.</li>
 <li>Off by default; default packed output stays byte-identical. Only
-meaningful with <code>--json-mode=packed</code>. Gated by
-<code>schema/packed_analytical_check.py</code> (run both sides cold).</li>
+  meaningful with <code>--json-mode=packed</code>. Gated by
+  <code>schema/packed_analytical_check.py</code> (run both sides cold).</li>
 </ul>
-<h2 id="2026-06-13--agda-deps--incremental-serialise-p2-cache-gc----cache-dir-re-export-hub-externals">2026-06-13 — <code>agda-deps</code> — incremental serialise (P2), cache GC + <code>--cache-dir</code>, re-export-hub externals</h2>
+<h2 id="2026-06-13-agda-deps-incremental-serialise-p2-cache-gc-cache-dir-re-export-hub-externals">2026-06-13 — <code>agda-deps</code> — incremental serialise (P2), cache GC + <code>--cache-dir</code>, re-export-hub externals</h2>
 <h3 id="incremental-serialise-p2">Incremental serialise (P2)</h3>
 <p>New <code>AgdaDeps.SerialiseCache</code> (plain-text manifest; no CPP) cuts
 serialise+write on a rebuild, on top of P1's per-definition walk cut.</p>
 <ul>
 <li><strong>Monolithic output</strong> (<code>deps.json</code>/inline <code>deps.html</code>) can't be
-patched cheaply, so the win is the no-op rebuild: when nothing
-recompiled (<code>recompiledRef</code>) <em>and</em> the <code>outputToken</code> (module set +
-output-affecting options + build identity + <code>nodeKeyVersion</code>) matches,
-generation and write are both skipped. Both guards are required —
-the token alone misses a recompiled body, <code>recompiledRef</code> alone misses
-a toggled rendering option.</li>
+  patched cheaply, so the win is the no-op rebuild: when nothing
+  recompiled (<code>recompiledRef</code>) <em>and</em> the <code>outputToken</code> (module set +
+  output-affecting options + build identity + <code>nodeKeyVersion</code>) matches,
+  generation and write are both skipped. Both guards are required —
+  the token alone misses a recompiled body, <code>recompiledRef</code> alone misses
+  a toggled rendering option.</li>
 <li><strong>Lazy per-module files</strong> carry a content epoch computed from the
-structured inputs (no base64), so a skipped file never forces its
-content thunk. Adding/removing a def shifts global indices, so many
-epochs change (correct if not minimal).</li>
+  structured inputs (no base64), so a skipped file never forces its
+  content thunk. Adding/removing a def shifts global indices, so many
+  epochs change (correct if not minimal).</li>
 <li>Profiling shows the warm-rebuild floor is Agda's interface load, which
-a backend cannot avoid; this helps signature-/source-heavy output and
-no-op rebuilds, not the floor.</li>
+  a backend cannot avoid; this helps signature-/source-heavy output and
+  no-op rebuilds, not the floor.</li>
 <li>Gated on <code>--incremental</code>; default output path byte-identical.</li>
 </ul>
-<h3 id="fragment-cache-gc----cache-dir">Fragment cache GC + <code>--cache-dir</code></h3>
+<h3 id="fragment-cache-gc-cache-dir">Fragment cache GC + <code>--cache-dir</code></h3>
 <ul>
 <li><strong>GC</strong>: after an <code>--incremental</code> run, <code>*.frag</code> files for modules no
-longer in the graph are pruned (<code>gcFragments</code>); only <code>*.frag</code> touched.</li>
+  longer in the graph are pruned (<code>gcFragments</code>); only <code>*.frag</code> touched.</li>
 <li><strong><code>--cache-dir=PATH</code></strong> (CLI + YAML) overrides the default
-<code>&lt;out-dir&gt;/.agda-deps-cache</code> for fragments and the serialise manifest.</li>
+  <code>&lt;out-dir&gt;/.agda-deps-cache</code> for fragments and the serialise manifest.</li>
 </ul>
 <h3 id="classifyexternalmodules-sees-re-export-hubs"><code>classifyExternalModules</code> sees re-export hubs</h3>
 <p>A stdlib module that only <code>open … public</code>s names contributes no QName of
 its own and slipped past <code>--no-externals</code>. The re-export host + source
 module names (<code>collectReExports</code>) are now pooled into the classification
 input. Additive: golden unchanged.</p>
-<h2 id="2026-06-12--agda-deps----keep-going-hardening-a-graph-is-always-emitted">2026-06-12 — <code>agda-deps</code> — <code>--keep-going</code> hardening: a graph is always emitted</h2>
+<h2 id="2026-06-12-agda-deps-keep-going-hardening-a-graph-is-always-emitted">2026-06-12 — <code>agda-deps</code> — <code>--keep-going</code> hardening: a graph is always emitted</h2>
 <p>On a real broken corpus the partial pass died with a bare exit 120 and
 no <code>deps.json</code>. Root cause: exit 120 is Agda's <code>__IMPOSSIBLE__</code>, a GHC
 exception (not a <code>TCErr</code>), invisible to every <code>catchError</code> guard; and
@@ -243,19 +257,19 @@ TCM's <code>catchError</code> rolls back <code>TCState</code>, so re-merging onl
 <em>signatures</em> left reification hitting a missing-builtin <code>__IMPOSSIBLE__</code>.</p>
 <ul>
 <li><strong><code>mergeIfaceState</code></strong> now rebuilds the import state as Agda's own
-<code>mergeInterface</code> does: signature + builtins (with per-primitive
-rebinds) + remote metas + pattern synonyms + display forms.</li>
+  <code>mergeInterface</code> does: signature + builtins (with per-primitive
+  rebinds) + remote metas + pattern synonyms + display forms.</li>
 <li><strong><code>catchAllTCM</code></strong> (catches TCErr <em>and</em> GHC exceptions; re-throws
-<code>ExitCode</code>/async) guards every stage — per definition, per module, per
-interface merge; <code>preCompile</code>/<code>postCompile</code> failures print a
-stage-named diagnostic before re-throwing.</li>
+  <code>ExitCode</code>/async) guards every stage — per definition, per module, per
+  interface merge; <code>preCompile</code>/<code>postCompile</code> failures print a
+  stage-named diagnostic before re-throwing.</li>
 <li><strong>The partial pass no longer claims an entry module</strong> — it passed
-<code>IsMain</code> to every module, so <code>entryModule</code> recorded whichever ran last.</li>
+  <code>IsMain</code> to every module, so <code>entryModule</code> recorded whichever ran last.</li>
 <li>Fixture + CI step <code>test-keepgoing/</code> (kept outside <code>test/</code>): entry
-imports one healthy and one failing module; CI asserts <code>deps.json</code> is
-produced with <code>failedModules == ["Broken"]</code>.</li>
+  imports one healthy and one failing module; CI asserts <code>deps.json</code> is
+  produced with <code>failedModules == ["Broken"]</code>.</li>
 </ul>
-<h2 id="2026-06-12--agda-deps----incremental-per-module-fragment-cache">2026-06-12 — <code>agda-deps</code> — <code>--incremental</code>: per-module fragment cache</h2>
+<h2 id="2026-06-12-agda-deps-incremental-per-module-fragment-cache">2026-06-12 — <code>agda-deps</code> — <code>--incremental</code>: per-module fragment cache</h2>
 <p>P1 of the incremental-rebuild design: the dominant rebuild cost is the
 per-definition backend walk, re-run for every module even when nothing
 changed. <code>AgdaDeps.FragmentCache</code> caches, per module, what <code>postModuleAD</code>
@@ -263,115 +277,117 @@ returns plus the module's contributions to the two compile-time
 side-channels (ignored edges, instance-method providers).</p>
 <ul>
 <li><strong>The slices are exact before/after deltas</strong> snapshotted in
-<code>ModuleEnv</code> — a <code>Skip</code>ped module never runs <code>compileDef</code>, so without
-them contraction silently loses edges through its helpers. A
-name-prefix filter is wrong: it misses defs Agda homes in anonymous
-modules at prefixless QNames.</li>
-<li><strong>Key</strong>: <code>(fragment format version, content-option fingerprint, iFullHash, nodeKeyVersion)</code>. <code>iFullHash</code> folds in transitive imported
-hashes, invalidating exactly the affected cone; rendering-only options
-are excluded.</li>
+  <code>ModuleEnv</code> — a <code>Skip</code>ped module never runs <code>compileDef</code>, so without
+  them contraction silently loses edges through its helpers. A
+  name-prefix filter is wrong: it misses defs Agda homes in anonymous
+  modules at prefixless QNames.</li>
+<li><strong>Key</strong>: <code>(fragment format version, content-option fingerprint,
+  iFullHash, nodeKeyVersion)</code>. <code>iFullHash</code> folds in transitive imported
+  hashes, invalidating exactly the affected cone; rendering-only options
+  are excluded.</li>
 <li><strong>Flow</strong>: <code>moduleSetup</code> returns <code>Skip</code> on a hit. <code>postModuleAD</code> writes
-imported modules unconditionally, the <strong>main module only from a fresh
-check</strong> (its output is enriched by the <code>getSignature</code> dead-private
-recovery a warm load can't see), so a fragment hit serves the complete
-main-module variant even warm.</li>
+  imported modules unconditionally, the <strong>main module only from a fresh
+  check</strong> (its output is enriched by the <code>getSignature</code> dead-private
+  recovery a warm load can't see), so a fragment hit serves the complete
+  main-module variant even warm.</li>
 <li><strong>Serialisation</strong> via Agda's <code>EmbPrj</code>, so <code>QName</code>s (NameIds, ranges)
-round-trip exactly. The byte layer is only exposed by Agda ≥ 2.9; on
-2.8 the flag warns + no-ops.</li>
+  round-trip exactly. The byte layer is only exposed by Agda ≥ 2.9; on
+  2.8 the flag warns + no-ops.</li>
 <li><code>--incremental</code> / YAML <code>incremental: true</code>; disabled under
-<code>--keep-going</code>. All failure modes degrade to recompute, never abort.
-CI: cold-write + warm-hit must be byte-identical and match the golden.</li>
+  <code>--keep-going</code>. All failure modes degrade to recompute, never abort.
+  CI: cold-write + warm-hit must be byte-identical and match the golden.</li>
 </ul>
-<h2 id="2026-06-12--agda-deps--golden-snapshot-regenerated-from-a-cold-run">2026-06-12 — <code>agda-deps</code> — golden snapshot regenerated from a cold run</h2>
+<h2 id="2026-06-12-agda-deps-golden-snapshot-regenerated-from-a-cold-run">2026-06-12 — <code>agda-deps</code> — golden snapshot regenerated from a cold run</h2>
 <p>The committed golden had been generated warm, freezing the degraded
 main-module variant (missing <code>Test.Int-0</code>-class pattern-helper
 edges/kinds/types — the "warm-<code>.agdai</code> edge loss"). The golden is now the
 cold (complete) variant, and CI clears <code>.agdai</code> before the runs that feed
 the golden check. The warm loss is main-module-only: imported modules'
 emission is a pure function of their pruned interface.</p>
-<h2 id="2026-06-12--agda-deps--expanded-graph-invariants--golden-snapshot-phase-3">2026-06-12 — <code>agda-deps</code> — expanded-graph invariants + golden snapshot (phase 3)</h2>
+<h2 id="2026-06-12-agda-deps-expanded-graph-invariants-golden-snapshot-phase-3">2026-06-12 — <code>agda-deps</code> — expanded-graph invariants + golden snapshot (phase 3)</h2>
 <ul>
 <li><strong><code>toExpandedGraph</code></strong> extracted from <code>buildExpandedJson</code> (now a thin
-validate-then-encode wrapper).</li>
+  validate-then-encode wrapper).</li>
 <li><strong><code>Wire.validateExpanded</code></strong> asserts the structural invariants JSON
-Schema can't express (provenance/subterm array lengths, edge endpoints
-name a definition); <code>buildExpandedJson</code> <code>error</code>s on a violation.</li>
+  Schema can't express (provenance/subterm array lengths, edge endpoints
+  name a definition); <code>buildExpandedJson</code> <code>error</code>s on a violation.</li>
 <li><strong>Golden snapshot guard</strong>: <code>test/golden/expanded.golden.json</code> +
-<code>schema/golden_check.py</code> catch content regressions; the normaliser
-strips build/layout/path-volatile fields so it's portable. New CI step.</li>
+  <code>schema/golden_check.py</code> catch content regressions; the normaliser
+  strips build/layout/path-volatile fields so it's portable. New CI step.</li>
 <li>Output byte-identical (refactor + new guards).</li>
 </ul>
-<h2 id="2026-06-12--agda-deps--expanded-emission-routed-through-the-schema-source-of-truth-phase-2">2026-06-12 — <code>agda-deps</code> — expanded emission routed through the schema source of truth (phase 2)</h2>
+<h2 id="2026-06-12-agda-deps-expanded-emission-routed-through-the-schema-source-of-truth-phase-2">2026-06-12 — <code>agda-deps</code> — expanded emission routed through the schema source of truth (phase 2)</h2>
 <p>The expanded <code>graph.json</code> is now encoded from the same
 <code>AgdaDeps.Backend.Wire</code> field tables that generate the schema, closing
 the drift gap by construction.</p>
 <ul>
 <li><strong><code>buildExpandedJson</code> builds an <code>ExpandedGraph</code> and calls
-<code>encodeExpanded</code></strong> (= <code>encodeObject expandedFields</code>). Each field-table
-row carries wire name, schema fragment, and byte encoder together, so a
-field can't be emitted without appearing in the generated schema. The
-old hand-rolled per-field assembly is gone.</li>
+  <code>encodeExpanded</code></strong> (= <code>encodeObject expandedFields</code>). Each field-table
+  row carries wire name, schema fragment, and byte encoder together, so a
+  field can't be emitted without appearing in the generated schema. The
+  old hand-rolled per-field assembly is gone.</li>
 <li><strong><code>Wire</code> now owns the expanded wire tags</strong> (<code>wireState</code>/<code>wireKind</code>/
-<code>wireAccess</code>); the duplicates in <code>GraphJson</code> were removed.</li>
+  <code>wireAccess</code>); the duplicates in <code>GraphJson</code> were removed.</li>
 <li>Output byte-identical; <code>packed</code>/<code>--lazy</code> untouched (still in <code>GraphJson</code>).</li>
 </ul>
-<h2 id="2026-06-12--agda-deps--expanded-schema-single-source-of-truth--drift-check-phase-1">2026-06-12 — <code>agda-deps</code> — expanded-schema single source of truth + drift check (phase 1)</h2>
+<h2 id="2026-06-12-agda-deps-expanded-schema-single-source-of-truth-drift-check-phase-1">2026-06-12 — <code>agda-deps</code> — expanded-schema single source of truth + drift check (phase 1)</h2>
 <p>Closes the silent-schema-drift gap: open <code>additionalProperties</code> let a new
 producer field slip past validation undocumented.</p>
 <ul>
 <li><strong><code>AgdaDeps.Backend.Wire</code></strong> describes the v2 expanded wire shape once
-(field tables + a small <code>SchemaDoc</code> ADT).</li>
+  (field tables + a small <code>SchemaDoc</code> ADT).</li>
 <li><strong><code>agda-deps --emit-schema</code></strong> prints the JSON Schema generated from it.</li>
 <li><strong><code>schema/check_schema.py</code></strong> + a CI step diff the generated schema
-against the committed oracle <em>structurally</em>; the committed file is
-never overwritten, so a wire-shape change must update it deliberately
-or the check fails.</li>
+  against the committed oracle <em>structurally</em>; the committed file is
+  never overwritten, so a wire-shape change must update it deliberately
+  or the check fails.</li>
 <li>Schema-only: no new runtime fields, no reroute; output byte-identical.</li>
 </ul>
-<h2 id="2026-06-12--agda-deps----version-reports-the-build-fingerprint-install-recipe">2026-06-12 — <code>agda-deps</code> — <code>--version</code> reports the build fingerprint; install recipe</h2>
+<h2 id="2026-06-12-agda-deps-version-reports-the-build-fingerprint-install-recipe">2026-06-12 — <code>agda-deps</code> — <code>--version</code> reports the build fingerprint; install recipe</h2>
 <ul>
 <li><strong><code>--version</code> / <code>-V</code></strong> now print the full build fingerprint (version +
-git rev + build date + GHC), the same string stamped into <code>graph.json</code>
-as <code>"producer"</code>; previously only the bare semver. <code>--numeric-version</code>
-stays bare for tooling.</li>
+  git rev + build date + GHC), the same string stamped into <code>graph.json</code>
+  as <code>"producer"</code>; previously only the bare semver. <code>--numeric-version</code>
+  stays bare for tooling.</li>
 <li><strong>Documented <code>cabal install exe:agda-deps --overwrite-policy=always</code></strong>
-so callers get a stable on-<code>PATH</code> binary.</li>
+  so callers get a stable on-<code>PATH</code> binary.</li>
 <li><strong><code>AGDA_DEPS_GIT_REV</code> override</strong> for <code>BuildInfoTH</code>: <code>cabal install</code>
-builds from an sdist with no <code>.git</code>, so the git splice otherwise
-reports <code>git unknown</code>; the env var lets an installer stamp the commit.
-In-tree builds are unaffected (git wins when present).</li>
+  builds from an sdist with no <code>.git</code>, so the git splice otherwise
+  reports <code>git unknown</code>; the env var lets an installer stamp the commit.
+  In-tree builds are unaffected (git wins when present).</li>
 </ul>
-<h2 id="2026-06-05--agda-deps--build-provenance-stamped-into-graphjson">2026-06-05 — <code>agda-deps</code> — build provenance stamped into <code>graph.json</code></h2>
+<h2 id="2026-06-05-agda-deps-build-provenance-stamped-into-graphjson">2026-06-05 — <code>agda-deps</code> — build provenance stamped into <code>graph.json</code></h2>
 <ul>
 <li><strong>Build fingerprint baked into every binary (<code>BuildInfo</code>)</strong> — package
-version, git revision (<code>+</code> for a dirty tree), compile date, compiling
-GHC (TH for git, CPP for the date). Reported by <code>--version</code>.</li>
+  version, git revision (<code>+</code> for a dirty tree), compile date, compiling
+  GHC (TH for git, CPP for the date). Reported by <code>--version</code>.</li>
 <li><strong>Graph provenance in <code>graph.json</code></strong> — both emitters write <code>"producer"</code>
-and <code>"nodeKeyVersion"</code>. Additive/optional; older JSON parses with
-<code>nodeKeyVersion</code> defaulting to <code>1</code>.</li>
+  and <code>"nodeKeyVersion"</code>. Additive/optional; older JSON parses with
+  <code>nodeKeyVersion</code> defaulting to <code>1</code>.</li>
 </ul>
-<h2 id="2026-06-05--agda-deps--same-named-helpers-no-longer-collapse-e1-node-collision">2026-06-05 — <code>agda-deps</code> — same-named helpers no longer collapse (E1 node collision)</h2>
+<h2 id="2026-06-05-agda-deps-same-named-helpers-no-longer-collapse-e1-node-collision">2026-06-05 — <code>agda-deps</code> — same-named helpers no longer collapse (E1 node collision)</h2>
 <p>Node identity now keys on <code>nodeKey</code>: <code>prettyShow</code> for top-level names
 plus a <code>@&lt;binding-line&gt;</code> suffix for <code>._.</code>-marked helpers, which
 <code>prettyShow</code> otherwise renders identically across every same-named helper
 in a module (so the last won and the rest's edges vanished). The
 binding-site line is the one per-helper coordinate stable across
-signature sources (<code>NameId</code> is not — hence the long-standing <code>hashQName = prettyShow</code> invariant). <code>hashQName</code>, the wire <code>name</code>, and edge
+signature sources (<code>NameId</code> is not — hence the long-standing <code>hashQName
+= prettyShow</code> invariant). <code>hashQName</code>, the wire <code>name</code>, and edge
 endpoints all derive from <code>nodeKey</code>; the expanded-edge filter resolves
 by canonical string, not <code>QName</code> <code>Ord</code>. Top-level keys byte-identical.
 Regression in <code>test/Collision.agda</code>.</p>
-<h2 id="2026-06-05--agda-deps--opt-in-normalised--implicit-signatures">2026-06-05 — <code>agda-deps</code> — opt-in normalised / implicit signatures</h2>
+<h2 id="2026-06-05-agda-deps-opt-in-normalised-implicit-signatures">2026-06-05 — <code>agda-deps</code> — opt-in normalised / implicit signatures</h2>
 <p><strong><code>--normalise-signatures</code></strong> reduces each type to semantic form before
 reifying; <strong><code>--signature-implicits</code></strong> shows implicit/irrelevant args
 (named to avoid clashing with Agda's <code>--show-implicit</code>). Both default
 off, so default <code>--with-signatures</code> output is byte-identical.</p>
-<h2 id="2026-06-04--agda-deps--rendered-type-signatures---with-signatures">2026-06-04 — <code>agda-deps</code> — rendered type signatures (<code>--with-signatures</code>)</h2>
+<h2 id="2026-06-04-agda-deps-rendered-type-signatures-with-signatures">2026-06-04 — <code>agda-deps</code> — rendered type signatures (<code>--with-signatures</code>)</h2>
 <p>Renders each definition's type — <code>prettyTCM</code> of <code>defType</code>, not
 normalised, default printing, one line — as the optional per-def <code>"type"</code>
 field in expanded JSON. Additive: absent without the flag, so default
 output is byte-identical. Mirrored in YAML as <code>with-signatures</code>.</p>
-<hr />
-<h2 id="2026-06-01--agda-deps----agda-html-dir--sunburst-open-source">2026-06-01 — <code>agda-deps</code> — <code>--agda-html-dir</code> + sunburst "Open source"</h2>
+<hr>
+<h2 id="2026-06-01-agda-deps-agda-html-dir-sunburst-open-source">2026-06-01 — <code>agda-deps</code> — <code>--agda-html-dir</code> + sunburst "Open source"</h2>
 <p>New flag <code>--agda-html-dir=DIR</code> links the HTML views to the pages
 <code>agda --html</code> already wrote, instead of embedding snippets with
 <code>--with-source</code>. Emitted into every view's data-loading prelude as the
@@ -385,14 +401,14 @@ affordance (module link needs no char-offset anchor — the filename is
 <code>&lt;Module.Name&gt;.html</code>); external/builtin modules are suppressed.
 Everything gated on <code>AGDA_HTML_BASE</code>, so output is unchanged when the
 flag is absent.</p>
-<hr />
-<h2 id="2026-05-29--agda-deps----lenient-imports-docs---resolve-deps-partial---keep-going-emission">2026-05-29 — <code>agda-deps</code> — <code>--lenient-imports</code> docs, <code>--resolve-deps</code>, partial <code>--keep-going</code> emission</h2>
-<h3 id="--lenient-imports----safe-incompatibility-documented"><code>--lenient-imports</code> × <code>--safe</code> incompatibility documented</h3>
+<hr>
+<h2 id="2026-05-29-agda-deps-lenient-imports-docs-resolve-deps-partial-keep-going-emission">2026-05-29 — <code>agda-deps</code> — <code>--lenient-imports</code> docs, <code>--resolve-deps</code>, partial <code>--keep-going</code> emission</h2>
+<h3 id="-lenient-imports-safe-incompatibility-documented"><code>--lenient-imports</code> × <code>--safe</code> incompatibility documented</h3>
 <p><code>--lenient-imports</code> is an argv rewrite to <code>--allow-unsolved-metas</code>; any
 <code>--safe</code> module in the dep closure (including stdlib) rejects it with
 <code>[SafeFlagPragma]</code>. Documented in <code>--help</code> and README, recommending
 <code>--keep-going</code> alone for safe-stdlib projects.</p>
-<h3 id="--resolve-deps-flag"><code>--resolve-deps</code> flag</h3>
+<h3 id="-resolve-deps-flag"><code>--resolve-deps</code> flag</h3>
 <p>Opt-in resolution of the project's <code>.agda-lib</code> <code>depend:</code> closure into an
 explicit <code>--no-libraries -i &lt;dir&gt; …</code> argv expansion. Use case: when
 multiple versions of the same library are registered, Agda's resolver
@@ -401,24 +417,25 @@ picks ambiguously (<code>[AmbiguousTopLevelModuleName]</code>). New module
 closure, and pins the include dirs. Wired through <code>Main.hs</code>; YAML
 <code>resolve-deps: true</code>. Falls back silently (with a breadcrumb) if there's
 no <code>.agda-lib</code> or a dependency can't be resolved.</p>
-<h3 id="partial-def-level-emission-under---keep-going">Partial def-level emission under <code>--keep-going</code></h3>
+<h3 id="partial-def-level-emission-under-keep-going">Partial def-level emission under <code>--keep-going</code></h3>
 <p>Previously, when a downstream module fatally failed, all def-level data
 from successfully-loaded modules was discarded — the graph collapsed to
 module-level only. Two fixes:</p>
-<ol type="1">
+<ol>
 <li><strong><code>catchError</code> now also wraps <code>setup</code></strong>, not just <code>check mainFile</code>,
-so a <code>TCErr</code> before checking starts (e.g. <code>OptionError</code>,
-<code>SafeFlagPragma</code>, library-resolution ambiguity) is reported, not
-escaped.</li>
+   so a <code>TCErr</code> before checking starts (e.g. <code>OptionError</code>,
+   <code>SafeFlagPragma</code>, library-resolution ambiguity) is reported, not
+   escaped.</li>
 <li><strong>The failure branch re-drives <code>preModule → compileDef → postModule</code>
-per decoded module</strong>, accumulating results for <code>postCompile</code>; each
-module's hooks are wrapped so one broken module is skipped.</li>
+   per decoded module</strong>, accumulating results for <code>postCompile</code>; each
+   module's hooks are wrapped so one broken module is skipped.</li>
 </ol>
 <p>Load-bearing: before the loop, every decoded interface's <code>iSignature</code> is
 merged into <code>stImports</code> and <code>stSignature</code> cleared — without this,
-downstream <code>getConstInfo</code> in <code>contractIgnoredEdges</code> fails with <code>Unbound name</code> panics on cross-module dep edges. Normal mode is byte-identical.</p>
-<hr />
-<h2 id="2026-05-29--agda-deps--remove-the-14-view-shortcut-boolean-flags">2026-05-29 — <code>agda-deps</code> — remove the 14 view-shortcut boolean flags</h2>
+downstream <code>getConstInfo</code> in <code>contractIgnoredEdges</code> fails with <code>Unbound
+name</code> panics on cross-module dep edges. Normal mode is byte-identical.</p>
+<hr>
+<h2 id="2026-05-29-agda-deps-remove-the-14-view-shortcut-boolean-flags">2026-05-29 — <code>agda-deps</code> — remove the 14 view-shortcut boolean flags</h2>
 <p>Drop the deprecated per-view shortcut flags (<code>--cytoscape</code>, <code>--sigma</code>,
 <code>--module-dag-pods</code>, <code>--ide-three-pane</code>, <code>--source-centric</code>,
 <code>--notion-doc</code>, <code>--wiki-backlinks</code>, <code>--big-module-dag-pods</code>,
@@ -429,48 +446,47 @@ as an unrecognised option. The replacement remains <code>--view=NAME</code> (or
 <code>view: NAME</code> in YAML). Removal drops <code>setViewShortcutOpt</code> and the
 <code>optSawViewShortcut</code> field; the <code>View</code> ADT, <code>viewSlug</code>, and <code>viewOpt</code>
 parser stay.</p>
-<hr />
-<h2 id="2026-05-28--agda-deps--round-6-p3-ast-subterm-fingerprinting">2026-05-28 — <code>agda-deps</code> — round-6 P3 (AST subterm fingerprinting)</h2>
+<hr>
+<h2 id="2026-05-28-agda-deps-round-6-p3-ast-subterm-fingerprinting">2026-05-28 — <code>agda-deps</code> — round-6 P3 (AST subterm fingerprinting)</h2>
 <p>Cross-file CSE / lemma-extraction candidate detection over canonicalised
 internal <code>Term</code>s.</p>
 <ul>
 <li><strong><code>AgdaDeps.TermCanon</code></strong> — canonical-form byte encoder for
-<code>Agda.Syntax.Internal.Term</code>. Two terms hash equal iff alpha-equivalent
-up to: de-Bruijn <code>Var</code> indices, positions stripped, <code>MetaV</code> wildcarded,
-hidden bit preserved, provenance (<code>ConInfo</code>/<code>ProjOrigin</code>/…) dropped;
-<code>QName</code>/<code>Sort</code>/<code>Level</code>/<code>Literal</code> via <code>prettyShow</code> (same convention as
-<code>hashQName</code>, so module aliases collapse). Single bottom-up walk returns
-<code>(encoding, depth, [(hash, depth)])</code>, reusing the encoding at the parent.</li>
+  <code>Agda.Syntax.Internal.Term</code>. Two terms hash equal iff alpha-equivalent
+  up to: de-Bruijn <code>Var</code> indices, positions stripped, <code>MetaV</code> wildcarded,
+  hidden bit preserved, provenance (<code>ConInfo</code>/<code>ProjOrigin</code>/…) dropped;
+  <code>QName</code>/<code>Sort</code>/<code>Level</code>/<code>Literal</code> via <code>prettyShow</code> (same convention as
+  <code>hashQName</code>, so module aliases collapse). Single bottom-up walk returns
+  <code>(encoding, depth, [(hash, depth)])</code>, reusing the encoding at the parent.</li>
 <li><strong><code>--with-term-hashes</code></strong> (off by default) — walks <code>defType</code> + every
-clause body; populates parallel <code>_subtermHashes :: Maybe [Word64]</code> and
-<code>_subtermDepths :: Maybe [Int]</code>.</li>
+  clause body; populates parallel <code>_subtermHashes :: Maybe [Word64]</code> and
+  <code>_subtermDepths :: Maybe [Int]</code>.</li>
 <li><strong><code>--min-term-depth=N</code></strong> — emission threshold, default <code>3</code> (<code>1</code>
-disables filtering); cuts hash volume substantially.</li>
+  disables filtering); cuts hash volume substantially.</li>
 <li><strong>Two optional wire fields</strong> in expanded JSON at <code>schemaVersion: 2</code>:
-<code>definitionSubtermHashes</code> and <code>definitionSubtermDepths</code>, both parallel
-to <code>definitions</code>; inner-array lengths must match (enforced at decode).
-Default-mode JSON is byte-identical (both fields absent, not empty).</li>
+  <code>definitionSubtermHashes</code> and <code>definitionSubtermDepths</code>, both parallel
+  to <code>definitions</code>; inner-array lengths must match (enforced at decode).
+  Default-mode JSON is byte-identical (both fields absent, not empty).</li>
 </ul>
-<hr />
-<h2 id="2026-05-27--agda-deps--yaml-config-agda-depsyml">2026-05-27 — <code>agda-deps</code> — YAML config (<code>.agda-deps.yml</code>)</h2>
+<hr>
+<h2 id="2026-05-27-agda-deps-yaml-config-agda-depsyml">2026-05-27 — <code>agda-deps</code> — YAML config (<code>.agda-deps.yml</code>)</h2>
 <p><code>agda-deps</code> now reads a YAML config from a project-local file (or
 explicit <code>--config=PATH</code>), promoting the shell-wrapper preambles projects
 used into a real format. New module <code>AgdaDeps.Config</code> composes on top of
-the existing surface via <code>applyConfig :: A.Object -&gt; Options -&gt; Either String Options</code>; <code>Options</code> and <code>commandLineFlags</code> are untouched.</p>
+the existing surface via <code>applyConfig :: A.Object -&gt; Options -&gt; Either
+String Options</code>; <code>Options</code> and <code>commandLineFlags</code> are untouched.</p>
 <ul>
 <li>Top-level keys are kebab-case mirrors of CLI flag names; repeatable
-flags accept YAML lists. Bad type / unknown key fails fast naming file
-<ul>
+  flags accept YAML lists. Bad type / unknown key fails fast naming file</li>
 <li>key, exit 1.</li>
-</ul></li>
 <li>Discovery (first match wins): <code>--config=PATH</code> &gt; <code>$AGDA_DEPS_CONFIG</code> &gt;
-<code>./.agda-deps.yml</code>(<code>.yaml</code>) &gt; walk up to the first ancestor with a
-<code>*.agda-lib</code> and pick its dotfile.</li>
+  <code>./.agda-deps.yml</code>(<code>.yaml</code>) &gt; walk up to the first ancestor with a
+  <code>*.agda-lib</code> and pick its dotfile.</li>
 <li>Merge order: <strong>defaults → config → CLI</strong>. A stderr breadcrumb fires
-once when a config applies, unless <code>--quiet</code>.</li>
+  once when a config applies, unless <code>--quiet</code>.</li>
 </ul>
 <p>Example:</p>
-<pre class="yaml"><code>format: html
+<pre><code class="language-yaml">format: html
 view: module-dag-pods
 theme: dark
 no-externals: true
@@ -488,29 +504,31 @@ max-snippet-bytes: 1000000
 json-mode: expanded
 gzip: false
 quiet: false
-out-dir: build/deps</code></pre>
+out-dir: build/deps
+</code></pre>
 <p>Two CLI simplifications shipped alongside:</p>
 <ul>
 <li><strong><code>--theme=default|light|dark|colorblind</code></strong> — single-flag preset for
-the four state colours. Explicit <code>--color-*=#RRGGBB</code> still wins. YAML
-<code>theme:</code>.</li>
+  the four state colours. Explicit <code>--color-*=#RRGGBB</code> still wins. YAML
+  <code>theme:</code>.</li>
 <li><strong>Auto-format inference from <code>-o</code></strong> — when <code>--format</code> is not set and
-<code>-o</code> ends in <code>.html</code>/<code>.json</code>/<code>.dot</code>, the format is inferred. Explicit
-<code>--format=…</code> always wins; directories/extension-less names keep the
-default (<code>dot</code>).</li>
+  <code>-o</code> ends in <code>.html</code>/<code>.json</code>/<code>.dot</code>, the format is inferred. Explicit
+  <code>--format=…</code> always wins; directories/extension-less names keep the
+  default (<code>dot</code>).</li>
 <li><strong>Per-view shortcut flags deprecated</strong> — still work, but emit a
-one-time stderr note; use <code>--view=NAME</code>.</li>
+  one-time stderr note; use <code>--view=NAME</code>.</li>
 </ul>
 <p>Added build-dep <code>yaml &gt;= 0.11 &amp;&amp; &lt; 0.12</code>.</p>
-<hr />
-<h2 id="2026-05-27--agda-deps--edge-provenance-tagging">2026-05-27 — <code>agda-deps</code> — edge-provenance tagging</h2>
+<hr>
+<h2 id="2026-05-27-agda-deps-edge-provenance-tagging">2026-05-27 — <code>agda-deps</code> — edge-provenance tagging</h2>
 <p>Expanded JSON now carries an optional <code>definitionEdgesProvenance</code> array,
-parallel to <code>definitionEdges</code>, tagging each edge <code>signature | body | where | with | unknown</code>. <code>AgdaDeps.Deps</code>:</p>
+parallel to <code>definitionEdges</code>, tagging each edge <code>signature | body |
+where | with | unknown</code>. <code>AgdaDeps.Deps</code>:</p>
 <ul>
 <li>Walks <code>defType</code> and <code>theDef</code> <strong>separately</strong>.</li>
 <li>Names in <code>defType</code> are <code>Signature</code>; names in <code>theDef</code> are <code>Body</code>,
-refined to <code>With</code> when the parent's <code>funWith</code> points at the target and
-<code>Where</code> when the qname's <code>prettyShow</code> contains the <code>._.</code> marker.</li>
+  refined to <code>With</code> when the parent's <code>funWith</code> points at the target and
+  <code>Where</code> when the qname's <code>prettyShow</code> contains the <code>._.</code> marker.</li>
 <li>Combines via precedence <code>Signature &gt; With &gt; Where &gt; Body &gt; Unknown</code>.</li>
 </ul>
 <p><code>ADDef</code> gained a strict <code>_depsProv :: !(Map QName EdgeProv)</code> with the
@@ -519,8 +537,8 @@ carry provenance through <code>contractIgnoredEdges</code> — contracted edges
 inherit the <strong>source</strong> side's tag. Packed mode emits an <code>Int8</code> array
 parallel to <code>outTargets</code> (<code>0=signature,1=body,2=where,3=with,4=unknown</code>).
 Schema stays at <code>v=2</code>; the field is additive.</p>
-<hr />
-<h2 id="2026-05-27--agda-deps--lazy-mode-placeholder-detail-files-for-modules-with-no-kept-defs">2026-05-27 — <code>agda-deps</code> — lazy-mode placeholder detail files for modules with no kept defs</h2>
+<hr>
+<h2 id="2026-05-27-agda-deps-lazy-mode-placeholder-detail-files-for-modules-with-no-kept-defs">2026-05-27 — <code>agda-deps</code> — lazy-mode placeholder detail files for modules with no kept defs</h2>
 <p><code>--lazy</code> declared <code>moduleFiles[m]</code> entries for modules whose detail JSON
 was never written (externals like <code>Agda.Primitive</code>, and project modules
 where every def was filtered), so the JS fetched a 404. Root cause:
@@ -533,9 +551,9 @@ in <code>moduleFiles</code> absent from <code>defsByModule</code>, with discrimi
 <code>externalPostulates</code>. Eight view templates gained
 <code>placeholderReasonText</code> + <code>renderPlaceholderHTML</code> and a guard at the
 fetch site. Schema stays at <code>v=2</code>; non-lazy and expanded modes unaffected.</p>
-<hr />
-<h2 id="2026-05-26--agda-deps----no-externals-actually-drops-externals--externals_summary">2026-05-26 — <code>agda-deps</code> — <code>--no-externals</code> actually drops externals + <code>externals_summary</code></h2>
-<h3 id="--no-externals-actually-drops-externals"><code>--no-externals</code> actually drops externals</h3>
+<hr>
+<h2 id="2026-05-26-agda-deps-no-externals-actually-drops-externals-externals_summary">2026-05-26 — <code>agda-deps</code> — <code>--no-externals</code> actually drops externals + <code>externals_summary</code></h2>
+<h3 id="-no-externals-actually-drops-externals"><code>--no-externals</code> actually drops externals</h3>
 <p><code>--no-externals</code> was still emitting hundreds of stdlib module names. Root
 cause: <code>classifyExternalModules</code> derived its external set only from
 QNames with a resolvable source path, but Agda's compiler-builtins carry
@@ -552,51 +570,53 @@ the project root. The <code>keep</code> predicate is applied to <code>moduleFile
 diagnostic record of the trusted base survives <code>--no-externals</code>.
 Collected <em>before</em> <code>dropExternalDefs</code> runs; omitted entirely when
 <code>--no-externals</code> is off (byte-identical otherwise).</p>
-<pre class="json"><code>&quot;externals_summary&quot;: {
+<pre><code class="language-json">&quot;externals_summary&quot;: {
   &quot;modules&quot;: [&quot;Agda.Builtin.Bool&quot;, &quot;Agda.Primitive&quot;, ...],
   &quot;postulates_by_module&quot;: {
     &quot;Agda.Builtin.Bool&quot;: [&quot;true&quot;, &quot;false&quot;],
     ...
   }
-}</code></pre>
+}
+</code></pre>
 <p><code>buildExternalsSummary</code> filters defs by <code>state == Postulate</code>, groups
 unqualified names by module, and feeds both packed and expanded output.
 The <code>--skip-agda</code> path initialises it to <code>Nothing</code> (no postulates seen).</p>
-<hr />
-<h2 id="2026-05-26--agda-deps--per-definition-line-access-instance-reverse-edges">2026-05-26 — <code>agda-deps</code> — per-definition <code>line</code>, <code>access</code>, instance reverse edges</h2>
+<hr>
+<h2 id="2026-05-26-agda-deps-per-definition-line-access-instance-reverse-edges">2026-05-26 — <code>agda-deps</code> — per-definition <code>line</code>, <code>access</code>, instance reverse edges</h2>
 <ul>
 <li><strong><code>line</code> per definition</strong> — <code>_line :: !(Maybe Int)</code> via
-<code>nameBindingSite</code> → <code>rStart</code> → <code>posLine</code>. Emitted in expanded JSON
-(omitted when unknown); packed unchanged.</li>
+  <code>nameBindingSite</code> → <code>rStart</code> → <code>posLine</code>. Emitted in expanded JSON
+  (omitted when unknown); packed unchanged.</li>
 <li><strong><code>access</code> per definition</strong> — <code>_access :: !(Maybe DefAccess)</code>. Agda
-discards the per-decl <code>Access</code> tag after scope-checking, so this uses a
-source-level pre-scan (<code>findPrivateRanges</code>) for top-level <code>private</code>
-blocks at column 0; <code>backfillAccess</code> matches each def's <code>_line</code> against
-those ranges. Emitted as <code>"access": "private" | "public"</code>.</li>
+  discards the per-decl <code>Access</code> tag after scope-checking, so this uses a
+  source-level pre-scan (<code>findPrivateRanges</code>) for top-level <code>private</code>
+  blocks at column 0; <code>backfillAccess</code> matches each def's <code>_line</code> against
+  those ranges. Emitted as <code>"access": "private" | "public"</code>.</li>
 <li><strong>Instance-declaration reverse edges</strong> — new <code>methodProvidersRef</code>
-side-channel. <code>recordInstanceMethods</code> (in <code>compileDefAD</code>) records
-<code>defInstance</code> binders + projection-method QNames off head clause
-patterns; <code>addInstanceMethodEdges</code> (after <code>contractIgnoredEdges</code>)
-appends providers to any kept def's dep that's a method key. Additive.</li>
+  side-channel. <code>recordInstanceMethods</code> (in <code>compileDefAD</code>) records
+  <code>defInstance</code> binders + projection-method QNames off head clause
+  patterns; <code>addInstanceMethodEdges</code> (after <code>contractIgnoredEdges</code>)
+  appends providers to any kept def's dep that's a method key. Additive.</li>
 </ul>
-<hr />
-<h2 id="2026-05-25--agda-deps--node-identity-and-dead-private-recovery-fixes">2026-05-25 — <code>agda-deps</code> — node-identity and dead-private recovery fixes</h2>
+<hr>
+<h2 id="2026-05-25-agda-deps-node-identity-and-dead-private-recovery-fixes">2026-05-25 — <code>agda-deps</code> — node-identity and dead-private recovery fixes</h2>
 <ul>
 <li><strong><code>ignoreDef</code> filters every <code>defCopy</code></strong> — module-instantiation copies
-for <code>Record</code>/<code>Datatype</code>/<code>Constructor</code>/<code>Projection</code>, not just
-<code>Function</code>; previously surfaced as ghost entries under the importer.</li>
+  for <code>Record</code>/<code>Datatype</code>/<code>Constructor</code>/<code>Projection</code>, not just
+  <code>Function</code>; previously surfaced as ghost entries under the importer.</li>
 <li><strong><code>hashQName</code> via <code>prettyShow</code></strong> — was hashing derived-<code>Show</code>, which
-included <code>NameId</code> metadata that differs between <code>iSignature</code> and
-<code>stSignature</code> sources, collapsing duplicate nodes.</li>
+  included <code>NameId</code> metadata that differs between <code>iSignature</code> and
+  <code>stSignature</code> sources, collapsing duplicate nodes.</li>
 <li><strong>Dead-end private definition recovery in <code>postModuleAD</code></strong> — Agda's
-<code>eliminateDeadCode</code> prunes unreachable top-level <code>private</code> defs from
-<code>iSignature</code>; we diff <code>getSignature</code> (pre-prune) against visited QNames
-and feed missing defs through <code>compileDefAD</code>.</li>
+  <code>eliminateDeadCode</code> prunes unreachable top-level <code>private</code> defs from
+  <code>iSignature</code>; we diff <code>getSignature</code> (pre-prune) against visited QNames
+  and feed missing defs through <code>compileDefAD</code>.</li>
 </ul>
-<hr />
-<h2 id="2026-05-23--feature-batch-for-re-exports--kind--edge-contraction">2026-05-23 — Feature batch for re-exports / kind / edge contraction</h2>
+<hr>
+<h2 id="2026-05-23-feature-batch-for-re-exports-kind-edge-contraction">2026-05-23 — Feature batch for re-exports / kind / edge contraction</h2>
 <h3 id="edge-contraction-through-ignored-defs">Edge contraction through ignored defs</h3>
-<p>Headline correctness fix: <code>with-</code>clauses elaborate to <code>parent → with-NNN → target</code>, and <code>ignoreDef</code> was dropping the <code>with-NNN</code> and
+<p>Headline correctness fix: <code>with-</code>clauses elaborate to <code>parent →
+with-NNN → target</code>, and <code>ignoreDef</code> was dropping the <code>with-NNN</code> and
 losing the edge. <code>ignoredEdgesRef</code> records the raw out-edges of every
 ignored def; <code>contractIgnoredEdges</code> (in <code>postCompileAD</code>) rewrites each
 kept def's <code>_deps</code> by expanding hidden refs into their transitive
@@ -617,102 +637,102 @@ producer walks each visited <code>Interface</code>'s <code>iScope</code> over bo
 <code>ImportedNS</code> (plain <code>open … public</code>) and <code>PublicNS</code> (re-exports through
 parameterised applications) namespaces. <code>iScope</code> is reconstructed from
 <code>iInsideScope</code> at deserialise time, so the data survives cached <code>.agdai</code>.</p>
-<hr />
-<h2 id="2026-05-22--g12--external-feature-request-batch">2026-05-22 — G12 · external feature-request batch</h2>
+<hr>
+<h2 id="2026-05-22-g12-external-feature-request-batch">2026-05-22 — G12 · external feature-request batch</h2>
 <p>Shipped 9 of 14 items from an external feature-request batch; the rest
 are in <a href="backlog.html">Backlog.md</a>.</p>
 <ul>
 <li><code>--version</code> / <code>-V</code> / <code>--numeric-version</code> — early intercept in <code>Main</code>;
-reports the backend's version, not Agda's.</li>
+  reports the backend's version, not Agda's.</li>
 <li><code>--quiet</code> — silences progress chatter via <code>AgdaDeps.Logging.info</code>,
-backed by a global <code>quietRef</code>.</li>
+  backed by a global <code>quietRef</code>.</li>
 <li><code>--no-externals</code> — drops external modules from the rendered graph.</li>
 <li><code>--json-mode=packed|expanded</code> — selects <code>--format=json</code> shape.
-Expanded ships <code>definitions</code> as <code>[{id, name, module, state, x?, y?}]</code> +
-string edge pairs + explicit <code>schemaVersion</code> and <code>mode</code>.</li>
+  Expanded ships <code>definitions</code> as <code>[{id, name, module, state, x?, y?}]</code> +
+  string edge pairs + explicit <code>schemaVersion</code> and <code>mode</code>.</li>
 <li><code>--lenient-imports</code> — rewritten in <code>Main.hs</code> to
-<code>--allow-unsolved-metas</code>; useful with <code>--keep-going</code> on projects with
-deliberate <code>?</code> holes.</li>
+  <code>--allow-unsolved-metas</code>; useful with <code>--keep-going</code> on projects with
+  deliberate <code>?</code> holes.</li>
 <li><code>-o</code> directory auto-created via <code>createDirectoryIfMissing True</code>.</li>
 <li><code>Options</code> grew <code>JsonMode</code>, plus <code>optQuiet</code>, <code>optNoExternals</code>,
-<code>optJsonMode</code>, <code>optLenientImports</code>.</li>
+  <code>optJsonMode</code>, <code>optLenientImports</code>.</li>
 <li><code>CLAUDE.md</code> gained the "State semantics" (D/P/H/F) and "v2 graph.json
-schema" sections.</li>
+  schema" sections.</li>
 </ul>
-<hr />
-<h2 id="g11----skip-agda">G11 — <code>--skip-agda</code></h2>
+<hr>
+<h2 id="g11-skip-agda">G11 — <code>--skip-agda</code></h2>
 <p>Short-circuits the entire Agda pipeline. <code>Main.hs</code> routes <code>--skip-agda</code>
 to <code>AgdaDeps.SkipAgda.runSkipAgda</code>, consuming the line-parsed <code>module …</code>
 / <code>import …</code> declarations <code>AgdaDeps.Precompute</code> already produces.</p>
 <ul>
 <li>Backend options parsed via <code>getOpt' Permute</code> + <code>runOptM</code>.</li>
 <li><code>Precompute.parseHeader</code> falls back to <code>takeBaseName path</code> for
-<code>module _ where</code>.</li>
+  <code>module _ where</code>.</li>
 <li><code>GraphInput</code> got <code>giExtraModules :: Set String</code> so orphan modules
-appear; <code>renderHtmlFromInput</code> exposed for <code>SkipAgda</code>.</li>
+  appear; <code>renderHtmlFromInput</code> exposed for <code>SkipAgda</code>.</li>
 </ul>
 <p>Trade-off: no def graph, no D/P/H, no snippets. Module-DAG views render;
 def-level views show empty pods. Runs in milliseconds regardless of size.</p>
-<hr />
-<h2 id="g10--scaling-to-1m-defs--100k-modules">G10 — Scaling to ~1M defs / 100k modules</h2>
+<hr>
+<h2 id="g10-scaling-to-1m-defs-100k-modules">G10 — Scaling to ~1M defs / 100k modules</h2>
 <p>Audited the pipeline for O(n²) hot spots; switched to strict
 <code>Map</code>/<code>IntMap</code>/<code>IntSet</code>/<code>Set</code> folds throughout. Byte-identical output.</p>
 <ul>
 <li><code>Layout.moduleGrouped</code> — <code>IntMap</code> cons-accumulation (was
-<code>M.fromListWith</code> with <code>(++)</code>).</li>
+  <code>M.fromListWith</code> with <code>(++)</code>).</li>
 <li><code>GraphJson.bfsFrom</code>/<code>bfsDepths</code> — <code>Data.Sequence</code> instead of list queues.</li>
 <li>Six <code>nub</code> sites collapsed to Set-based dedup.</li>
 <li><code>moduleEdgePairs</code> — folds into <code>Set (Int, Int)</code>.</li>
 <li><code>Deps.collectAllQNames</code> — folds into <code>IntMap QName</code>.</li>
 <li><code>Csr.buildCsr</code> — fused <code>length</code> + <code>concatMap</code> into one strict sweep.</li>
 <li><code>Backend.computeQNamePositions</code> — <code>IntSet</code>/<code>IntMap</code>, cheap membership
-test first.</li>
+  test first.</li>
 <li><code>moduleStateCounts</code> — strict <code>data Counts !Int !Int !Int !Int</code>.</li>
 <li><code>buildSearchIndex</code> bigrams gated above 50k names; JS falls back to
-linear scan.</li>
+  linear scan.</li>
 </ul>
-<hr />
-<h2 id="g9--multi-view-html-system">G9 — Multi-view HTML system</h2>
+<hr>
+<h2 id="g9-multi-view-html-system">G9 — Multi-view HTML system</h2>
 <p>Replaced the single cytoscape template with a <code>View</code> ADT and one template
 per view under <code>src/AgdaDeps/templates/views/</code>, all consuming the same v2
 <code>graph.json</code>:</p>
 <ul>
 <li><code>module-dag-pods</code> <em>(default)</em> — top-down DAG of expandable module pods
-via dagre.</li>
+  via dagre.</li>
 <li><code>cytoscape</code> — original compound-node viewer.</li>
 <li><code>ide-three-pane</code>, <code>source-centric</code>, <code>notion-doc</code>, <code>wiki-backlinks</code> —
-definition-level views.</li>
+  definition-level views.</li>
 <li><code>sigma</code> — WebGL via sigma.js + graphology + dagre; falls back to
-concentric above 3000 modules.</li>
+  concentric above 3000 modules.</li>
 <li><code>big-module-dag-pods</code> — viewport-virtualised port for ~100k modules.
-Dagre layout pre-computed Haskell-side (<code>buildModuleDagLayout</code>, Kahn +
-column-pack, O(V+E)), packed as <code>modulePodLayout</code>; JS uses a
-spatial-grid + minimap.</li>
+  Dagre layout pre-computed Haskell-side (<code>buildModuleDagLayout</code>, Kahn +
+  column-pack, O(V+E)), packed as <code>modulePodLayout</code>; JS uses a
+  spatial-grid + minimap.</li>
 <li><code>progress-dashboard</code>, <code>critical-path-holes</code> — KPI / kanban dashboards.</li>
 <li><code>sunburst-hierarchy</code>, <code>cartographic-atlas</code>, <code>reading-order-narrative</code>,
-<code>pixel-grid-overview</code> — hierarchical / textbook / heatmap views.</li>
+  <code>pixel-grid-overview</code> — hierarchical / textbook / heatmap views.</li>
 </ul>
-<hr />
-<h2 id="g8--custom---help-agdadepshelp">G8 — Custom <code>--help</code> (<code>AgdaDeps.Help</code>)</h2>
+<hr>
+<h2 id="g8-custom-help-agdadepshelp">G8 — Custom <code>--help</code> (<code>AgdaDeps.Help</code>)</h2>
 <p>Agda's own <code>--help</code> lists hundreds of flags. <code>Main.hs</code> intercepts plain
 <code>--help</code> / <code>-h</code> / <code>-?</code> and routes to <code>printHelp</code>, which uses
 <code>usageInfo</code> over only the backend's <code>commandLineFlags</code>. Topic forms
 (<code>--help=warning</code>) still forward to Agda; new <code>--agda-help</code> is rewritten
 to plain <code>--help</code> for Agda's upstream printer.</p>
-<hr />
-<h2 id="g7--partial-compilation-under---keep-going">G7 — Partial compilation under <code>--keep-going</code></h2>
+<hr>
+<h2 id="g7-partial-compilation-under-keep-going">G7 — Partial compilation under <code>--keep-going</code></h2>
 <p><code>Agda.Main.runAgda</code> aborts on the first <code>TCErr</code>, so <code>postCompile</code> never
 fires. Forked into <code>AgdaDeps.ModuleExplorer</code>:</p>
 <ul>
 <li><code>partialBackendInteraction</code> catches <code>TCErr</code> from <code>check mainFile</code>,
-records the failing module via <code>reportFailed :: String -&gt; IO ()</code>, and
-drives each backend manually over the modules Agda did load.</li>
+  records the failing module via <code>reportFailed :: String -&gt; IO ()</code>, and
+  drives each backend manually over the modules Agda did load.</li>
 <li><code>partialCompilerMain</code> re-seeds <code>stVisitedModules</code> from
-<code>stDecodedModules</code>, runs <code>preCompile</code>, then <code>postCompile</code>.</li>
+  <code>stDecodedModules</code>, runs <code>preCompile</code>, then <code>postCompile</code>.</li>
 <li><code>AgdaDeps.Driver</code> is a thin shim wiring <code>failedModulesRef</code> to the callback.</li>
 </ul>
-<hr />
-<h2 id="g6--auto-discover-agda-lib-for-non-cwd-invocations">G6 — Auto-discover <code>.agda-lib</code> for non-cwd invocations</h2>
+<hr>
+<h2 id="g6-auto-discover-agda-lib-for-non-cwd-invocations">G6 — Auto-discover <code>.agda-lib</code> for non-cwd invocations</h2>
 <p>Plain <code>agda</code> only looks for <code>.agda-lib</code> in cwd, so invocations from
 outside the project failed (library deps never consulted). Pre-process
 argv before <code>runAgdaArgs</code>: canonicalize path-bearing entries to absolute
@@ -721,31 +741,31 @@ then walk up from each <code>-i</code> and each <code>.agda</code>/<code>.lagda*
 ancestor containing a <code>*.agda-lib</code> and <code>setCurrentDirectory</code> to it. Skip
 the dance when <code>--no-libraries</code>, <code>--library</code>/<code>-l</code>, or <code>--library-file</code> is
 already passed.</p>
-<hr />
-<h2 id="g5--bump-to-agda-29">G5 — Bump to Agda 2.9</h2>
+<hr>
+<h2 id="g5-bump-to-agda-29">G5 — Bump to Agda 2.9</h2>
 <ul>
 <li><code>cabal.project</code> pins Agda as a <code>source-repository-package</code> from
-<code>github.com/agda/agda</code> (2.9.0 isn't on Hackage yet).</li>
+  <code>github.com/agda/agda</code> (2.9.0 isn't on Hackage yet).</li>
 <li><code>agda-deps.cabal</code>: <code>Agda &gt;= 2.9 &amp;&amp; &lt; 3</code>.</li>
 <li><code>graphviz &gt;= 2999.20</code> to dodge older versions' <code>&lt;&gt;</code> ambiguity on GHC ≥ 9.</li>
 <li>Adapted <code>_funWith :: Maybe QName</code> → <code>IsWithFunction QName</code> via <code>isWithFun</code>.</li>
 </ul>
-<hr />
-<h2 id="g4--linked-source-view---with-source">G4 — Linked source view (<code>--with-source</code>)</h2>
+<hr>
+<h2 id="g4-linked-source-view-with-source">G4 — Linked source view (<code>--with-source</code>)</h2>
 <p><code>--with-source</code> embeds each definition's source in a slide-in drawer,
 rendered with Agda's native semantic highlighting. Drives Agda's
 <code>defaultPageGen</code> programmatically from <code>postCompileAD</code>:</p>
-<ol type="1">
+<ol>
 <li>Per-module Agda HTML to a temp dir under <code>-o</code>.</li>
 <li>Extract the <code>&lt;pre class="Agda"&gt;</code> block from each file.</li>
 <li>Per leaf QName: find binding line via <code>srcLocOf</code>, compute paragraph
-bounds against the cached source, slice the highlighted HTML by line.</li>
+   bounds against the cached source, slice the highlighted HTML by line.</li>
 <li>Inline <code>source</code> + <code>sourceLine</code> on each node's JSON; remove temp dir.</li>
 </ol>
 <p>Line slicing is safe because Agda's rendered <code>&lt;pre&gt;</code> keeps newlines as
 plain text <em>outside</em> any <code>&lt;a&gt;</code> tag.</p>
-<hr />
-<h2 id="g3--node-colouring-by-state">G3 — Node colouring by state</h2>
+<hr>
+<h2 id="g3-node-colouring-by-state">G3 — Node colouring by state</h2>
 <p>Definitions classified <code>Defined</code> / <code>Postulate</code> / <code>Hole</code>, tagged on
 <code>ADDef</code>. Palette via <code>--color-defined</code> / <code>--color-postulate</code> /
 <code>--color-hole</code> (defaults <code>#4caf50</code> / <code>#f44336</code> / <code>#9c27b0</code>); both DOT and
@@ -753,16 +773,23 @@ HTML honour it. Hole detection has three signals because Agda's
 <code>openMetasToPostulates</code> rewrites <code>?</code> into synthetic <code>unsolved#meta.*</code>
 postulates before backends fire: a syntactic <code>MetaV</code> walk, the def's own
 name, and references to synthetic-meta names.</p>
-<hr />
-<h2 id="g2--html-interactive-backend">G2 — HTML interactive backend</h2>
+<hr>
+<h2 id="g2-html-interactive-backend">G2 — HTML interactive backend</h2>
 <p>Added <code>--format=dot|html</code> and a self-contained browser-explorable HTML
 output backed by <a href="https://js.cytoscape.org/">cytoscape.js</a>. Modules as
 collapsible compound parent nodes (<code>cytoscape-expand-collapse</code>); cytoscape
 loaded from CDN, graph inlined as JSON. Output routed via <code>-o/--out-dir</code>.</p>
-<hr />
-<h2 id="g1--remove-nix-scaffolding">G1 — Remove nix scaffolding</h2>
-<p>Stripped <code>flake.nix</code> / <code>flake.lock</code>. Project builds purely via <code>cabal</code>.</p>
-</div></div></main>
-<footer class="site-footer"><div class="wrap"><div><a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div><div class="muted">Built from the repository’s Markdown by <code>docs/build.py</code>. <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div></div></footer>
+<hr>
+<h2 id="g1-remove-nix-scaffolding">G1 — Remove nix scaffolding</h2>
+<p>Stripped <code>flake.nix</code> / <code>flake.lock</code>. Project builds purely via <code>cabal</code>.</p></div>
+</div>
+</main>
+<footer class="site-footer"><div class="wrap">
+<div>
+<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div>
+<div class="muted">Built from the repository’s Markdown with
+<a href="https://getpelican.com">Pelican</a>.
+<a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div>
+</div></footer>
 </body>
 </html>

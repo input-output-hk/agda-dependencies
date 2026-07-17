@@ -1,28 +1,49 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Roadmap · agda-deps</title>
-<link rel="stylesheet" href="assets/pico.min.css">
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="theme/css/style.css">
 </head>
 <body>
-<header class="topbar"><div class="bar"><a class="brand" href="index.html">agda-deps</a><nav><a href="index.html">Home</a><a href="guide.html">Guide</a><a href="examples.html">Examples</a><a href="views/index.html">Views ↗</a><a href="changelog.html">Changelog</a><a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a></nav></div></header>
-<main><div class="layout"><aside class="toc"><div class="toc-inner"><div class="toc-title">On this page</div><nav><a class="lvl2" href="#open">Open</a></nav></div></aside><div class="prose"><h1 id="todo">TODO</h1>
+<header class="topbar"><div class="bar">
+<a class="brand" href="index.html">agda-deps</a>
+<nav>
+<a href="index.html">Home</a>
+<a href="guide.html">Guide</a>
+<a href="examples.html">Examples</a>
+<a href="views/index.html">Views ↗</a>
+<a href="changelog.html">Changelog</a>
+<a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a>
+</nav>
+</div></header>
+<main><div class="layout">
+<aside class="toc"><div class="toc-inner">
+<div class="toc-title">On this page</div>
+<nav><a class="lvl2" href="#open">Open</a></nav>
+</div></aside>
+<div class="prose"><h1 id="todo">TODO</h1>
 <p>Forward-looking work on <code>agda-deps</code>. Runnable examples:
 <a href="examples.html">Examples.md</a>. Deferred / refused ideas: <a href="backlog.html">Backlog.md</a>.
 Shipped work: <a href="changelog.html">Changelog.md</a>.</p>
-<hr />
+<hr>
 <h2 id="open">Open</h2>
-<ul class="task-list">
-<li><label><input type="checkbox" /><strong>Truly minimal lazy serialise.</strong> A body-only edit already rewrites just
-the edited module's lazy file, but adding/removing a definition renumbers the
-dense global node indices the per-module <code>outEdges</code> embed, so many files'
-epochs change. Making that minimal needs a stable-per-node index in the lazy
-wire format, coordinated with the JS consumer in <code>agda-graph-explorer</code>.</label></li>
-</ul>
-</div></div></main>
-<footer class="site-footer"><div class="wrap"><div><a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div><div class="muted">Built from the repository’s Markdown by <code>docs/build.py</code>. <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div></div></footer>
+<ul>
+<li>[ ] <strong>Truly minimal lazy serialise.</strong> A body-only edit already rewrites just
+  the edited module's lazy file, but adding/removing a definition renumbers the
+  dense global node indices the per-module <code>outEdges</code> embed, so many files'
+  epochs change. Making that minimal needs a stable-per-node index in the lazy
+  wire format, coordinated with the JS consumer in <code>agda-graph-explorer</code>.</li>
+</ul></div>
+</div>
+</main>
+<footer class="site-footer"><div class="wrap">
+<div>
+<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div>
+<div class="muted">Built from the repository’s Markdown with
+<a href="https://getpelican.com">Pelican</a>.
+<a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div>
+</div></footer>
 </body>
 </html>

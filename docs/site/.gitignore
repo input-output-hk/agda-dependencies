@@ -1,0 +1,9 @@
+# Python venv used to run Pelican
+.venv/
+
+# Staged content (derived from the repo root Markdown + views/ by stage.py)
+content/pages/
+content/views/
+
+__pycache__/
+*.pyc

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="{{ DEFAULT_LANG }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ SITENAME }}{% endblock %}</title>
+<link rel="stylesheet" href="theme/css/style.css">
+</head>
+<body>
+<header class="topbar"><div class="bar">
+<a class="brand" href="index.html">{{ SITENAME }}</a>
+<nav>
+{% for href, label in TOP_NAV %}
+<a href="{{ href }}"{% if href == active_page %} class="active"{% endif %}>{{ label }}</a>
+{% endfor %}
+</nav>
+</div></header>
+<main>{% block main %}{% endblock %}</main>
+<footer class="site-footer"><div class="wrap">
+<div>
+{% for p in DOC_PAGES %}<a href="{{ p.out }}">{{ p.nav }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+</div>
+<div class="muted">Built from the repository’s Markdown with
+<a href="https://getpelican.com">Pelican</a>.
+<a href="{{ GITHUB_URL }}">Source on GitHub ↗</a></div>
+</div></footer>
+</body>
+</html>

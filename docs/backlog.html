@@ -1,66 +1,113 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Backlog · agda-deps</title>
-<link rel="stylesheet" href="assets/pico.min.css">
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="theme/css/style.css">
 </head>
 <body>
-<header class="topbar"><div class="bar"><a class="brand" href="index.html">agda-deps</a><nav><a href="index.html">Home</a><a href="guide.html">Guide</a><a href="examples.html">Examples</a><a href="views/index.html">Views ↗</a><a href="changelog.html">Changelog</a><a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a></nav></div></header>
-<main><div class="layout"><aside class="toc"><div class="toc-inner"><div class="toc-title">On this page</div><nav><a class="lvl2" href="#deferred--useful-no-current-push">Deferred — useful, no current push</a><a class="lvl2" href="#refused--out-of-scope">Refused / out of scope</a></nav></div></aside><div class="prose"><h1 id="backlog">Backlog</h1>
+<header class="topbar"><div class="bar">
+<a class="brand" href="index.html">agda-deps</a>
+<nav>
+<a href="index.html">Home</a>
+<a href="guide.html">Guide</a>
+<a href="examples.html">Examples</a>
+<a href="views/index.html">Views ↗</a>
+<a href="changelog.html">Changelog</a>
+<a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a>
+</nav>
+</div></header>
+<main><div class="layout">
+<aside class="toc"><div class="toc-inner">
+<div class="toc-title">On this page</div>
+<nav><a class="lvl2" href="#deferred-useful-no-current-push">Deferred — useful, no current push</a><a class="lvl2" href="#refused-out-of-scope">Refused / out of scope</a></nav>
+</div></aside>
+<div class="prose"><h1 id="backlog">Backlog</h1>
 <p>Deferred and refused ideas. Shipped work: <a href="changelog.html">Changelog.md</a>.
 Recipes: <a href="examples.html">Examples.md</a>. Planned work: <a href="roadmap.html">TODO.md</a>.</p>
-<hr />
-<h2 id="deferred--useful-no-current-push">Deferred — useful, no current push</h2>
+<hr>
+<h2 id="deferred-useful-no-current-push">Deferred — useful, no current push</h2>
 <ul>
-<li><p><strong>Bump the <code>cabal.project</code> Agda pin to Hackage</strong> once Agda 2.9 releases (it
-currently points at an upstream commit).</p></li>
-<li><p><strong>Multicore for the post-Agda passes.</strong> Agda's <code>TCM</code> and the <code>Backend'</code> hooks
-are serial and unsafe to fork. The post-Agda IO in <code>postCompileAD</code>
-(<code>findPrivateRanges</code>, <code>collectHighlightedSnippets</code>, the <code>Precompute</code> scan) would
-be safe to parallelise, but its walltime isn't dominant. Revisit on a profile.</p></li>
-<li><p><strong>Daemon / persistent mode.</strong> Amortise cabal+Agda startup by keeping one process
-consuming newline-delimited commands. Large: Agda's <code>TCM</code> holds persistent state
-(<code>stDecodedModules</code> / <code>stVisitedModules</code> / mtime-based <code>.agdai</code> invalidation)
-that cross-command reuse would touch.</p></li>
-<li><p><strong>Snippet hashing for the <code>--skip-agda</code> drawer.</strong> <code>big-module-dag-pods</code> keys defs
-by a Murmur-on-<code>prettyShow</code> hash that <code>SkipAgda</code> doesn't reimplement, so it shows
-a fallback. Add a JS-side hash for a future <code>--skip-agda --with-source</code> mode.</p></li>
-<li><p><strong>Sub-modules in the source scan.</strong> <code>Precompute.parseHeader</code> reads only the first
-<code>module …</code> per file; nested <code>module Foo.Inner where</code> blocks are missed. Fine for
-<code>--skip-agda</code> today.</p></li>
-<li><p><strong>Scale validation at 100k modules.</strong> <code>big-module-dag-pods</code> has the right shape
-but is untested at that size; tune <code>BUCKET_SIZE</code> / <code>EDGE_BUDGET</code> / <code>VIEWPORT_PAD</code>
-against a real corpus.</p></li>
-<li><p><strong>External-module heuristic for <code>--skip-agda</code>.</strong> Currently: external iff the
-source is outside <code>cwd</code> or it appears only as an import target. Could read
-<code>.agda-lib</code> <code>depend:</code> libraries for better multi-library classification.</p></li>
-<li><p><strong>Schema bump to v3.</strong> <code>kind</code>, <code>reexports[]</code>, and <code>definitionEdgesProvenance</code>
-were added additively under <code>schemaVersion: 2</code>. A v3 bump becomes honest at the
-next <em>incompatible</em> change.</p></li>
-<li><p><strong>Warm-<code>.agdai</code> edge loss.</strong> A warm, non-incremental run emits a slightly poorer
-main-module graph than a cold run (dead-private pattern helpers lose
-edges/kind/type), because <code>getSignature</code> recovery only sees <code>stSignature</code> (the
-entry module's defs). Main-module-only; mitigated because the golden is a cold
-run and <code>--incremental</code> serves the complete fragment.</p></li>
+<li>
+<p><strong>Bump the <code>cabal.project</code> Agda pin to Hackage</strong> once Agda 2.9 releases (it
+  currently points at an upstream commit).</p>
+</li>
+<li>
+<p><strong>Multicore for the post-Agda passes.</strong> Agda's <code>TCM</code> and the <code>Backend'</code> hooks
+  are serial and unsafe to fork. The post-Agda IO in <code>postCompileAD</code>
+  (<code>findPrivateRanges</code>, <code>collectHighlightedSnippets</code>, the <code>Precompute</code> scan) would
+  be safe to parallelise, but its walltime isn't dominant. Revisit on a profile.</p>
+</li>
+<li>
+<p><strong>Daemon / persistent mode.</strong> Amortise cabal+Agda startup by keeping one process
+  consuming newline-delimited commands. Large: Agda's <code>TCM</code> holds persistent state
+  (<code>stDecodedModules</code> / <code>stVisitedModules</code> / mtime-based <code>.agdai</code> invalidation)
+  that cross-command reuse would touch.</p>
+</li>
+<li>
+<p><strong>Snippet hashing for the <code>--skip-agda</code> drawer.</strong> <code>big-module-dag-pods</code> keys defs
+  by a Murmur-on-<code>prettyShow</code> hash that <code>SkipAgda</code> doesn't reimplement, so it shows
+  a fallback. Add a JS-side hash for a future <code>--skip-agda --with-source</code> mode.</p>
+</li>
+<li>
+<p><strong>Sub-modules in the source scan.</strong> <code>Precompute.parseHeader</code> reads only the first
+  <code>module …</code> per file; nested <code>module Foo.Inner where</code> blocks are missed. Fine for
+  <code>--skip-agda</code> today.</p>
+</li>
+<li>
+<p><strong>Scale validation at 100k modules.</strong> <code>big-module-dag-pods</code> has the right shape
+  but is untested at that size; tune <code>BUCKET_SIZE</code> / <code>EDGE_BUDGET</code> / <code>VIEWPORT_PAD</code>
+  against a real corpus.</p>
+</li>
+<li>
+<p><strong>External-module heuristic for <code>--skip-agda</code>.</strong> Currently: external iff the
+  source is outside <code>cwd</code> or it appears only as an import target. Could read
+  <code>.agda-lib</code> <code>depend:</code> libraries for better multi-library classification.</p>
+</li>
+<li>
+<p><strong>Schema bump to v3.</strong> <code>kind</code>, <code>reexports[]</code>, and <code>definitionEdgesProvenance</code>
+  were added additively under <code>schemaVersion: 2</code>. A v3 bump becomes honest at the
+  next <em>incompatible</em> change.</p>
+</li>
+<li>
+<p><strong>Warm-<code>.agdai</code> edge loss.</strong> A warm, non-incremental run emits a slightly poorer
+  main-module graph than a cold run (dead-private pattern helpers lose
+  edges/kind/type), because <code>getSignature</code> recovery only sees <code>stSignature</code> (the
+  entry module's defs). Main-module-only; mitigated because the golden is a cold
+  run and <code>--incremental</code> serves the complete fragment.</p>
+</li>
 </ul>
-<h2 id="refused--out-of-scope">Refused / out of scope</h2>
+<h2 id="refused-out-of-scope">Refused / out of scope</h2>
 <ul>
-<li><p><strong>Stable <code>def_id</code> across runs.</strong> Belongs in a history/diff tool. Content/signature
-hashes and user pragmas break on refactors; QNames are the closest stable thing
-Agda ships, and we already emit them. Rename detection is <code>git log --follow</code>'s job.</p></li>
-<li><p><strong>Inliner gap.</strong> Agda inlines every <code>{-# INLINE #-}</code> call before the backend hook,
-so the call edges are unrecoverable from post-elaboration syntax; keeping INLINE
-functions as nodes just creates false-<code>dead</code> orphans. Handled consumer-side by a
-source scan. Fixture: <code>test/InlineGap.agda</code>.</p></li>
-<li><p><strong><code>first_seen</code> / <code>last_seen</code>, per-commit <code>churn</code> / pivot hints.</strong> Multi-commit
-context is a history-tool concern.</p></li>
-<li><p><strong>Per-commit <code>present: [qname]</code> set.</strong> Redundant — <code>defs.names</code> (packed) and
-<code>definitions[].name</code> (expanded) already enumerate every def seen this run.</p></li>
-</ul>
-</div></div></main>
-<footer class="site-footer"><div class="wrap"><div><a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div><div class="muted">Built from the repository’s Markdown by <code>docs/build.py</code>. <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div></div></footer>
+<li>
+<p><strong>Stable <code>def_id</code> across runs.</strong> Belongs in a history/diff tool. Content/signature
+  hashes and user pragmas break on refactors; QNames are the closest stable thing
+  Agda ships, and we already emit them. Rename detection is <code>git log --follow</code>'s job.</p>
+</li>
+<li>
+<p><strong>Inliner gap.</strong> Agda inlines every <code>{-# INLINE #-}</code> call before the backend hook,
+  so the call edges are unrecoverable from post-elaboration syntax; keeping INLINE
+  functions as nodes just creates false-<code>dead</code> orphans. Handled consumer-side by a
+  source scan. Fixture: <code>test/InlineGap.agda</code>.</p>
+</li>
+<li>
+<p><strong><code>first_seen</code> / <code>last_seen</code>, per-commit <code>churn</code> / pivot hints.</strong> Multi-commit
+  context is a history-tool concern.</p>
+</li>
+<li>
+<p><strong>Per-commit <code>present: [qname]</code> set.</strong> Redundant — <code>defs.names</code> (packed) and
+  <code>definitions[].name</code> (expanded) already enumerate every def seen this run.</p>
+</li>
+</ul></div>
+</div>
+</main>
+<footer class="site-footer"><div class="wrap">
+<div>
+<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div>
+<div class="muted">Built from the repository’s Markdown with
+<a href="https://getpelican.com">Pelican</a>.
+<a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div>
+</div></footer>
 </body>
 </html>

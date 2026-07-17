@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% set active_page = "index.html" %}
+{% block title %}Documentation · {{ SITENAME }}{% endblock %}
+{% block main %}
+<div class="layout wide">
+<div class="home">
+  <header class="mast">
+    <h1>{{ SITENAME }}</h1>
+    <p class="sub">An Agda compiler backend</p>
+    <p class="lede">It runs inside the type-checker and emits your proof's
+      dependency graph &mdash; one node per definition, each coloured by
+      <span class="em">state</span>: defined, postulated, a hole, or a module
+      that failed to check.</p>
+  </header>
+
+  <section>
+    <h2>Getting a graph</h2>
+    <pre><span class="c"># install once</span>
+cabal install exe:agda-deps --overwrite-policy=always</pre>
+    <pre><span class="c"># emit an interactive HTML view</span>
+agda-deps --format=html --view=module-dag-pods \
+          --with-source -i test/ -o out/ test/Test.agda</pre>
+    <p class="fine">With no <code>--format</code>, the output is Graphviz DOT; a
+      <code>.html</code> or <code>.json</code> path after <code>-o</code> infers
+      the format.</p>
+  </section>
+
+  <section>
+    <h2>The four states</h2>
+    <dl>
+    {% for code, name, desc in STATES %}
+      <div class="item"><dt><span class="mark m-{{ code }}">{{ code }}</span>{{ name }}</dt><dd>{{ desc | safe }}</dd></div>
+    {% endfor %}
+    </dl>
+  </section>
+
+  <section>
+    <h2>Three outputs</h2>
+    <dl>
+    {% for name, desc in FORMATS %}
+      <div class="item"><dt>{{ name }}</dt><dd>{{ desc | safe }}</dd></div>
+    {% endfor %}
+    </dl>
+  </section>
+
+  <section>
+    <h2>Flags worth knowing</h2>
+    <dl>
+    {% for flag, desc in MODES %}
+      <div class="item"><dt><span class="mono">{{ flag }}</span></dt><dd>{{ desc | safe }}</dd></div>
+    {% endfor %}
+    </dl>
+    <p class="fine"><a href="guide.html#backend-flags">Full flag reference in the guide &rarr;</a></p>
+  </section>
+
+  <section>
+    <h2>The views</h2>
+    <p class="fine">Fourteen HTML views, each answering a different question.
+      A slice below &mdash; or the <a href="{{ GALLERY }}">full gallery</a>.</p>
+    <div class="rows">
+    {% for slug, name, desc in VIEW_HIGHLIGHTS %}
+      <a class="linkrow" href="views/{{ slug }}/deps.html"><span class="rk">{{ name }}<span class="slug">--view={{ slug }}</span></span><span class="rd">{{ desc | safe }}</span></a>
+    {% endfor %}
+    </div>
+  </section>
+
+  <section>
+    <h2>Documentation</h2>
+    <div class="rows">
+    {% for p in DOC_PAGES %}
+      <a class="linkrow" href="{{ p.out }}"><span class="rk">{{ p.nav }}</span><span class="rd">{{ p.blurb | safe }}</span></a>
+    {% endfor %}
+    </div>
+  </section>
+</div>
+</div>
+{% endblock %}
