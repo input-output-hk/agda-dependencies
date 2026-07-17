@@ -19,7 +19,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))   # docs/site
 # --- site identity ---------------------------------------------------------
 
 SITENAME = "agda-deps"
-SITE_TAGLINE = "An Agda compiler backend that maps your proof's dependency graph."
+SITE_TAGLINE = "An Agda dependency graph generator."
 GITHUB_URL = "https://github.com/input-output-hk/agda-dependencies"
 GALLERY = "views/index.html"
 
@@ -98,7 +98,7 @@ TOP_NAV = [
     ("guide.html", "Guide"),
     ("examples.html", "Examples"),
     (GALLERY, "Views ↗"),
-    ("changelog.html", "Changelog"),
+    # ("changelog.html", "Changelog"),
     (GITHUB_URL, "GitHub ↗"),
 ]
 
@@ -156,15 +156,9 @@ DOC_PAGES = [
     dict(src="Examples.md", out="examples.html", slug="examples", nav="Examples",
          title="Examples",
          blurb="One runnable command per feature, with empirical defaults."),
-    dict(src="Changelog.md", out="changelog.html", slug="changelog", nav="Changelog",
-         title="Changelog",
-         blurb="Everything shipped, newest first."),
     dict(src="TODO.md", out="roadmap.html", slug="roadmap", nav="Roadmap",
          title="Roadmap",
          blurb="Forward-looking work that's actively planned."),
-    dict(src="Backlog.md", out="backlog.html", slug="backlog", nav="Backlog",
-         title="Backlog",
-         blurb="Ideas parked for later, plus approaches consciously set aside."),
 ]
 
 # Staged only with `stage.py --internal`.
@@ -172,4 +166,10 @@ INTERNAL_PAGES = [
     dict(src="CLAUDE.md", out="internals.html", slug="internals", nav="Internals",
          title="Architecture & internals",
          blurb="Module map, backend pipeline, and hard-won gotchas."),
+    dict(src="Backlog.md", out="backlog.html", slug="backlog", nav="Backlog",
+         title="Backlog",
+         blurb="Ideas parked for later, plus approaches consciously set aside."),
+    dict(src="Changelog.md", out="changelog.html", slug="changelog", nav="Changelog",
+         title="Changelog",
+         blurb="Everything shipped, newest first."),
 ]

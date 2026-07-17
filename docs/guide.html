@@ -14,7 +14,6 @@
 <a href="guide.html" class="active">Guide</a>
 <a href="examples.html">Examples</a>
 <a href="views/index.html">Views ↗</a>
-<a href="changelog.html">Changelog</a>
 <a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a>
 </nav>
 </div></header>
@@ -23,15 +22,17 @@
 <div class="toc-title">On this page</div>
 <nav><a class="lvl2" href="#prerequisites">Prerequisites</a><a class="lvl2" href="#build">Build</a><a class="lvl2" href="#quick-start">Quick start</a><a class="lvl2" href="#backend-flags">Backend flags</a><a class="lvl2" href="#views">Views</a><a class="lvl2" href="#yaml-config">YAML config</a><a class="lvl2" href="#linking-to-source">Linking to source</a><a class="lvl2" href="#large-projects-lazy-output">Large projects: lazy output</a><a class="lvl2" href="#consuming-the-json-output">Consuming the JSON output</a><a class="lvl2" href="#what-gets-filtered-out">What gets filtered out</a><a class="lvl2" href="#ai-disclaimer">AI disclaimer</a></nav>
 </div></aside>
-<div class="prose"><h1 id="agda-deps-an-agda-backend-for-visualizing-lemma-dependencies">agda-deps: an Agda backend for visualizing lemma dependencies</h1>
-<p><code>agda-deps</code> is an Agda compiler backend. It runs inside the type-checker and
-emits a graph of the dependencies between definitions, postulates, and
-incomplete lemmas. Output is one of:</p>
+<div class="prose"><h1 id="agda-deps-an-agda-dependecy-graph-generator-plus-nice-visuals">agda-deps: an Agda dependecy graph generator plus nice visuals.</h1>
+<p><code>agda-deps</code> is an dependency graph generator exposing the relation between
+definitions, postulates, and incomplete definitions/expressions.
+The main idea is to show a simple overview of the state of the library.</p>
+<p>There are two visual outcomes:</p>
 <ul>
 <li>a Graphviz <strong>DOT</strong> file,</li>
-<li>an interactive <strong>HTML</strong> page (one of several <a href="#views">views</a>),</li>
-<li>a stable <strong>JSON</strong> artifact (the v2 <code>graph.json</code> schema) for downstream tooling.</li>
+<li>an interactive <strong>HTML</strong> page, here we have several backends (see <a href="#views">views</a>),</li>
 </ul>
+<p>All outcomes are generated from a stable <strong>JSON</strong> artifact (see the v2
+<code>graph.json</code> schema).</p>
 <p>Each node is coloured by the state of its definition:</p>
 <table>
 <thead>
@@ -64,42 +65,29 @@ incomplete lemmas. Output is one of:</p>
 </tr>
 </tbody>
 </table>
-<p>Examples: <a href="examples.html">Examples.md</a>. Changes: <a href="changelog.html">Changelog.md</a>.
-Planned / deferred: <a href="roadmap.html">TODO.md</a>, <a href="backlog.html">Backlog.md</a>.</p>
 <h2 id="prerequisites">Prerequisites</h2>
 <ul>
-<li>GHC and <code>cabal-install</code> with <code>base &gt;= 4.10 &amp;&amp; &lt; 4.23</code>.</li>
-<li><code>Agda &gt;= 2.8 &amp;&amp; &lt; 3</code>. The cabal solver picks the version: the default
-  <code>cabal.project</code> pins <code>Agda ==2.8.0</code>; <code>cabal.project.agda29</code> pins a 2.9.0 git
-  commit.</li>
+<li>GHC, <code>base &gt;= 4.10 &amp;&amp; &lt; 4.23</code>.</li>
+<li><code>Agda &gt;= 2.8 &amp;&amp; &lt; 3</code>. </li>
 </ul>
-<p>A browser is enough to view HTML output over <code>file://</code>. Only <code>--lazy</code> output
-needs an HTTP server.</p>
 <h2 id="build">Build</h2>
+<p>Two builds, Agda 2.8 and 2.9 (wait until there is a rc.)</p>
 <pre><code>cabal build                                                                        # Agda 2.8.0 (default)
 cabal build --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps   # Agda 2.9.0
 </code></pre>
-<p>Both produce byte-identical graphs (apart from the <code>producer</code> fingerprint).</p>
-<p>Install a stable binary for repeated use or for tooling that shells out:</p>
-<pre><code>cabal install exe:agda-deps --overwrite-policy=always
-</code></pre>
-<p>It lands in cabal's <code>installdir</code> (<code>~/.local/bin/</code> by default; ensure it is on
-<code>PATH</code>). <code>agda-deps --version</code> prints the build fingerprint — the same string
-stamped into <code>graph.json</code> as <code>producer</code>.</p>
 <h2 id="quick-start">Quick start</h2>
-<p><code>test/Test.agda</code> (entry of the <code>test/</code> corpus) includes a postulate
-(<code>Holes.magic</code>) and a hole (<code>Holes.incomplete</code>), so its graph shows all states.</p>
-<p>DOT:</p>
+<p>For DOT generation:</p>
 <pre><code>cabal run agda-deps -- --format=dot -i test/ -o test/ test/Test.agda
 dot -Tsvg test/deps.dot -o deps.svg
 </code></pre>
-<p>HTML:</p>
+<p>For HTML generation:</p>
 <pre><code>cabal run agda-deps -- --format=html -i test/ -o test/ test/Test.agda
 xdg-open test/deps.html
 </code></pre>
-<p>The HTML page has pan &amp; zoom, collapsible module clusters, click-to-focus,
-a module-tree sidebar, layout/spacing controls, and a transitive-edge filter.
-Externals (stdlib, <code>Agda.Builtin.*</code>, <code>depend:</code> libraries) start hidden. Under
+<p>HTML pages have awesome visual effects: pan &amp; zoom, collapsible module clusters,
+click-to-focus, a module-tree sidebar, layout/spacing controls, and a
+transitive-edge filter.</p>
+<p>Externals (stdlib, <code>Agda.Builtin.*</code>, <code>depend:</code> libraries) start hidden. Under
 <code>--lazy</code> only the entry module shows at first; click a module to reveal its
 imports.</p>
 <p>Run on your own code by pointing <code>-i</code> at the include path that resolves your
@@ -107,6 +95,7 @@ imports (repeat <code>-i</code> for the standard library) and passing the top mo
 <pre><code>cabal run agda-deps -- --format=html -i src/ -i /path/to/agda-stdlib/src -o out/ src/MyMain.agda
 </code></pre>
 <h2 id="backend-flags">Backend flags</h2>
+<p>Here is where it gets complicated since we have a lot of config options.</p>
 <p>Everything after <code>--</code> is forwarded to the backend and to Agda's CLI. Standard
 Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</code>,
 <code>--library-file=FILE</code>, <code>--no-libraries</code>, and the trailing positional module.
@@ -126,20 +115,14 @@ Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</co
   (defaults <code>#4caf50</code> / <code>#f44336</code> / <code>#9c27b0</code> / <code>#ff9800</code>).</li>
 <li><code>--keep-going</code> — don't abort on a type-check error: tag the failing module
   <code>failed</code> and emit whatever loaded, with def-level data for every module that
-  elaborated. JSON carries a <code>failedModules</code> array; DOT emits one node per
-  failed module. <code>failedModules</code> names the module Agda was checking when the
-  error fired (possibly a parent, not the failing leaf); <code>entryModule</code> is
-  omitted if the entry point never elaborated.</li>
+  elaborated. </li>
 <li><code>--skip-agda</code> — don't invoke Agda; render a module-level graph from a source
-  scan (<code>module</code> / <code>import</code> lines) in milliseconds. No definition graph, no
+  scan (<code>module</code> / <code>import</code> lines). No definition graph, no
   D/P/H states, no snippets — module-DAG views only.</li>
 <li><code>--lenient-imports</code> — forward <code>--allow-unsolved-metas</code> to Agda, for projects
-  that deliberately commit <code>?</code> holes; combine with <code>--keep-going</code>. Incompatible
-  with <code>--safe</code> dependencies (any <code>--safe</code> module in the closure aborts with
-  <code>[SafeFlagPragma]</code>); for a <code>--safe</code> stdlib use <code>--keep-going</code> alone.</li>
+  that deliberately commit <code>?</code> holes; combine with <code>--keep-going</code>. </li>
 <li><code>--resolve-deps</code> — constrain Agda's search path to the project's <code>.agda-lib</code>
-  <code>depend:</code> closure. Fixes <code>[AmbiguousTopLevelModuleName]</code> when several versions
-  of a library are registered. No-op if there is no <code>.agda-lib</code>.</li>
+  <code>depend:</code> closure. </li>
 <li><code>--no-externals</code> — drop everything outside the project root (nodes and edges).
   JSON keeps a top-level <code>externals_summary</code> of what was dropped.</li>
 <li><code>--json-mode=packed|expanded</code> — the <code>--format=json</code> shape (default <code>packed</code>).
@@ -154,15 +137,11 @@ Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</co
   disables). Needs <code>--with-term-hashes</code>.</li>
 <li><code>--with-signatures</code> — emit each definition's reified type as the per-def
   <code>type</code> field in expanded JSON (as written, one line). Off by default.</li>
-<li><code>--normalise-signatures</code> — normalise types before rendering. Needs
-  <code>--with-signatures</code>.</li>
-<li><code>--signature-implicits</code> — show implicit/irrelevant args. Needs
-  <code>--with-signatures</code>.</li>
+<li><code>--normalise-signatures</code> — normalise types before rendering.</li>
+<li><code>--signature-implicits</code> — show implicit/irrelevant args.</li>
 <li><code>--incremental</code> — per-module caching under <code>&lt;out-dir&gt;/.agda-deps-cache/</code>,
-  keyed on the interface hash. Skips the per-definition walk and the re-emission
-  of unchanged output; result is byte-identical to a non-cached run. Disabled
-  under <code>--keep-going</code>; deleting the cache dir is always safe.</li>
-<li><code>--cache-dir=DIR</code> — override the cache location. Needs <code>--incremental</code>.</li>
+  keyed on the interface hash.</li>
+<li><code>--cache-dir=DIR</code> — override the cache location.</li>
 <li><code>--quiet</code> — suppress the progress lines on stderr; warnings and errors still
   print.</li>
 <li><code>--version</code> / <code>-V</code> — print the build fingerprint (version, git rev, build
@@ -172,8 +151,7 @@ Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</co
 <p>HTML / source flags:</p>
 <ul>
 <li><code>--with-source</code> — embed each definition's source snippet; clicking a leaf
-  opens it in a side drawer. <strong>Requires <code>--lazy</code>.</strong> See
-  <a href="#linking-to-source">Linking to source</a>.</li>
+  opens it in a side drawer. </li>
 <li><code>--agda-html-dir=DIR</code> — link the views to existing <code>agda --html</code> pages at
   <code>DIR/&lt;Module.Name&gt;.html</code> (path relative to the generated HTML). Wired into the
   <code>sunburst-hierarchy</code> view.</li>
@@ -193,7 +171,7 @@ Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</co
 that module-level graph into the output, so modules that never type-checked
 (under <code>--keep-going</code>) still appear with their import wiring.</p>
 <h2 id="views">Views</h2>
-<p>Pick one with <code>--view=VIEW</code>. All views consume the same v2 <code>graph.json</code>; only
+<p>Pick one with <code>--view=VIEW</code>. All views consume the same <code>graph.json</code>; only
 the JS app and styling differ.</p>
 <table>
 <thead>
@@ -307,7 +285,7 @@ signature-implicits: false    # show implicit args; needs with-signatures
 <code>--color-*</code> CLI flags still win over <code>theme:</code>.</p>
 <h2 id="linking-to-source">Linking to source</h2>
 <p><code>--with-source</code> (with <code>--lazy</code>) runs Agda's HTML highlighter on every loaded
-module, slices each definition's highlighted span into a per-module
+module, slices each definition is highlighted span into a per-module
 <code>snippets/&lt;Module&gt;.json</code>, and fetches it on demand when a leaf is clicked. It
 requires <code>--lazy</code> because <code>fetch()</code> needs HTTP serving:</p>
 <pre><code>cabal run agda-deps -- --format=html --with-source --lazy -i test/ -o test/ test/Test.agda
@@ -336,7 +314,7 @@ snippets/&lt;Module&gt;.json ← per-module snippet bundle (bundle-&lt;hash&gt;.
 </code></pre>
 <p>On load the shell fetches only <code>graph.json</code> and renders module boxes plus
 aggregated edges; clicking a module fetches its <code>modules/&lt;Module&gt;.json</code> and
-splices in the leaves. Browsers block <code>fetch()</code> on <code>file://</code>, so serve over HTTP.</p>
+splices in the leaves.</p>
 <h2 id="consuming-the-json-output">Consuming the JSON output</h2>
 <p><code>--format=json</code> ships in two shapes, selected by <code>--json-mode</code>:</p>
 <ul>
@@ -373,7 +351,7 @@ naming convention, for stale-cache detection; absent reads as <code>1</code>).</
   <code>open import … public</code>; a row that used <code>renaming</code> also carries a <code>"renames"</code>
   map (<code>alias → canonical name</code>).</li>
 </ul>
-<p>The expanded form has a JSON Schema (draft 2020-12) at
+<p>The expanded form has a JSON Schema at
 <a href="schema/graph-v2-expanded.schema.json"><code>schema/graph-v2-expanded.schema.json</code></a>.
 Validate with e.g.
 <code>pipx run check-jsonschema --schemafile schema/graph-v2-expanded.schema.json deps.json</code>.
@@ -396,8 +374,8 @@ concept for visualizing and exploring Agda projects. Feel free to edit them.</p>
 </main>
 <footer class="site-footer"><div class="wrap">
 <div>
-<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div>
-<div class="muted">Built from the repository’s Markdown with
+<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="roadmap.html">Roadmap</a></div>
+<div class="muted">Built with
 <a href="https://getpelican.com">Pelican</a>.
 <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div>
 </div></footer>

@@ -1,10 +1,8 @@
 # agda-deps documentation site (Pelican)
 
 The [`paper`](themes/paper) theme, rendered by [Pelican](https://getpelican.com).
-It replaces the previous hand-rolled `build.py` generator: the same content and
-look, split into the pieces a static-site generator expects.
 
-The site is published into **`docs/`** (the parent of this folder) so GitHub
+The site is published into **`docs/`** so GitHub
 Pages can serve it directly from the repository's `docs/` directory.
 
 ## Build
@@ -16,7 +14,7 @@ make serve        # build, then serve docs/ on http://127.0.0.1:8000
 make clean        # remove staged content + caches
 ```
 
-`make html STAGE_FLAGS=--internal` also renders `CLAUDE.md` as an Internals page.
+For internal docs: `make html STAGE_FLAGS=--internal`.
 
 Without `make`:
 

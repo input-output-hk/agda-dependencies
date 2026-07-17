@@ -82,7 +82,7 @@ def stage_views() -> None:
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Stage docs content for Pelican.")
     ap.add_argument("--internal", action="store_true",
-                    help="also stage CLAUDE.md as an Internals page")
+                    help="Internals page")
     ap.add_argument("--no-views", action="store_true",
                     help="do not mirror the views/ gallery")
     args = ap.parse_args(argv)

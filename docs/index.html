@@ -14,7 +14,6 @@
 <a href="guide.html">Guide</a>
 <a href="examples.html">Examples</a>
 <a href="views/index.html">Views ↗</a>
-<a href="changelog.html">Changelog</a>
 <a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a>
 </nav>
 </div></header>
@@ -22,9 +21,9 @@
 <div class="home">
   <header class="mast">
     <h1>agda-deps</h1>
-    <p class="sub">An Agda compiler backend</p>
-    <p class="lede">It runs inside the type-checker and emits your proof's
-      dependency graph &mdash; one node per definition, each coloured by
+    <p class="sub">An Agda denpendency graph generator.</p>
+    <p class="lede">It emits your proof's dependency graph &mdash; one node per
+      definition, each coloured by
       <span class="em">state</span>: defined, postulated, a hole, or a module
       that failed to check.</p>
   </header>
@@ -32,7 +31,7 @@
   <section>
     <h2>Getting a graph</h2>
     <pre><span class="c"># install once</span>
-cabal install exe:agda-deps --overwrite-policy=always</pre>
+cabal install exe:agda-deps</pre>
     <pre><span class="c"># emit an interactive HTML view</span>
 agda-deps --format=html --view=module-dag-pods \
           --with-source -i test/ -o out/ test/Test.agda</pre>
@@ -77,7 +76,7 @@ agda-deps --format=html --view=module-dag-pods \
 
   <section>
     <h2>The views</h2>
-    <p class="fine">Fourteen HTML views, each answering a different question.
+    <p class="fine">Several HTML views, each answering a different question.
       A slice below &mdash; or the <a href="views/index.html">full gallery</a>.</p>
     <div class="rows">
       <a class="linkrow" href="views/module-dag-pods/deps.html"><span class="rk">Module DAG pods<span class="slug">--view=module-dag-pods</span></span><span class="rd">Default. Expandable module pods, dagre layout.</span></a>
@@ -96,9 +95,7 @@ agda-deps --format=html --view=module-dag-pods \
     <div class="rows">
       <a class="linkrow" href="guide.html"><span class="rk">Guide</span><span class="rd">Install, flags, views, YAML config, and the v2 JSON schema.</span></a>
       <a class="linkrow" href="examples.html"><span class="rk">Examples</span><span class="rd">One runnable command per feature, with empirical defaults.</span></a>
-      <a class="linkrow" href="changelog.html"><span class="rk">Changelog</span><span class="rd">Everything shipped, newest first.</span></a>
       <a class="linkrow" href="roadmap.html"><span class="rk">Roadmap</span><span class="rd">Forward-looking work that's actively planned.</span></a>
-      <a class="linkrow" href="backlog.html"><span class="rk">Backlog</span><span class="rd">Ideas parked for later, plus approaches consciously set aside.</span></a>
     </div>
   </section>
 </div>
@@ -106,8 +103,8 @@ agda-deps --format=html --view=module-dag-pods \
 </main>
 <footer class="site-footer"><div class="wrap">
 <div>
-<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div>
-<div class="muted">Built from the repository’s Markdown with
+<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="roadmap.html">Roadmap</a></div>
+<div class="muted">Built with
 <a href="https://getpelican.com">Pelican</a>.
 <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div>
 </div></footer>

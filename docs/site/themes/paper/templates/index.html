@@ -6,9 +6,9 @@
 <div class="home">
   <header class="mast">
     <h1>{{ SITENAME }}</h1>
-    <p class="sub">An Agda compiler backend</p>
-    <p class="lede">It runs inside the type-checker and emits your proof's
-      dependency graph &mdash; one node per definition, each coloured by
+    <p class="sub">An Agda denpendency graph generator.</p>
+    <p class="lede">It emits your proof's dependency graph &mdash; one node per
+      definition, each coloured by
       <span class="em">state</span>: defined, postulated, a hole, or a module
       that failed to check.</p>
   </header>
@@ -16,7 +16,7 @@
   <section>
     <h2>Getting a graph</h2>
     <pre><span class="c"># install once</span>
-cabal install exe:agda-deps --overwrite-policy=always</pre>
+cabal install exe:agda-deps</pre>
     <pre><span class="c"># emit an interactive HTML view</span>
 agda-deps --format=html --view=module-dag-pods \
           --with-source -i test/ -o out/ test/Test.agda</pre>
@@ -55,7 +55,7 @@ agda-deps --format=html --view=module-dag-pods \
 
   <section>
     <h2>The views</h2>
-    <p class="fine">Fourteen HTML views, each answering a different question.
+    <p class="fine">Several HTML views, each answering a different question.
       A slice below &mdash; or the <a href="{{ GALLERY }}">full gallery</a>.</p>
     <div class="rows">
     {% for slug, name, desc in VIEW_HIGHLIGHTS %}
