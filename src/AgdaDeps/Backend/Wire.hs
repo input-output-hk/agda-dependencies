@@ -182,17 +182,13 @@ objectSchemaOf fs =
 -- | Encode an object from a field table, in field-table (byte) order.
 -- 'Optional' fields whose encoder yields 'Nothing' are omitted.
 --
--- The table is fixed, so each field's @"name":@ prefix ('jsString' over
--- the static field name) is precomputed once and shared across every
--- record encoded with this table (the definitions / reexports arrays run
--- this per row) instead of being re-escaped per record. Written as
--- @encodeObject fs = \\a -> …@ so @prepared@ is bound to @fs@ and floated
--- out of the per-record loop; byte-identical to the per-field @emit@.
+-- Keep the eta form (@encodeObject fs = \\a -> …@): it binds @prepared@ to
+-- @fs@ so each field's @"name":@ prefix is escaped once per table, not per
+-- record (the definitions / reexports arrays run this per row).
 encodeObject :: [Field a] -> a -> String
 encodeObject fs = \a -> "{" ++ intercalate "," (mapMaybe (emit a) prepared) ++ "}"
   where
-    -- (type left to inference: a local @a@ signature would be a fresh
-    -- variable without ScopedTypeVariables and not unify with the outer a.)
+    -- No local signature: @a@ here would be fresh (no ScopedTypeVariables).
     prepared =
       [ case f of
           Required n _ e -> (jsString n ++ ":", Just . e)

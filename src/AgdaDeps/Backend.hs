@@ -76,9 +76,8 @@ import Agda.TypeChecking.Monad.Base
   , iSignature, sigDefinitions, iFullHash
   , iFilePragmaOptions
   )
--- 'OptionsPragma'/'pragmaStrings' live here in both 2.8 and 2.9 (the
--- module has no export list); 'iFilePragmaOptions' likewise — no CPP
--- needed for the file-OPTIONS scan.
+-- 'pragmaStrings' + 'iFilePragmaOptions' live here on both 2.8 and 2.9
+-- (module has no export list) — no CPP for the file-OPTIONS scan.
 import Agda.Interaction.Library.Base ( pragmaStrings )
 import Agda.TypeChecking.Monad.Imports ( getVisitedModules )
 import Agda.TypeChecking.Monad.State ( getSignature )
@@ -138,12 +137,11 @@ import AgdaDeps.Backend.GraphJson ( GraphInput(..), ExternalsSummary, buildExter
 import AgdaDeps.Backend.Html ( renderHtml, renderLazyHtml, LazyOutput(..) )
 import AgdaDeps.Backend.Json ( renderJson )
 
--- | Per-module state captured during 'moduleSetup', threaded to
--- 'postModuleAD': the in-scope names, plus pre-module snapshots of the
--- two compile-time side-channels so the fragment cache can attribute
--- each module's contributions exactly as a before/after delta. Must be
--- a delta, not a name-prefix slice: prefix slicing misses defs Agda
--- homes in anonymous modules (bare @_.…@ copies).
+-- | Per-module state from 'moduleSetup', threaded to 'postModuleAD':
+-- in-scope names plus pre-module snapshots of the two side-channels, so
+-- the fragment cache attributes each module's contributions as a
+-- before/after delta. Must be a delta, not a name-prefix slice: prefixes
+-- miss defs Agda homes in anonymous modules (bare @_.…@ copies).
 data ModuleEnv = ModuleEnv
   { namesInScope       :: Set QName
   , envIgnoredBefore   :: IgnoredEdgeMap
@@ -157,9 +155,8 @@ themeOpt s opts = case parseTheme s of
   Right th -> return (applyTheme th opts)
   Left err -> throwError err
 
--- | @--config=PATH@ parser. A no-op: the config-file load happens in
--- 'Main' (seeding 'Options' before argv parsing), and the flag is
--- already stripped from argv by the time GetOpt sees it.
+-- | @--config=PATH@ parser. No-op: 'Main' loads the config (seeding
+-- 'Options') and strips the flag from argv before GetOpt sees it.
 configOpt :: Monad m => String -> Options -> m Options
 configOpt _ opts = return opts
 
@@ -170,9 +167,8 @@ type ModuleRes = [Maybe ADDef]
 backend :: Backend' Options Options ModuleEnv ModuleRes (Maybe ADDef)
 backend = backendWithSeed defaultOptions
 
--- | Like 'backend' but lets the caller pre-populate the 'options' field
--- (used by 'Main' to overlay a discovered @.agda-deps.yml@ before CLI
--- parsing).
+-- | Like 'backend' but with a caller-seeded 'options' field ('Main'
+-- overlays a discovered @.agda-deps.yml@ before CLI parsing).
 backendWithSeed
   :: Options -> Backend' Options Options ModuleEnv ModuleRes (Maybe ADDef)
 backendWithSeed seed = Backend'
@@ -185,7 +181,7 @@ backendWithSeed seed = Backend'
       , Option []    ["format"]  (ReqArg formatOpt "FORMAT")
         "Output format: dot (default), html, or json."
       , Option []    ["view"]    (ReqArg viewOpt "VIEW")
-        "HTML view variant: module-dag-pods (default), cytoscape,\nide-three-pane, source-centric, notion-doc, wiki-backlinks,\nsigma, big-module-dag-pods."
+        "HTML view variant: module-dag-pods (default), cytoscape,\nide-three-pane, source-centric, notion-doc, wiki-backlinks,\nsigma, big-module-dag-pods, critical-path-holes,\nprogress-dashboard, cartographic-atlas, sunburst-hierarchy,\nreading-order-narrative, pixel-grid-overview."
       , Option []    ["theme"]   (ReqArg themeOpt "THEME")
         "Colour preset: default (=light), dark, or colorblind.\nIndividual --color-* flags override the corresponding slot."
       , Option []    ["config"]  (ReqArg configOpt "PATH")
@@ -259,10 +255,9 @@ backendWithSeed seed = Backend'
   , mayEraseType          = \ _ -> return True
   }
 
--- | Pre-compile hook. Clears the side-channels (edges through ignored
--- definitions; instance-method providers) so repeated runs in the same
--- process start fresh, and surfaces the @--incremental@ + @--keep-going@
--- caveat once per run.
+-- | Pre-compile hook: clear the side-channels (ignored-edge +
+-- instance-method) for a fresh in-process run; warn once on
+-- @--incremental@ + @--keep-going@.
 preCompileAD :: Options -> TCM Options
 preCompileAD opts = do
   resetIgnoredEdges
@@ -280,26 +275,23 @@ useFragmentCache :: Options -> Bool
 useFragmentCache opts =
   optIncremental opts && not (optKeepGoing opts)
 
--- | Where fragments + the serialise manifest live. @--cache-dir@
--- overrides; otherwise under the output dir (or the working directory —
--- the project root after 'Main''s @.agda-lib@ discovery — when output
--- goes to stdout).
+-- | Where fragments + the serialise manifest live: @--cache-dir@, else
+-- @<out-dir>/.agda-deps-cache@ (or the cwd when output is stdout).
 cacheDirFor :: Options -> FilePath
 cacheDirFor opts = case optCacheDir opts of
   Just dir -> dir
   Nothing  -> fromMaybe "." (optOutDir opts) </> ".agda-deps-cache"
 
--- | Whether the @--incremental@ serialise cache is active. The monolithic
--- no-op skip also needs the fragment cache to detect \"nothing
--- recompiled\". Disabled under @--keep-going@.
+-- | Whether the @--incremental@ serialise cache is active. Disabled
+-- under @--keep-going@.
 useSerialiseCache :: Options -> Bool
 useSerialiseCache opts = optIncremental opts && not (optKeepGoing opts)
 
--- | Output-context token for the monolithic no-op skip: a fingerprint
--- of everything other than per-definition /content/ the output depends
--- on — live module set, output-affecting options, build identity,
--- node-key convention. Combined with \"nothing recompiled\" (per
--- 'recompiledRef'), an unchanged token means the output is byte-identical.
+-- | Output-context token for the monolithic no-op skip: fingerprints
+-- everything other than per-def /content/ (live module set,
+-- output-affecting options, build identity, node-key convention). With
+-- \"nothing recompiled\" ('recompiledRef'), an unchanged token means the
+-- output is byte-identical.
 outputToken :: Options -> [String] -> Epoch
 outputToken opts modules = combineEpochs
   [ hashEpoch buildFingerprint
@@ -308,9 +300,9 @@ outputToken opts modules = combineEpochs
   , hashEpoch (unwords modules)
   ]
   where
-    -- One 'show' per output-affecting option (a single tuple would
-    -- exceed GHC's tuple 'Show' limit). Every new output-affecting
-    -- option must be added here, or the no-op skip serves stale output.
+    -- One 'show' per output-affecting option (a single tuple exceeds
+    -- GHC's 'Show' limit). Add every new output-affecting option here, or
+    -- the no-op skip serves stale output.
     optStrings =
       [ show (optFormat opts), show (optJsonMode opts), show (optView opts)
       , show (optColors opts), show (optGzip opts), show (optAgdaHtmlDir opts)
@@ -337,9 +329,8 @@ moduleSetup opts isMain tlmn _ = do
   case mCached of
     Just frag -> do
       -- Skip bypasses compileDef + postModule: re-inject the module's
-      -- side-channel slices (else contraction loses every edge through
-      -- this module's ignored helpers) and the entry-module capture
-      -- postModuleAD would have done.
+      -- side-channel slices (else contraction drops edges through its
+      -- ignored helpers) and the entry-module capture postModuleAD would do.
       mergeIgnoredEdges (fragIgnored frag)
       mergeMethodProviders (fragProviders frag)
       case isMain of
@@ -380,10 +371,8 @@ recompiledRef :: IORef Bool
 recompiledRef = unsafePerformIO $ newIORef False
 
 -- | The run's fragment-cache options fingerprint ('optionsFingerprint'),
--- computed once in 'preCompileAD' and read per module in 'moduleSetup' /
--- the fragment write — it is constant for the whole run (a pure function
--- of the options), so re-deriving it per module (a 'show' + hash over the
--- option tuple, incl. the @--exclude@ list) is wasted work.
+-- computed once in 'preCompileAD': constant for the run, so memoised here
+-- rather than re-derived (a 'show' + hash) per module.
 {-# NOINLINE optsFingerprintRef #-}
 optsFingerprintRef :: IORef Word64
 optsFingerprintRef = unsafePerformIO $ newIORef 0
@@ -404,23 +393,20 @@ postModuleAD opts env isMain tlmn defs = do
       liftIO $ writeIORef mainModuleRef (Just (tlmn, imports))
     NotMain -> return ()
 
-  -- Recover dead-end private definitions that Agda's compileDef hook
-  -- skips: 'eliminateDeadCode' prunes private defs no live code calls
-  -- from 'iSignature' before the interface is built. 'getSignature' is
-  -- the pre-prune source of truth (every checked def, this module's +
-  -- imports'); filter to this module and run the missed top-level
-  -- private defs through 'compileDefAD' so they pass the same filters.
-  -- (Access is classified later in 'postCompileAD' via a source pre-scan.)
+  -- Recover dead-end private defs Agda's compileDef hook skips:
+  -- 'eliminateDeadCode' prunes private defs no live code calls from
+  -- 'iSignature'. 'getSignature' is the pre-prune source of truth; filter
+  -- to this module and run the missed defs through 'compileDefAD' so they
+  -- pass the same filters. (Access is back-filled later in 'postCompileAD'.)
   fullSig <- getSignature
   let thisModule  = iModuleName iface
       sigDefs     = [ (qn, def)
                     | (qn, def) <- HMap.toList (fullSig ^. sigDefinitions)
                     , A.qnameModule qn == thisModule ]
-      -- Membership by 'NodeRef' (its 'Ord' is hash-then-key), so a
-      -- signature def is 'missing' iff its 'mkRef' isn't already among the
-      -- visited defs' 'NodeRef's. 'mkRef' is a cache hit for every visited
-      -- def (compileDef already built it), so this drops the prettyShow +
-      -- liftAnonSegments the old 'nodeKeyOfQ' recomputed per signature def.
+      -- Membership by 'NodeRef' ('Ord' is hash-then-key): a signature def
+      -- is 'missing' iff its 'mkRef' isn't among the visited defs'
+      -- 'NodeRef's. 'mkRef' is a cache hit for every visited def
+      -- (compileDef already built it).
       visitedRefs = S.fromList [ _name d | Just d <- defs ]
   missing <- fmap catMaybes . forM sigDefs $ \ (qn, def) -> do
                r <- mkRef qn
@@ -429,11 +415,10 @@ postModuleAD opts env isMain tlmn defs = do
   let result = defs ++ extras
 
   -- '--incremental' write path. An IMPORTED module's fragment is a pure
-  -- function of its dead-code-pruned interface, so cache it
-  -- unconditionally. The MAIN module is enriched by the dead-private
-  -- recovery above, present in 'stSignature' only on a fresh check
-  -- ('sigDefs' non-empty); caching a warm-loaded main module would
-  -- freeze the degraded warm-.agdai variant, so cache it only fresh.
+  -- function of its pruned interface — cache unconditionally. The MAIN
+  -- module is enriched by the dead-private recovery above (only on a fresh
+  -- check, 'sigDefs' non-empty); caching a warm-loaded main module would
+  -- freeze the degraded variant, so cache it only fresh.
   when (useFragmentCache opts) $ do
     let cacheable = case isMain of
           NotMain -> True
@@ -441,11 +426,9 @@ postModuleAD opts env isMain tlmn defs = do
     when cacheable $ do
       ignoredAll   <- readIgnoredEdges
       providersAll <- readMethodProviders
-      -- This module's contributions = the delta added to the
-      -- side-channels since 'moduleSetup' snapshotted them. Must be a
-      -- delta, not a name-prefix slice: prefix slicing misses defs Agda
-      -- homes in anonymous modules (bare '_.…' copies), losing their
-      -- contracted edges on an all-cache-hit run.
+      -- This module's contributions = the delta since 'moduleSetup'
+      -- snapshotted the side-channels. Delta, not name-prefix slice (see
+      -- 'ModuleEnv').
       let ignoredFrag = M.difference ignoredAll (envIgnoredBefore env)
           -- Providers grow by *prepending* binders per method key, so
           -- the delta on a shared key is the new list's prefix.
@@ -464,25 +447,19 @@ postModuleAD opts env isMain tlmn defs = do
 
 -- | After all modules are compiled, build the per-format output.
 --
--- The @--incremental@ monolithic no-op skip is decided up front, here,
--- before the graph is built: it depends only on the options, the live
--- module set and the on-disk manifest (serialise cache active, nothing
--- recompiled this run, a matching output token, the file already on
--- disk) — never on the graph itself — so when it fires the entire
--- contraction / private-scan / external-classification / layout pipeline
--- in 'emitFullGraph' is skipped, not just the final write. The decision
--- is identical to the per-format 'monoOutputUnchanged' check inside
--- 'emitFullGraph' (same inputs); it is merely taken before the work. Only
--- the monolithic-file formats (@deps.json@, non-lazy @deps.html@) carry a
--- single output token; @--lazy@ (per-module content epochs) and @dot@
--- (never skips) always fall through to the full pipeline.
+-- The @--incremental@ monolithic no-op skip is decided up front (before
+-- the graph is built) from the options, live module set and on-disk
+-- manifest — never the graph — so when it fires the whole 'emitFullGraph'
+-- pipeline is skipped, not just the final write. Same inputs as the
+-- per-format 'monoOutputUnchanged' check, taken earlier. Only @deps.json@
+-- and non-lazy @deps.html@ carry a single token; @--lazy@ and @dot@ fall
+-- through to the full pipeline.
 postCompileAD
   :: Options -> IsMain -> Map TopLevelModuleName [Maybe ADDef] -> TCM ()
 postCompileAD opts _ defMap = do
-  -- Forced to full NF under --incremental only (its inputs — the token
-  -- and GC — need it, and forcing here stops the thunk pinning @defMap@
-  -- through the render). A non-incremental run never consumes it, so the
-  -- bang forces only WHNF of the un-mapped list and the tail is dropped.
+  -- Forced to full NF under --incremental only (the token + GC need it,
+  -- and forcing here stops the thunk pinning @defMap@ through the render).
+  -- Non-incremental never consumes it, so the bang forces only WHNF.
   let !liveModules
         | optIncremental opts = force (map prettyShow (M.keys defMap))
         | otherwise           = map prettyShow (M.keys defMap)
@@ -502,10 +479,9 @@ postCompileAD opts _ defMap = do
     Nothing ->
       emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable
 
--- | Whether the up-front monolithic no-op skip fires, and for which
--- output file ('Nothing' = fall through to the full pipeline). Reuses
--- 'monoOutputUnchanged' so this decision can't drift from the per-format
--- check. Only @deps.json@ and non-lazy @deps.html@ carry a single token.
+-- | Whether the up-front no-op skip fires, and for which output file
+-- ('Nothing' = fall through). Reuses 'monoOutputUnchanged' so it can't
+-- drift from the per-format check. Only @deps.json@ / non-lazy @deps.html@.
 hoistedMonoSkip :: Options -> FilePath -> Epoch -> Bool -> IO (Maybe String)
 hoistedMonoSkip opts cacheDir monoToken monoSkippable =
   case (optOutDir opts, optFormat opts) of
@@ -519,9 +495,8 @@ hoistedMonoSkip opts cacheDir monoToken monoSkippable =
       pure (if ok then Just slot else Nothing)
 
 -- | Build the per-format output — the full graph pipeline. Called by
--- 'postCompileAD' when the up-front no-op skip did not fire; the skip
--- inputs it already computed ('liveModules' / 'cacheDir' / 'monoToken' /
--- 'monoSkippable') are threaded in rather than recomputed.
+-- 'postCompileAD' when the up-front skip didn't fire; the skip inputs it
+-- already computed are threaded in rather than recomputed.
 emitFullGraph
   :: Options
   -> Map TopLevelModuleName [Maybe ADDef]
@@ -541,11 +516,9 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
   defsWithInstances <- addInstanceMethodEdges defsContracted
 
   -- Back-fill '_access' by scanning each .agda file once for top-level
-  -- @private@-block line ranges and matching each def's binding-site
-  -- line against them (see 'backfillAccess', 'findPrivateRanges').
-  -- Files to scan for @private@ ranges: every distinct binding-site file.
-  -- ('backfillAccess' reads each def's file straight off its 'NodeRef' —
-  -- see there — so no NodeRef->file indirection map is needed.)
+  -- @private@-block line ranges and matching each def's binding line
+  -- against them (see 'backfillAccess' / 'findPrivateRanges'). Scan every
+  -- distinct binding-site file.
   let filesToScan :: [FilePath]
       filesToScan = S.toAscList $ S.fromList
         [ fp | d <- defsWithInstances, Just (fp, _ln) <- [nrSrcLoc (_name d)] ]
@@ -562,9 +535,9 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
   -- source under root) are still classified as external.
   precomputed <- liftIO $ readIORef precomputedGraphRef
   visited <- getVisitedModules
-  let -- Raw (source-module, target-module) pairs for every import edge
-      -- across all visited interfaces, computed once and shared by the
-      -- endpoint pool and 'visitedImportEdges' below.
+  let -- (source, target) module pairs for every import edge across all
+      -- visited interfaces; shared by the endpoint pool and
+      -- 'visitedImportEdges'.
       importPairs :: [(String, String)]
       importPairs =
         [ (srcS, prettyShow tgt)
@@ -581,12 +554,10 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
       -- interfaces, computed once and shared with 'reExportRows' below.
       reExportRaw :: [(String, String, String, Maybe String)]
       reExportRaw = concatMap (collectReExports . miInterface) (M.elems visited)
-      -- Re-export hubs: a module that only @open … public@s names from
-      -- elsewhere contributes no QName of its own to 'allQNames0', so it
-      -- would slip past classification and survive @--no-externals@.
-      -- Pool both the host and the re-exported source so an out-of-root
-      -- hub like @Data.List@ is seen and classified external. In-root
-      -- hubs already carry True via other signals ('M.insertWith (||)').
+      -- Re-export hubs: a module that only @open … public@s names
+      -- contributes no QName of its own to 'allQNames0', so it would
+      -- survive @--no-externals@. Pool host + re-exported source so an
+      -- out-of-root hub (e.g. @Data.List@) is classified external.
       reExportEndpoints :: [String]
       reExportEndpoints = concat [ [h, t] | (h, t, _n, _a) <- reExportRaw ]
       allEndpointModules :: [String]
@@ -599,10 +570,9 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
       (precomputedModuleFiles precomputed)
       allEndpointModules
 
-  -- '--no-externals': drop every external module from the rendered
-  -- graph (no nodes, no edges into them). The 'keep' predicate below
-  -- carries the same filter through to the module-level wire outputs;
-  -- a diagnostic summary of the stripped externals is attached too.
+  -- '--no-externals': drop every external module (no nodes, no edges).
+  -- The 'keep' predicate carries the same filter to module-level wire
+  -- outputs; a diagnostic summary of the stripped externals is attached.
   let externalsSummary :: Maybe ExternalsSummary
       !externalsSummary
         | optNoExternals opts = Just $! buildExternalsSummary externals0 defs0
@@ -616,9 +586,9 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
       stateMap :: Map NodeRef DefState
       stateMap = M.fromList [ (_name d, _state d) | d <- defs ]
 
-      -- Only @--no-externals@ filters 'defs' (via 'dropExternalDefs'), so
-      -- only it needs a fresh QName pass; the default path's 'defs' is the
-      -- same value as 'defs0', so reuse 'allQNames0' rather than recompute.
+      -- Only @--no-externals@ filters 'defs', so only it needs a fresh
+      -- QName pass; the default path's 'defs' == 'defs0', so reuse
+      -- 'allQNames0'.
       allQNames :: [NodeRef]
       allQNames | optNoExternals opts = collectAllQNames defs
                 | otherwise           = allQNames0
@@ -639,13 +609,12 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
       visitedImportEdges =
         [ (s, t) | (s, t) <- importPairs, s /= t, keep s, keep t ]
 
-      -- (host-module, source-module, [qualified-names], [(alias,
-      -- canonical)]) rows aggregated across every visited interface.
-      -- 'collectReExports' returns one tuple per (host, source, qname,
-      -- alias); grouped here by (host, source) and dedup-sorted. The
-      -- renames map is built from a second (host, source)-keyed map that
-      -- only collects tuples with a 'Just' alias; empty when nothing was
-      -- renamed (Wire omits the field then, keeping output byte-identical).
+      -- (host, source, [qnames], [(alias, canonical)]) rows aggregated
+      -- across visited interfaces. 'collectReExports' yields one tuple per
+      -- (host, source, qname, alias); grouped by (host, source),
+      -- dedup-sorted. The renames map collects only 'Just'-alias tuples;
+      -- empty when nothing was renamed (Wire omits the field then —
+      -- byte-identical output).
       reExportRows :: [(String, String, [String], [(String, String)])]
       reExportRows =
         let raw = [ (h, t, n, a) | (h, t, n, a) <- reExportRaw, keep h, keep t ]
@@ -659,17 +628,15 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
            | ((h, t), ns) <- M.toAscList grouped
            ]
 
-      -- File-level @{-# OPTIONS ⋯ #-}@ soundness escapes per visited
-      -- module. Read from 'iFilePragmaOptions' — the file's OWN OPTIONS
-      -- tokens — NOT 'iOptionsUsed', which folds in command-line + library
-      -- options and would misattribute e.g. @--lenient-imports@
-      -- (⇒ @--allow-unsolved-metas@) to every module. 'optionEscapes' keeps
-      -- only the safety-relevant flags; 'keep' applies the same
-      -- @--exclude@ / @--no-externals@ filter. 'sortOn fst' orders the
-      -- survivors ('visited' is keyed by an opaque hash). The
-      -- 'not (null esc)' guard drops escape-free modules (byte-identical
-      -- when escape-free). Per-block @NO_POSITIVITY_CHECK@ etc. are
-      -- declaration pragmas, not OPTIONS, so never appear here.
+      -- File-level @{-# OPTIONS #-}@ soundness escapes per visited module.
+      -- Read 'iFilePragmaOptions' (the file's OWN OPTIONS), NOT
+      -- 'iOptionsUsed' (folds in CLI + library opts, would misattribute
+      -- e.g. @--lenient-imports@ to every module). 'optionEscapes' keeps
+      -- only safety-relevant flags; 'keep' applies the
+      -- @--exclude@/@--no-externals@ filter; 'sortOn fst' orders the
+      -- hash-keyed survivors; 'not (null esc)' drops escape-free modules.
+      -- Per-block @NO_POSITIVITY_CHECK@ etc. are declaration pragmas, not
+      -- OPTIONS, so never appear here.
       moduleOptionEscapes :: [(String, [String])]
       moduleOptionEscapes = sortOn fst
         [ (m, esc)
@@ -690,11 +657,9 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
       importEdges =
         S.toList (S.fromList (visitedImportEdges ++ precomputedImportEdges))
 
-      -- Module -> source-file path, lifted from the binding site of any
-      -- QName homed in that module. Used by the v2 graph.json for
-      -- moduleToFile / fileToModules. 'keep' is applied so @--exclude@
-      -- and @--no-externals@ never surface a path for a module excluded
-      -- from the wire output.
+      -- Module -> source-file path, from the binding site of any QName
+      -- homed there. Feeds v2 graph.json moduleToFile / fileToModules.
+      -- 'keep' so excluded modules surface no path.
       moduleFileMap :: Map String FilePath
       moduleFileMap = M.fromListWith (\_old new -> new)
         [ (modName, p)
@@ -719,14 +684,8 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
     Just dir -> liftIO $ createDirectoryIfMissing True dir
     Nothing  -> return ()
 
-  -- ('liveModules' / 'cacheDir' / 'monoToken' / 'monoSkippable' are the
-  -- no-op-skip inputs 'postCompileAD' computed and passed in; the skip is
-  -- decided there, before this pipeline ran.)
-  let -- The shared graph-data bundle for the JSON / HTML emitters. Each
-      -- render path overrides only its format-specific fields via record
-      -- update (JSON: giReExports + giPackedAnalytical; HTML: giWithSource
-      -- + giSnippetModules; lazy: also giLazy) instead of re-threading the
-      -- whole bundle as positional arguments.
+  let -- Shared graph-data bundle for the JSON / HTML emitters; each render
+      -- path overrides only its format-specific fields via record update.
       baseGraphInput = GraphInput
         { giDefs             = defs
         , giStateMap         = stateMap
@@ -793,8 +752,7 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
           liftIO $ writeHtmlOutput dir opts (SerialiseCtx (useSerialiseCache opts) cacheDir monoSkippable monoToken) snippetMap baseGraphInput
 
   -- '--incremental': prune fragment files for modules no longer in the
-  -- graph (deleted / renamed source). Live set = every module Agda
-  -- processed this run (def-map keys, hit or recompiled).
+  -- graph. Live set = every module Agda processed this run.
   when (useFragmentCache opts) $ do
     removed <- gcFragments cacheDir liveModules
     when (removed > 0) $
@@ -834,9 +792,9 @@ computeQNamePositions allQNames defs = do
     , Just qn <- [IM.lookup nid qnameById]
     ]
 
--- | The @--incremental@ serialise-cache context threaded into the
--- output writers. When 'scEnabled' is 'False' the writers behave
--- exactly as the non-incremental path (write everything, no manifest).
+-- | The @--incremental@ serialise-cache context threaded into the output
+-- writers. When 'scEnabled' is 'False' the writers behave as the
+-- non-incremental path (write everything, no manifest).
 data SerialiseCtx = SerialiseCtx
   { scEnabled   :: Bool       -- ^ 'useSerialiseCache'.
   , scCacheDir  :: FilePath   -- ^ where the serialise manifest lives.
@@ -845,11 +803,10 @@ data SerialiseCtx = SerialiseCtx
   }
 
 -- | Whether a monolithic output (@deps.json@ / @deps.html@) re-emit can
--- be skipped: the serialise cache is active with nothing recompiled this
--- run (@skippable@), the file already exists, and its manifest slot still
--- matches the current output token. Shared by the JSON and HTML paths so
--- the two skip checks can't drift. The skip needs BOTH the recompiled
--- guard (folded into @skippable@ by the caller) and a matching @token@.
+-- be skipped: @skippable@ (cache active + nothing recompiled), the file
+-- exists, and its manifest slot matches the current @token@. Shared by
+-- the JSON and HTML paths so the two checks can't drift. Needs BOTH the
+-- recompiled guard (in @skippable@) and a matching @token@.
 monoOutputUnchanged
   :: Bool -> FilePath -> Bool -> String -> Epoch -> FilePath -> IO Bool
 monoOutputUnchanged skippable cacheDir gz slot token path
@@ -859,14 +816,13 @@ monoOutputUnchanged skippable cacheDir gz slot token path
       ex <- System.Directory.doesFileExist path
       pure (manifestLookup slot m == Just token && ex)
 
--- | Write the HTML output: a single self-contained @deps.html@, or
--- (with @--lazy@) a small shell plus @graph.json@, per-module detail
--- files, and per-module snippet files.
+-- | Write the HTML output: a self-contained @deps.html@, or (with
+-- @--lazy@) a shell plus @graph.json@, per-module detail files, and
+-- snippet files.
 --
--- Under @--incremental@ the lazy per-module + snippet files are
--- rewritten only when their content epoch changed (skipped files never
--- force their content thunk); the non-lazy @deps.html@ uses the
--- monolithic no-op skip.
+-- Under @--incremental@ the lazy per-module + snippet files are rewritten
+-- only when their content epoch changed (skipped files never force their
+-- thunk); the non-lazy @deps.html@ uses the monolithic no-op skip.
 writeHtmlOutput
   :: FilePath -> Options -> SerialiseCtx
   -> Map NodeRef Snippet -- ^ per-definition source snippets (@--with-source@)
@@ -922,9 +878,8 @@ writeHtmlOutput dir opts sc snippetMap gi
       if not gz then pure a
                 else (a &&) <$> System.Directory.doesFileExist (full ++ ".gz")
 
-    -- A module-detail file. Returns the manifest entry to record (always
-    -- 'Just' — the file is on disk afterwards), forcing the content
-    -- thunk only when an actual write is needed.
+    -- A module-detail file. Returns the manifest entry (always 'Just' —
+    -- on disk afterwards), forcing the content thunk only on an actual write.
     writeDetail
       :: Bool -> Manifest -> FilePath -> (FilePath, Epoch, String)
       -> IO (Maybe (String, Epoch))
@@ -937,10 +892,9 @@ writeHtmlOutput dir opts sc snippetMap gi
       pure (Just (slot, epoch))
 
     -- A snippet bundle. The byte cap is checked only when a (re)write is
-    -- actually needed, so an unchanged bundle is skipped without forcing
-    -- its content. A cap change is folded into the epoch so it forces a
-    -- re-evaluation. Cap-skipped bundles write no file and record no
-    -- manifest entry ('Nothing').
+    -- needed, so an unchanged bundle is skipped without forcing its content.
+    -- A cap change is folded into the epoch. Cap-skipped bundles write no
+    -- file and record no manifest entry ('Nothing').
     writeBundle
       :: Bool -> Manifest -> FilePath -> Maybe Int -> (FilePath, Epoch, String)
       -> IO (Maybe (String, Epoch))
@@ -971,15 +925,13 @@ writeJsonMaybeGz gz path content = do
   when gz $ BL.writeFile (path ++ ".gz") (GZip.compress (BLC.pack content))
 
 -- | Classify modules whose source lives outside the project root (the
--- working directory after 'Main''s .agda-lib discovery). A module is
--- "external" when no signal places its source under root. Three signals
--- are pooled:
+-- cwd after 'Main''s .agda-lib discovery). A module is external when no
+-- signal places its source under root. Three signals pooled:
 --
---   * 'nrSrcLoc' for every known QName (def names + dep targets); a
---     QName with @rangeFile = Nothing@ (builtins) gives no evidence.
+--   * 'nrSrcLoc' for every known QName (builtins with no range give none).
 --   * The pre-compute @module → file@ map ('precomputedModuleFiles').
---   * Module names appearing as import-edge endpoints, so endpoint-only
---     modules with no surviving QName are still classified.
+--   * Import-edge endpoints, so endpoint-only modules (no surviving
+--     QName) are still classified.
 --
 -- Returns the complement: every seen module with no in-root path.
 classifyExternalModules
@@ -991,13 +943,11 @@ classifyExternalModules qns precomputedMF endpointModules = do
   cwd <- getCurrentDirectory
   let root = normalise cwd
       isUnderRoot p = root `isPrefixOf` normalise p
-      -- Per-module flag: at least one signal lands at an in-root
-      -- source path.
       -- Per-module flag: at least one signal lands at an in-root source
-      -- path. 'isUnderRoot' (a normalise + isPrefixOf) is memoised per
-      -- distinct FilePath in the @pc@ cache, so it runs once per source
-      -- file, not once per node (10k-100k nodes vs a few hundred files on a
-      -- large corpus). Strict inserts keep the @||@ accumulator a WHNF Bool.
+      -- path. 'isUnderRoot' (normalise + isPrefixOf) is memoised per
+      -- distinct FilePath in @pc@, so it runs once per file, not once per
+      -- node (10k-100k nodes vs a few hundred files). Strict inserts keep
+      -- the @||@ accumulator a WHNF Bool.
       seedFromQNames :: Map String Bool
       seedFromQNames = snd (foldl' bumpQ (M.empty, M.empty) qns)
         where
@@ -1028,26 +978,20 @@ dropExternalDefs :: Set String -> [ADDef] -> [ADDef]
 dropExternalDefs externals defs =
   let isExt qn = S.member (moduleKey qn) externals
   -- Filter the provenance map once and derive '_deps' from its keys
-  -- ('M.keysSet' is a structural rebuild, no comparisons, no 'isExt'),
-  -- rather than running the external check over both '_deps' and
-  -- '_depsProv' — the @M.keysSet _depsProv == _deps@ invariant makes the
-  -- two results identical.
+  -- ('M.keysSet', no re-check), not by running 'isExt' over both — the
+  -- @M.keysSet _depsProv == _deps@ invariant makes them identical.
   in [ let !prov' = M.filterWithKey (\qn _ -> not (isExt qn)) (_depsProv d)
        in d { _deps = M.keysSet prov', _depsProv = prov' }
      | d <- defs, not (isExt (_name d))
      ]
 
--- | Replace each def's lazy 'Nothing' '_access' with the right
--- 'DefAccess'. We classify a def as private when its '_line' falls
--- within a @private@-block range in its source file. Defs without a
--- usable '_line' (synthetic names) keep 'Nothing' / fall back to
--- public.
+-- | Replace each def's 'Nothing' '_access' with a 'DefAccess': private
+-- when '_line' falls within a @private@-block range in its source file,
+-- else public (synthetic names with no usable '_line' fall back to public).
 backfillAccess :: Map FilePath [(Int, Int)] -> ADDef -> ADDef
 backfillAccess privRanges d =
-  -- 'nrFile' straight off the def's NodeRef, not a NodeRef->file lookup.
-  -- 'isPriv' fires only when '_line' (= 'nrLine (_name d)') is 'Just', and
-  -- 'nrLine' is 'Just' exactly when 'nrSrcLoc' was — so an 'nrFile'-only
-  -- (line-less) case falls through to public, matching the old defFile map.
+  -- 'nrFile' straight off the NodeRef. 'isPriv' fires only when '_line'
+  -- is 'Just'; a line-less case falls through to public.
   let mFile = nrFile (_name d)
       mLine = _line d
       isPriv = case (mFile, mLine) of
@@ -1099,23 +1043,22 @@ findPrivateRanges fp = do
 
     startsWith xs prefix = take (length prefix) xs == prefix
 
--- | Walk every (sub-)scope in an 'Interface' and extract the public
+-- | Walk every (sub-)scope in an 'Interface' and extract public
 -- re-exports: names in 'ImportedNS' (@open public@ from another module)
--- and 'PublicNS' (@open … public@ of a child module). Both are checked
--- because Agda's 'openModule' uses 'PublicNS' for child-module opens
--- and 'ImportedNS' otherwise.
+-- and 'PublicNS' (@open … public@ of a child module). Both, because
+-- 'openModule' uses 'PublicNS' for child-module opens, 'ImportedNS'
+-- otherwise.
 --
--- Returns @(host, source, qname, alias)@ tuples (caller aggregates and
--- dedups). Host = the interface's top-level module; source = the
--- 'QName''s 'qnameModule', so chained re-exports collapse to the
--- definition site. Self-edges filtered by comparing to 'iModuleName'.
+-- Returns @(host, source, qname, alias)@ tuples (caller aggregates).
+-- Host = the interface's top-level module; source = the 'QName''s
+-- 'qnameModule' (chained re-exports collapse to the definition site);
+-- self-edges filtered via 'iModuleName'.
 --
--- @alias@ is the post-@renaming@ in-scope spelling (the 'C.Name' key of
--- 'nsNames') when it differs from the canonical unqualified name
--- ('qnameName' — NOT the last segment of 'nodeKey', which can carry an
--- @\@line@ suffix); 'Nothing' for un-renamed re-exports. Lets a consumer
--- resolve @Host.combine@ back to @M.merge@ under
--- @open import M public renaming (merge to combine)@.
+-- @alias@ is the post-@renaming@ in-scope spelling ('nsNames' key) when
+-- it differs from the canonical unqualified name ('qnameName', NOT the
+-- last 'nodeKey' segment, which can carry an @\@line@ suffix); 'Nothing'
+-- when un-renamed. Lets a consumer resolve @Host.combine@ back to
+-- @M.merge@ under @renaming (merge to combine)@.
 collectReExports :: Interface -> [(String, String, String, Maybe String)]
 collectReExports i =
   let hostMod  = prettyShow (iTopLevelModuleName i)

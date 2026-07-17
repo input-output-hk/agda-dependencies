@@ -178,11 +178,9 @@ moduleGrouped nodes =
            | (i, nid) <- zip [0..] ids
            ]
 
-      -- Assemble the global map in a single O(V log V) build rather than M
-      -- throwaway 'IM.union's over the modules (O(V*M)). Node ids are
-      -- globally distinct ('hashQName' over the node set), so there are no
-      -- key conflicts; '(\_new old -> old)' still reproduces the old
-      -- left-biased 'IM.union' (earliest-module-wins) resolution exactly in
+      -- Single O(V log V) build. Node ids are globally distinct
+      -- ('hashQName' over the node set), so there are no key conflicts;
+      -- '(\_new old -> old)' is left-biased (earliest-module-wins) for
       -- the degenerate collision case the surrounding code tolerates.
       allPos :: IM.IntMap Position
       allPos = IM.fromListWith (\_new old -> old)

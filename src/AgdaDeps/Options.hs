@@ -67,10 +67,9 @@ import AgdaDeps.Util ( isValidHexColor )
 data OutputFormat = FmtDot | FmtHtml | FmtJson
   deriving (Show, Eq)
 
--- | How @--format=json@ emits the v2 graph. The packed form keeps
--- adjacency in CSR form and per-def state as base64 typed arrays. The
--- expanded form is definitions as an array of records and edges as
--- pairs of qnames.
+-- | How @--format=json@ emits the v2 graph. Packed: CSR adjacency +
+-- per-def state as base64 typed arrays. Expanded: definitions as records,
+-- edges as qname pairs.
 data JsonMode = JsonPacked | JsonExpanded
   deriving (Show, Eq)
 
@@ -227,30 +226,27 @@ data Options = Options
     -- ^ @--normalise-signatures@: 'normalise' each type before rendering
     -- under 'optWithSignatures'. Off by default; no effect without it.
   , optShowImplicit   :: Bool
-    -- ^ @--signature-implicits@ (avoids clashing with Agda's own
+    -- ^ @--signature-implicits@ (named to avoid Agda's own
     -- @--show-implicit@): show implicit + irrelevant args in signatures,
-    -- via 'withShowAllArguments'. Off by default; no effect without
-    -- 'optWithSignatures'.
+    -- via 'withShowAllArguments'. No effect without 'optWithSignatures'.
   , optIncremental    :: Bool
     -- ^ @--incremental@: per-module fragment cache for the
     -- per-definition backend walk, keyed on the interface hash.
     -- Opt-in; disabled under @--keep-going@. See 'AgdaDeps.FragmentCache'.
   , optCacheDir       :: Maybe FilePath
-    -- ^ @--cache-dir=PATH@: override the @--incremental@ cache
-    -- location (fragments + serialise manifest). Default:
-    -- @\<out-dir\>/.agda-deps-cache@. No effect without
-    -- @--incremental@.
+    -- ^ @--cache-dir=PATH@: override the @--incremental@ cache location
+    -- (fragments + serialise manifest). Default
+    -- @\<out-dir\>/.agda-deps-cache@; no effect without @--incremental@.
   , optPackedAnalytical :: Bool
     -- ^ @--packed-analytical@: add the per-def analytical arrays
     -- (kind\/line\/access\/type\/subterm hashes) to the packed @defs@
     -- object, so packed carries what expanded does. Off by default
     -- (packed stays byte-identical); only affects @--json-mode=packed@.
   , optAgdaHtmlDir    :: Maybe FilePath
-    -- ^ @--agda-html-dir=DIR@: location of the @agda --html@ pages,
-    -- resolved by the browser relative to the generated HTML. When
-    -- 'Just', views surface an "Open source" link to
-    -- @DIR\/\<Module.Name\>.html@ (passed as the @AGDA_HTML_BASE@ prelude
-    -- var). 'Nothing' disables it.
+    -- ^ @--agda-html-dir=DIR@: @agda --html@ pages location, resolved by
+    -- the browser relative to the generated HTML. When 'Just', views add
+    -- an "Open source" link to @DIR\/\<Module.Name\>.html@ (the
+    -- @AGDA_HTML_BASE@ prelude var). 'Nothing' disables it.
   }
 
 instance NFData Options where

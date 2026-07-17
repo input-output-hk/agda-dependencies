@@ -27,7 +27,6 @@ bare Python 3 install.
 | `changelog.html` | `Changelog.md` |
 | `roadmap.html` | `TODO.md` |
 | `backlog.html` | `Backlog.md` |
-| `deferred.html` | `Deferred.md` |
 | `internals.html` | `CLAUDE.md` (only with `--internal`) |
 | `views/` | copy of the repo's `views/` gallery |
 | `assets/style.css` | written from the `CSS` constant in `build.py` |

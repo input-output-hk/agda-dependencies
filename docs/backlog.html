@@ -9,190 +9,57 @@
 </head>
 <body>
 <header class="topbar"><div class="bar"><a class="brand" href="index.html">agda-deps</a><nav><a href="index.html">Home</a><a href="guide.html">Guide</a><a href="examples.html">Examples</a><a href="views/index.html">Views ↗</a><a href="changelog.html">Changelog</a><a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a></nav></div></header>
-<main><div class="layout"><aside class="toc"><div class="toc-inner"><div class="toc-title">On this page</div><nav><a class="lvl2" href="#deferred--would-be-useful-no-current-push">Deferred — would be useful, no current push</a><a class="lvl2" href="#from-the-jolteon-fastbft-agent-usage-analysis-2026-06-12">From the Jolteon-FastBFT agent-usage analysis (2026-06-12)</a><a class="lvl3" href="#5--schema-version-stamp-on-the-json-output">#5 — Schema-version stamp on the JSON output</a><a class="lvl3" href="#7--stable-def_id-across-runs">#7 — Stable def_id across runs</a><a class="lvl3" href="#12--first_seen--last_seen-per-qname-in-lazy-archives">#12 — first_seen / last_seen per qname in lazy archives</a><a class="lvl3" href="#13--per-commit-churn--pivot-hints">#13 — Per-commit churn / pivot hints</a><a class="lvl3" href="#14--stable-per-commit-present-qname-set">#14 — Stable per-commit present: [qname] set</a></nav></div></aside><div class="prose"><h1 id="backlog">Backlog</h1>
-<p>Deferred ideas, refused requests, exploratory work that isn't ready to
-be picked up. For shipped work see <a href="changelog.html">Changelog.md</a>; for
-runnable recipes see <a href="examples.html">Examples.md</a>; for concrete
-forward-looking items see <a href="roadmap.html">TODO.md</a>.</p>
+<main><div class="layout"><aside class="toc"><div class="toc-inner"><div class="toc-title">On this page</div><nav><a class="lvl2" href="#deferred--useful-no-current-push">Deferred — useful, no current push</a><a class="lvl2" href="#refused--out-of-scope">Refused / out of scope</a></nav></div></aside><div class="prose"><h1 id="backlog">Backlog</h1>
+<p>Deferred and refused ideas. Shipped work: <a href="changelog.html">Changelog.md</a>.
+Recipes: <a href="examples.html">Examples.md</a>. Planned work: <a href="roadmap.html">TODO.md</a>.</p>
 <hr />
-<h2 id="deferred--would-be-useful-no-current-push">Deferred — would be useful, no current push</h2>
+<h2 id="deferred--useful-no-current-push">Deferred — useful, no current push</h2>
 <ul>
-<li><p><strong>Multicore for <code>agda-deps</code> post-Agda passes.</strong> <code>agda-deps</code>'s
-post-Agda passes are still single-threaded. Agda's
-<code>TCM</code> and the <code>Backend'</code> hooks (<code>compileDefAD</code>, <code>postModuleAD</code>,
-<code>moduleSetup</code>) are serial by the upstream contract and aren't safe
-to fork. What <em>is</em> safe is the post-Agda IO inside <code>postCompileAD</code>:
-<code>backfillAccess</code>'s per-file <code>findPrivateRanges</code> scan
-(<code>Backend.hs:312-314</code>), <code>collectHighlightedSnippets</code> per-QName
-(<code>Backend.hs:474-475</code>), and the pre-compile <code>Precompute</code> line scan.
-Walltime on these isn't currently dominant, so deferred until a
-profile shows otherwise.</p></li>
-<li><p><strong>Daemon / persistent mode (<code>agda-deps daemon</code>).</strong> An earlier
-benchmarking pass measured ~25 min of cabal+Agda startup on a
-776-commit walk over a real corpus. Real problem. Ask was to
-amortise by keeping one long-running process
-consuming newline-delimited JSON commands. Several weeks of work
-(Agda's TCM holds persistent state via <code>stDecodedModules</code> /
-<code>stVisitedModules</code> / mtime-based <code>.agdai</code> invalidation; reusing
-that across commits touches all of it). Two cheaper wins still on
-the table first: (a) walker calls the <strong>installed binary</strong> instead
-of <code>cabal run</code> (~1.5 s → ~50 ms per commit), (b) parallelise the
-walker's per-commit loop. Revisit when (a) + (b) are exhausted and
-overhead still dominates.</p></li>
-<li><p><strong>Snippet bundle hashing for <code>--skip-agda</code> drawer.</strong> The
-<code>big-module-dag-pods</code> drawer references a definition by its hashed
-key, but <code>AgdaDeps.SkipAgda</code> doesn't reimplement Agda's
-Murmur-on-<code>prettyShow</code> hashing — drawer renders a fallback message.
-Wire up a small JS-side hash, or pre-bake the hash → name map into
-<code>graph.json</code>, so the drawer can pull source snippets in a future
-combined <code>--skip-agda --with-source</code> mode.</p></li>
-<li><p><strong>Sub-modules in the source scan.</strong> <code>Precompute.parseHeader</code> only
-reads the <em>first</em> <code>module …</code> declaration per file — nested
-<code>module Foo.Inner where …</code> blocks are missed. Acceptable for the
-current <code>--skip-agda</code> use case; revisit if a project relies heavily
-on nested modules.</p></li>
-<li><p><strong>Scale validation at 100k modules.</strong> <code>big-module-dag-pods</code> has the
-right algorithmic shape but hasn't been pointed at a real corpus
-that size. Once one's available, tune <code>BUCKET_SIZE</code>, <code>EDGE_BUDGET</code>,
-<code>VIEWPORT_PAD</code> from measured behaviour rather than guesses.</p></li>
-<li><p><strong>External-module heuristic for <code>--skip-agda</code>.</strong> Currently a module
-is external iff its scanned source is outside <code>cwd</code>, OR it appears
-only as an import target with no scanned source of its own. Could
-grow into recognising <code>.agda-lib</code> <code>depend:</code> libraries directly for
-better classification on multi-library projects.</p></li>
-<li><p><strong><code>classifyExternalModules</code> misses pure re-export hubs.</strong> Stdlib
-modules that only re-export from elsewhere never appear in
-<code>allQNames</code> and so slip past <code>--no-externals</code>. Now that
-<code>reexports[]</code> is populated, those hosts could be unioned into the
-classification input. ~5-line change.</p></li>
-<li><p><strong>Schema bump to v3.</strong> <code>kind</code> and <code>reexports[]</code> were added at
-<code>schemaVersion: 2</code> (consumers ignore unknown fields, so strictly
-correct). The round-4 <code>definitionEdgesProvenance</code> field was also
-added under v2 — still additive, still backwards-compatible — but
-the surface area of v2 is growing. A v3 bump becomes honest at the
+<li><p><strong>Bump the <code>cabal.project</code> Agda pin to Hackage</strong> once Agda 2.9 releases (it
+currently points at an upstream commit).</p></li>
+<li><p><strong>Multicore for the post-Agda passes.</strong> Agda's <code>TCM</code> and the <code>Backend'</code> hooks
+are serial and unsafe to fork. The post-Agda IO in <code>postCompileAD</code>
+(<code>findPrivateRanges</code>, <code>collectHighlightedSnippets</code>, the <code>Precompute</code> scan) would
+be safe to parallelise, but its walltime isn't dominant. Revisit on a profile.</p></li>
+<li><p><strong>Daemon / persistent mode.</strong> Amortise cabal+Agda startup by keeping one process
+consuming newline-delimited commands. Large: Agda's <code>TCM</code> holds persistent state
+(<code>stDecodedModules</code> / <code>stVisitedModules</code> / mtime-based <code>.agdai</code> invalidation)
+that cross-command reuse would touch.</p></li>
+<li><p><strong>Snippet hashing for the <code>--skip-agda</code> drawer.</strong> <code>big-module-dag-pods</code> keys defs
+by a Murmur-on-<code>prettyShow</code> hash that <code>SkipAgda</code> doesn't reimplement, so it shows
+a fallback. Add a JS-side hash for a future <code>--skip-agda --with-source</code> mode.</p></li>
+<li><p><strong>Sub-modules in the source scan.</strong> <code>Precompute.parseHeader</code> reads only the first
+<code>module …</code> per file; nested <code>module Foo.Inner where</code> blocks are missed. Fine for
+<code>--skip-agda</code> today.</p></li>
+<li><p><strong>Scale validation at 100k modules.</strong> <code>big-module-dag-pods</code> has the right shape
+but is untested at that size; tune <code>BUCKET_SIZE</code> / <code>EDGE_BUDGET</code> / <code>VIEWPORT_PAD</code>
+against a real corpus.</p></li>
+<li><p><strong>External-module heuristic for <code>--skip-agda</code>.</strong> Currently: external iff the
+source is outside <code>cwd</code> or it appears only as an import target. Could read
+<code>.agda-lib</code> <code>depend:</code> libraries for better multi-library classification.</p></li>
+<li><p><strong>Schema bump to v3.</strong> <code>kind</code>, <code>reexports[]</code>, and <code>definitionEdgesProvenance</code>
+were added additively under <code>schemaVersion: 2</code>. A v3 bump becomes honest at the
 next <em>incompatible</em> change.</p></li>
-<li><p><strong>Warm-<code>.agdai</code> edge loss (found 2026-06-12).</strong> The emitted graph is
-not byte-stable across the <code>.agdai</code> cache state: a cold run (modules
-freshly type-checked) and a warm run (modules loaded from cached
-interfaces) emit the <strong>same node set</strong> but a different <em>edge</em> set —
-on <code>test/Test.agda</code>, cold emits 213 definition edges, warm 204 (9
-edges lost). The lost edges are out-edges of Agda-generated
-pattern-helper functions (<code>Test.Int-0</code>, <code>Test.Plus-0/1</code>,
-<code>Test.Var-0</code> → the <code>Exp</code> datatype / its constructors). Mechanism is
-the documented <code>postModuleAD</code> dead-code interaction:
-<code>buildInterface</code> runs <code>eliminateDeadCode</code>, so a module <em>loaded from
-its interface</em> exposes a pruned <code>getSignature</code>, and the dead-private
-recovery re-adds the <em>nodes</em> but not all of their <em>body</em> edges. Cold
-(fresh-checked) is the more-complete/correct side. Low-impact on the
-states (nodes are stable), but it means cached-vs-fresh runs can
-disagree on a handful of edges. Relevant to incremental rebuild (see
-<a href="roadmap.html">TODO.md</a>): a fragment cache must store <em>fresh-checked</em>
-fragments, and doing so would actually <em>normalise</em> this discrepancy
-rather than inherit it.</p></li>
+<li><p><strong>Warm-<code>.agdai</code> edge loss.</strong> A warm, non-incremental run emits a slightly poorer
+main-module graph than a cold run (dead-private pattern helpers lose
+edges/kind/type), because <code>getSignature</code> recovery only sees <code>stSignature</code> (the
+entry module's defs). Main-module-only; mitigated because the golden is a cold
+run and <code>--incremental</code> serves the complete fragment.</p></li>
 </ul>
-<hr />
-<h2 id="from-the-jolteon-fastbft-agent-usage-analysis-2026-06-12">From the Jolteon-FastBFT agent-usage analysis (2026-06-12)</h2>
-<p>Source: <code>Jolteon-FastBFT/docs/MCP/UsageAnalysis.md</code> — a mining pass
-over all 60 Claude-agent session transcripts in that consumer project
-(organic behaviour, not battle-test probes). Producer-side items only;
-consumer/MCP items live in <code>agda-graph-explorer/Backlog.md</code>.</p>
+<h2 id="refused--out-of-scope">Refused / out of scope</h2>
 <ul>
-<li><p><strong>Incremental rebuild (changed-module cones) — promoted to the
-Roadmap 2026-06-12.</strong> Profiled and designed; see
-<a href="roadmap.html">TODO.md</a> ("Incremental rebuild — per-module fragment
-cache"). The profile corrected the framing: on a warm <code>.agdai</code> cache
-Agda's own load is only ~8 s — the dominant cost (~79 % of a ~151 s
-run on a 16,769-def corpus) is <em>our</em> per-definition <code>compileDef</code> /
-<code>postModule</code> walk, re-run in full on every rebuild. Agda's
-<code>preModule</code> <code>Skip</code>/<code>Recompile</code> API + the already-module-keyed
-<code>postCompile</code> dataflow make a per-module fragment cache (keyed on the
-interface hash) a localised change rather than a rewrite. This is the
-root cost behind the consumer-side serve-stale item; both are worth
-having.</p></li>
-<li><p><strong>Where-helper node identity (battle-test E1, HIGH).</strong> <del>The graph
-keys definitions by reified qualified name, so same-named
-<code>where</code>/anonymous-module helpers silently merge into one node.</del>
-<strong>SHIPPED 2026-06-05 — predates this analysis.</strong> The mined
-transcripts captured pre-fix behaviour. <code>nodeKey</code> now suffixes
-<code>._.</code>-marked helpers with <code>@&lt;binding-line&gt;</code>, <code>hashQName</code>/wire
-<code>name</code>/edge endpoints all derive from it, and <code>nodeKeyVersion</code> is
-bumped to <code>2</code> so a stale-format cache is detectable. Regression is
-baked into <code>test/Collision.agda</code> (imported by <code>test/Test.agda</code>):
-<code>useA ⇝ QED@20 ⇝ targetA</code> and <code>useB ⇝ QED@26 ⇝ targetB</code> both
-survive. See <a href="changelog.html">Changelog.md</a> (2026-06-05) and the
-<code>nodeKey</code> gotcha in <a href="internals.html">CLAUDE.md</a>. Do not re-implement.</p></li>
-<li><p><strong>Inliner gap, producer side — investigated 2026-06-12, deferred with
-evidence.</strong> Agda inlines every call to an <code>{-# INLINE #-}</code> function
-into the caller's body <em>during type-checking</em>, before the backend
-hook fires, so <code>agda-unused</code> reports such live definitions as <code>dead</code>
-(three confirmed FPs in the consumer project; agents grep-verify every
-<code>dead</code> finding, halving the tool's value). Characterised with a
-fixture (<code>test/InlineGap.agda</code>, imported by <code>test/Test.agda</code>):</p>
-<ul>
-<li>The INLINE helper <code>twice</code> is dropped as a node by <code>ignoreDef</code>'s
-<code>funInline</code> rule, and its callers <code>useInline</code> / <code>aliasTwice</code> point
-straight at <code>Nat._+_</code> (the inlined body), never at <code>twice</code>.</li>
-<li>The lost <code>⇝ twice</code> edges are <strong>not</strong> a contraction artefact: with
-the <code>funInline</code> drop disabled, <code>twice</code> reappears as a node but the
-callers <em>still</em> point at <code>_+_</code>. The call edges are genuinely absent
-from the elaborated <code>Defn</code> the Backend receives — Agda replaced the
-call with the body upstream of <code>compileDefAD</code>.
-Conclusion: <strong>the full producer fix is not achievable from the
-post-elaboration internal syntax</strong> (<code>compileDef</code> has no pre-inline
-view; recovering the edges would mean walking abstract syntax /
-hooking before Agda's inliner, the "principled-but-complex" option).
-And the cheap partial step — keeping INLINE functions as nodes — is
-<strong>net-negative</strong>: every call site is inlined away, so the node is
-always a zero-caller orphan that dead-code analysis flags as a false
-<code>dead</code>. So the <code>funInline</code> drop stays (now with a don't-revert note in
-<code>ignoreDef</code> + the CLAUDE.md gotcha), and the <strong>consumer-side
-source-scan union remains the right fix</strong> (filed in
-<code>agda-graph-explorer</code>): the textual <code>twice m</code> call survives in source
-even when the elaborated edge does not.</li>
-</ul></li>
-<li><p><strong>Stable installed binary path.</strong> ~30 transcript Bash calls were
-pure binary archaeology (<code>find dist-newstyle -name agda-deps</code>,
-launcher checks, mtime-vs-commit forensics). Confirms the filed
-launcher-staleness items (consumer F3.2/F4.3/F5.2/F6.1) from the
-usage side; a <code>cabal install</code>-style stable path removes the class.</p></li>
+<li><p><strong>Stable <code>def_id</code> across runs.</strong> Belongs in a history/diff tool. Content/signature
+hashes and user pragmas break on refactors; QNames are the closest stable thing
+Agda ships, and we already emit them. Rename detection is <code>git log --follow</code>'s job.</p></li>
+<li><p><strong>Inliner gap.</strong> Agda inlines every <code>{-# INLINE #-}</code> call before the backend hook,
+so the call edges are unrecoverable from post-elaboration syntax; keeping INLINE
+functions as nodes just creates false-<code>dead</code> orphans. Handled consumer-side by a
+source scan. Fixture: <code>test/InlineGap.agda</code>.</p></li>
+<li><p><strong><code>first_seen</code> / <code>last_seen</code>, per-commit <code>churn</code> / pivot hints.</strong> Multi-commit
+context is a history-tool concern.</p></li>
+<li><p><strong>Per-commit <code>present: [qname]</code> set.</strong> Redundant — <code>defs.names</code> (packed) and
+<code>definitions[].name</code> (expanded) already enumerate every def seen this run.</p></li>
 </ul>
-<p>From an external batch of 14 numbered feature requests, 9 shipped
-(#1, #2, #3, #4, #5b, #8, #9, #10, #11), 1 was already done (#5), and
-these are the rest.</p>
-<h3 id="5--schema-version-stamp-on-the-json-output">#5 — Schema-version stamp on the JSON output</h3>
-<p>Already done. Every payload starts with <code>"v": 2</code> as its first field —
-that <em>is</em> the schema version. The expanded form additionally emits
-<code>"schemaVersion": 2</code> and <code>"mode": "expanded"</code> for clarity. A consumer
-wanting fail-fast on schema skew:</p>
-<pre class="python"><code>graph = json.loads(open(&quot;deps.json&quot;).read())
-if graph.get(&quot;v&quot;) != 2:
-    raise SystemExit(f&quot;agda-deps schema v{graph.get(&#39;v&#39;)} unsupported&quot;)</code></pre>
-<h3 id="7--stable-def_id-across-runs">#7 — Stable <code>def_id</code> across runs</h3>
-<p>Refused on principle; belongs in a history / diff tool, not in agda-deps.</p>
-<p>Each suggested shape breaks on a slightly different refactor:</p>
-<ul>
-<li>Content hash breaks on whitespace, comment, let-bound variable
-renames.</li>
-<li>Signature hash breaks on type-signature refactors.</li>
-<li>User-supplied pragma requires every Agda developer to annotate.</li>
-</ul>
-<p>None of these is "stable identity"; they're heuristics that look
-stable until they don't. <strong>Agda itself has no notion of stable
-identity</strong> — QNames are the closest thing it ships, and we already
-emit them. Layering rename detection on top is exactly what
-<code>git log --follow</code> does for files: it lives in the <em>history tool</em>,
-not the snapshot tool.</p>
-<h3 id="12--first_seen--last_seen-per-qname-in-lazy-archives">#12 — <code>first_seen</code> / <code>last_seen</code> per qname in lazy archives</h3>
-<p>Out of scope (author marked it so). agda-deps is single-shot.
-Multi-commit context is a history-tool feature. If #6 (daemon) ever
-lands, this could plausibly become a daemon-mode-only field.</p>
-<h3 id="13--per-commit-churn--pivot-hints">#13 — Per-commit <code>churn</code> / pivot hints</h3>
-<p>Out of scope (author marked it so). Cross-commit comparison is a
-history-tool concern.</p>
-<h3 id="14--stable-per-commit-present-qname-set">#14 — Stable per-commit <code>present: [qname]</code> set</h3>
-<p>Redundant. <code>defs.names</code> (packed) and <code>definitions[].name</code> (expanded)
-already enumerate every definition agda-deps saw this run. Consumers
-that want just presence can parse only those fields.</p>
 </div></div></main>
 <footer class="site-footer"><div class="wrap"><div><a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div><div class="muted">Built from the repository’s Markdown by <code>docs/build.py</code>. <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div></div></footer>
 </body>

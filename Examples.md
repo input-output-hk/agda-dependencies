@@ -1,15 +1,10 @@
 # Examples
 
-Runnable recipes for `agda-deps`. For full flag reference see
-[README.md](README.md); for design rationale and the empirical evidence
-behind the default values see [Changelog.md](Changelog.md).
+Runnable recipes for `agda-deps`. Full flag reference: [README.md](README.md).
 
-Throughout, `test/Test.agda` is the small bundled fixture (one defined
-function, one postulate, one hole — every state branch exercised). The
-real-world corpus used to tune the defaults below was the reference corpus,
-a ~21k-node Agda formalisation; the larger examples use a generic
-`path/to/your-project/…`, so substitute your own project's include
-path and entry module wherever you see it.
+`test/Test.agda` is the bundled fixture (one defined function, one postulate, one
+hole). Larger examples use a generic `path/to/your-project/…` — substitute your
+own include path and entry module.
 
 ## Setup
 
@@ -18,27 +13,21 @@ cabal build
 mkdir -p out
 ```
 
----
+`agda-deps` is an Agda `Backend`, so the command line follows Agda's shape:
+`-i INCLUDE_PATH … <entry-module>`. When invoked through cabal, everything before
+`--` is for cabal; everything after is for the backend and Agda.
 
-## `agda-deps` — Agda backend that emits a dependency graph
-
-`agda-deps` is registered as an Agda `Backend`, so the command line
-follows Agda's usual shape: `-i INCLUDE_PATH … <entry-module>`.
-Everything before `--` (when invoked through cabal) is for cabal;
-everything after is for the backend + Agda.
-
-### DOT output (default)
+## DOT output (default)
 
 ```bash
 cabal run agda-deps -- -i test/ -o out/ test/Test.agda
 dot -Tsvg out/deps.dot -o out/deps.svg
 ```
 
-DOT is the right output when the consumer is another graph tool
-(Graphviz, dot2tex, anything that reads the `digraph` syntax). No
-heuristics; the format is dictated by the tool you're piping into.
+Right when the consumer is another graph tool (Graphviz, dot2tex, anything
+reading `digraph` syntax).
 
-### HTML output — interactive viewer
+## HTML output — interactive viewer
 
 ```bash
 cabal run agda-deps -- --format=html --view=module-dag-pods \
@@ -46,164 +35,110 @@ cabal run agda-deps -- --format=html --view=module-dag-pods \
 xdg-open out/deps.html
 ```
 
-**Default view: `module-dag-pods`.** Top-down DAG of expandable
-module pods. Empirically the right starting view for any project
-under ~10k modules — the dagre layout is informative without
-overwhelming. Switch to:
+`module-dag-pods` (the default) is a top-down DAG of expandable module pods — the
+right start for projects under ~10k modules. Switch views:
 
-- `--view=cytoscape` — the original force-directed compound-graph
-  viewer. Use when you want a *single* canvas with everything visible
-  rather than a layered hierarchy.
-- `--view=sigma` or `--view=big-module-dag-pods` — WebGL-rendered;
-  scales to 100k+ modules. The DAG variant uses Haskell-side
-  pre-computed layout to avoid blowing up dagre in the browser.
-- `--view=ide-three-pane` / `--view=source-centric` —
-  definition-level views; needs `--with-source` to be useful.
-- `--view=critical-path-holes` / `--view=progress-dashboard` —
-  specialty views for in-progress proofs.
+- `--view=cytoscape` — force-directed compound graph; one canvas with everything.
+- `--view=sigma` / `--view=big-module-dag-pods` — WebGL, scales to 100k+ modules.
+- `--view=ide-three-pane` / `--view=source-centric` — definition-level; want `--with-source`.
+- `--view=critical-path-holes` / `--view=progress-dashboard` — for in-progress proofs.
 
-### JSON output — for downstream tooling
+## JSON output — for downstream tooling
 
 ```bash
-# Compact: base64-encoded CSR. Right for huge graphs.
-cabal run agda-deps -- --format=json --json-mode=packed \
-  -i test/ -o out/ test/Test.agda
+# Compact: base64 CSR. Right for huge graphs.
+cabal run agda-deps -- --format=json --json-mode=packed -i test/ -o out/ test/Test.agda
 
 # Expanded: arrays of records, no decoder needed.
-cabal run agda-deps -- --format=json --json-mode=expanded \
+cabal run agda-deps -- --format=json --json-mode=expanded -i test/ -o out/ test/Test.agda
+```
+
+`packed` (default) is ~5× smaller on large projects but needs a base64 + Int32-LE
+decoder; use `expanded` to consume from Python / TypeScript / shell.
+
+## `--no-externals` — drop stdlib from the graph
+
+```bash
+cabal run agda-deps -- --format=json --json-mode=expanded --no-externals \
   -i test/ -o out/ test/Test.agda
 ```
 
-**Default mode: `packed`.** ~5× smaller than `expanded` on
-large-scale projects (~21k defs). Switch to `expanded` when you
-need to consume the JSON from Python / TypeScript / shell — the
-`packed` form needs a base64 + Int32-LE decoder.
+Strips every module outside the project root (`Agda.Builtin`, `Data`, …). Cleaner
+than curating `--exclude` lists. The JSON keeps an `externals_summary` recording
+what was dropped.
 
-Downstream tooling generally requires `--json-mode=expanded`.
-
-### `--no-externals` — drop stdlib from the graph
+## `--keep-going` — survive type-check errors
 
 ```bash
-cabal run agda-deps -- --format=json --json-mode=expanded \
-  --no-externals \
-  -i test/ -o out/ test/Test.agda
+cabal run agda-deps -- --keep-going -i test/ -o out/ test/Test.agda
 ```
 
-Strips every module outside the project root (typically `Agda.Builtin`,
-`Data`, `Function`, `Relation`, etc.). Cleaner than maintaining
-`--exclude=PREFIX` lists. The JSON retains an
-`externals_summary` field so downstream tooling that wants a diagnostic
-record of the trusted base can still see what was dropped.
+Catches the `TCErr` and proceeds; failing modules surface as `F`-state markers.
+Use when commits contain `?` holes, when onboarding a broken project, or when one
+WIP module shouldn't hide the rest. Pair with `--lenient-imports` if Agda refuses
+to *import* a module with open metas.
 
-### `--keep-going` — survive type-check errors
+## `--skip-agda` — module-level graph, no type-checking
 
 ```bash
-cabal run agda-deps -- --keep-going \
-  -i test/ -o out/ test/Test.agda
+cabal run agda-deps -- --skip-agda --format=html -i test/ -o out/ test/Test.agda
 ```
 
-Default Agda behaviour aborts on any error. `--keep-going` catches
-the `TCErr` and proceeds; failing modules surface as `F`-state
-markers. Use when (a) commits deliberately contain `?` holes, (b)
-you're onboarding a broken project, (c) one module's WIP shouldn't
-hide the rest of the graph.
+Scans `module …` / `import …` lines and emits a module-level graph in
+milliseconds. Right when the project doesn't type-check, when you only care about
+the module DAG, or for a 1M+ module corpus. No D/P/H classification, no snippets,
+no definition-level edges.
 
-Pair with `--lenient-imports` if Agda refuses to *import* a module
-with open metas (forwarded as `--allow-unsolved-metas`).
-
-### `--skip-agda` — module-level graph, no type-checking
+## `--with-source` + `--lazy` — full HTML viewer at scale
 
 ```bash
-cabal run agda-deps -- --skip-agda --format=html \
-  -i test/ -o out/ test/Test.agda
-```
-
-Doesn't invoke Agda at all. Scans `module …` / `import …` lines and
-emits a module-level graph in milliseconds. Right when (a) the
-project doesn't type-check at all, (b) you only care about the module
-DAG (not definition states), (c) you're inspecting a 1M+ module
-corpus that you can't afford to elaborate.
-
-Trade-off: no defined/postulate/hole classification, no source
-snippets, no definition-level edges.
-
-### `--with-source` + `--lazy` — full HTML viewer at scale
-
-```bash
-cabal run agda-deps -- --format=html --view=ide-three-pane \
-  --with-source --lazy \
-  -i path/to/your-project/ \
-  -o out/ path/to/your-project/Main.lagda.md
-
+cabal run agda-deps -- --format=html --view=ide-three-pane --with-source --lazy \
+  -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md
 cd out/ && python3 -m http.server 8000
 ```
 
-`--with-source` embeds each definition's Agda-highlighted source into
-the page (clicking a leaf opens it in a side drawer). `--lazy`
-splits the output into `graph.json` + per-module detail/snippet
-files so the initial page load stays small. Lazy mode **requires
-HTTP serving** — browsers block `fetch()` on `file://`.
+`--with-source` embeds each definition's highlighted source (clicking a leaf
+opens it in a drawer); `--lazy` splits output into `graph.json` + per-module files
+so the initial load stays small. Lazy mode **requires HTTP serving**. Combine for
+anything bigger than ~5k defs; below that, inline HTML loads instantly.
 
-**When to combine:** anything bigger than ~5k defs. Below that,
-inline-HTML loads instantly.
-
-### `--with-term-hashes` — subterm fingerprints
+## `--with-term-hashes` — subterm fingerprints
 
 ```bash
 cabal run agda-deps -- --format=json --json-mode=expanded \
   --with-term-hashes --min-term-depth=3 \
-  -i path/to/your-project/ \
-  -o out/ path/to/your-project/Main.lagda.md
+  -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md
 ```
 
-Emits canonical-form hashes for every elaborated subterm into the
-JSON. Off by default — adds a `Term` walk per definition and bloats
-the wire format by ~50-100%.
+Emits canonical-form hashes for every elaborated subterm. Off by default (adds a
+Term walk, ~50–100% wire growth). `--min-term-depth=3` (the default) cuts trivial
+`Var`/`Lit`/`Sort` noise; `1` disables the filter.
 
-**Default `--min-term-depth=3`.** At `1` (no filter) the cluster ranking is
-dominated by trivial `Var`/`Lit`/`Sort` shapes; depth-3 cuts the hash volume
-~3× and pushes meaningful clusters to the top. `--min-term-depth=1` disables
-the filter.
-
-### `--incremental` — cache the per-module work across rebuilds
+## `--incremental` — cache per-module work across rebuilds
 
 ```bash
-# First run: full work, writes the cache under out/.agda-deps-cache/.
+# First run: full work, writes out/.agda-deps-cache/. Later runs: unchanged
+# modules served from cache, no-op rebuilds skip re-emitting output.
 cabal run agda-deps -- --incremental --format=json --json-mode=expanded \
-  -i path/to/your-project/ \
-  -o out/ path/to/your-project/Main.lagda.md
-
-# Later runs: unchanged modules are served from the cache (only the
-# changed cone is re-walked), and a no-op rebuild skips re-emitting the
-# output entirely.
-cabal run agda-deps -- --incremental --format=json --json-mode=expanded \
-  -i path/to/your-project/ \
-  -o out/ path/to/your-project/Main.lagda.md
+  -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md
 ```
 
-Two cache layers, both keyed on the module's interface hash: a
-**fragment cache** skips the per-definition walk for unchanged modules,
-and an **incremental-serialise** layer skips rewriting unchanged output
-(the whole monolithic file on a no-op; in `--lazy` mode, only the
-changed `modules/<M>.json` files). Output is byte-identical to a
-non-cached run. Requires Agda ≥ 2.9; disabled under `--keep-going`.
-Stale fragments for deleted modules are pruned automatically;
-`--cache-dir=DIR` relocates the cache. The dominant cost of a warm
-rebuild is Agda's own interface load, which a backend can't avoid — this
-removes our walk and the re-emit on top of it.
+Two cache layers keyed on the interface hash: a **fragment cache** skips the
+per-definition walk, and an **incremental-serialise** layer skips rewriting
+unchanged output (whole file on a no-op; in `--lazy` mode, only changed
+`modules/<M>.json`). Output is byte-identical. Requires Agda ≥ 2.8; disabled
+under `--keep-going`; `--cache-dir=DIR` relocates the cache. The dominant warm
+rebuild cost is Agda's own interface load, which a backend can't avoid.
 
-### `--packed-analytical` — compact JSON without losing fidelity
+## `--packed-analytical` — compact JSON without losing fidelity
 
 ```bash
 cabal run agda-deps -- --format=json --json-mode=packed --packed-analytical \
   --with-signatures --with-term-hashes \
-  -i path/to/your-project/ \
-  -o out/ path/to/your-project/Main.lagda.md
+  -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md
 ```
 
-Packed JSON is ~3-5× smaller than expanded, but by default its `defs`
-object drops the per-definition analytical fields (kind, line, access,
-type, subterm hashes). `--packed-analytical` adds them back as compact
-base64 typed arrays, so a downstream tool keeps the size win *and* the
-fidelity — a decoded packed-analytical graph is node-for-node identical
-to the expanded form. Off by default; only affects `--json-mode=packed`.
+Adds the per-def analytical fields (kind, line, access, type, subterm hashes)
+back to packed's `defs` as base64 typed arrays, so a downstream tool keeps
+packed's size win *and* expanded's fidelity — a decoded graph is node-for-node
+identical to expanded. Off by default; only affects `--json-mode=packed`.

@@ -74,14 +74,6 @@ instance Binary FragmentData where
 -- meaning) changes. The side-channel slices must be exact before/after
 -- deltas, not name-prefix filters — a filter drops anonymous-module
 -- entries no module name prefixes.
---
--- 4: identity is 'NodeRef' serialised via 'Data.Binary' (was a 'QName'
---    'EmbPrj' wire form).
--- 5: derived fields dropped from the payload ('ADDef._deps',
---    'NodeRef.nrHash', both rebuilt on decode); 'NodeRef' stores the
---    unqualified display name, not the full 'prettyShow'.
--- 6: 'NodeRef' gained the serialised 'nrWhereHelper' bit (the module-local
---    marker; not derivable from 'nrKey', which has @._.@ stripped).
 fragmentFormatVersion :: Word64
 fragmentFormatVersion = 6
 
@@ -164,13 +156,11 @@ readFragment path fingerprint fullHash = liftIO $ do
            `E.catch` \ (_ :: E.IOException) -> pure Nothing
   case mbs of
     Nothing -> pure Nothing
-    -- Decode the fixed-size header first and check it *before* touching the
-    -- payload: a stale header (fingerprint change, format bump, deleted
-    -- module) is the common invalidation case, and the payload's @[ADDef]@
-    -- list is the whole cost. The header is the leading field of the
-    -- serialised @(Header, FragmentData)@ tuple, so this is byte-compatible
-    -- with 'writeFragment' — @runGetOrFail get@ consumes exactly the header
-    -- and leaves the payload bytes in @rest@, decoded only on a hit.
+    -- Check the header before decoding the payload: a stale header
+    -- (fingerprint change, format bump, deleted module) is the common
+    -- miss and the payload's @[ADDef]@ list is the whole cost. The header
+    -- is the leading serialised field, so @runGetOrFail get@ consumes
+    -- exactly it and leaves the payload in @rest@, decoded only on a hit.
     Just bs -> case runGetOrFail B.get (L.fromStrict bs) of
       Right (rest, _, hdr)
         | hdr == header fingerprint fullHash ->

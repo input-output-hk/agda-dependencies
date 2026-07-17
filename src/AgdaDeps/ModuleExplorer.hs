@@ -151,16 +151,12 @@ runPartial reportFailed backends = do
 
 -- ** Exception plumbing
 
--- | Catch-everything guard for the best-effort partial pass.
---
--- Don't simplify back to 'catchError': it catches only 'TCErr', but Agda
--- internals also throw GHC exceptions (@__IMPOSSIBLE__@, exit 120). This
--- catches both (a 'TCErr' is itself a GHC exception), re-throwing only
--- 'ExitCode' and async exceptions.
---
--- Unlike 'catchError', state is NOT rolled back: the handler continues
--- from where the failed action left off — what a skip-and-continue
--- driver wants (the next 'setInterface' re-establishes per-module state).
+-- | Catch-everything guard for the best-effort partial pass. Needed over
+-- 'catchError', which catches only 'TCErr': Agda internals also throw GHC
+-- exceptions (@__IMPOSSIBLE__@, exit 120). Catches both, re-throwing only
+-- 'ExitCode' + async. State is NOT rolled back (unlike 'catchError'), so
+-- the handler continues from the failure point — the next 'setInterface'
+-- re-establishes per-module state.
 catchAllTCM :: TCM a -> (E.SomeException -> TCM a) -> TCM a
 catchAllTCM m h = TCM $ \ r e ->
   unTCM m r e `E.catches`
@@ -204,10 +200,9 @@ partialBackendInteraction
   -> AbsolutePath -> [Backend]
   -> TCM () -> (AbsolutePath -> TCM ACB.CheckResult) -> TCM ()
 partialBackendInteraction reportFailed mainFile backends setup check = do
-  -- Wrap both 'setup' and 'check mainFile' so library / pragma / option
-  -- errors firing before the check starts are caught too. 'catchError'
-  -- handles 'TCErr' (and rolls the TCState back, hence 'mergeIfaceState');
-  -- 'catchAllTCM' picks up everything else.
+  -- Wrap both 'setup' and 'check mainFile' so pre-check library / pragma
+  -- / option errors are caught too. 'catchError' handles 'TCErr' (rolls
+  -- the TCState back, hence 'mergeIfaceState'); 'catchAllTCM' the rest.
   let guarded :: TCM a -> TCM (Either () a)
       guarded act =
         ((Right <$> act)
@@ -326,10 +321,9 @@ partialCompilerMain backend isMain =
   where
     perModule env acc iface = do
       let tlmn = iTopLevelModuleName iface
-      -- Always NotMain: the pass can't tell which decoded interface is
-      -- the entry point, and passing IsMain to all makes entry-module
-      -- capture record whichever ran last. An absent entryModule beats a
-      -- wrong one.
+      -- Always NotMain: the pass can't tell which interface is the entry
+      -- point, and IsMain-to-all makes entry capture record whichever ran
+      -- last. An absent entryModule beats a wrong one.
       mRes <- (Just <$> compileOneModule backend env NotMain iface)
                 `catchAllTCM` \ ex -> do
                   reportSkippedModule tlmn (exceptionLine ex)

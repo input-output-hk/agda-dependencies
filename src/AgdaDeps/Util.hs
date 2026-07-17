@@ -117,12 +117,9 @@ liftAnonSegments = intercalate "." . filter (/= "_") . splitDots
 -- escapes (including @<@ \/ @>@ \/ @&@) make the result safe inside
 -- both a @<script>@ block and a standalone @.json@ file.
 --
--- Built as a 'ShowS' fold: each unescaped char costs one @cons@ (not a
--- singleton list + @concatMap@ append), and the closing quote is the
--- fold's base accumulator, so there is no trailing @++ "\\\""@ pass over
--- the whole escaped string. jsString sits on every JSON/HTML/DOT string
--- emitted, so this multiplies across the entire output. Byte-for-byte
--- identical to the previous @concatMap esc@ form.
+-- A 'ShowS' fold: each unescaped char is one @cons@ and the closing
+-- quote is the base accumulator, so no trailing append pass. Sits on
+-- every emitted JSON/HTML/DOT string, so it multiplies across output.
 jsString :: String -> String
 jsString s = '"' : foldr escS "\"" s
   where

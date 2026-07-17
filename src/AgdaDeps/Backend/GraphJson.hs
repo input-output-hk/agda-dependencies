@@ -227,12 +227,10 @@ buildGraphJson GraphInput{..} =
   let mode = if giLazy then EmitLazy else EmitInline
 
       -- (1) Definition list ---------------------------------------------
-      -- Sorted by hashQName for deterministic byte output across runs;
-      -- shared with 'toExpandedGraph' via 'graphDefsList'.
       defsList :: [NodeRef]
       defsList = graphDefsList giDefs
 
-      -- Edge endpoints index by canonical 'nodeKey' string, not 'NodeRef' identity
+      -- Index edge endpoints by canonical 'nodeKey' string, not 'NodeRef'
       -- 'Ord' (which distinguishes same-key helpers and re-drops edges).
       defKeyIndexMap :: M.Map String Int
       defKeyIndexMap = M.fromList (zip (map nodeKey defsList) [0..])
@@ -246,9 +244,7 @@ buildGraphJson GraphInput{..} =
       defModuleNames :: [String]
       defModuleNames = map moduleKey defsList
 
-      -- (2) Module list -------------------------------------------------
-      -- Union of def modules, import-edge endpoints, the entry module,
-      -- failed modules, and extra modules. 'S.toAscList' is sorted.
+      -- (2) Module list ('graphModulesSet'; 'S.toAscList' is sorted) -----
       modulesSet :: S.Set String
       modulesSet = graphModulesSet defModuleNames giImportEdges
                      giEntryModule giFailedModules giExtraModules
@@ -274,8 +270,7 @@ buildGraphJson GraphInput{..} =
       defState :: NodeRef -> DefState
       defState qn = M.findWithDefault Defined qn giStateMap
 
-      -- Per-def state, looked up once and shared by 'defStateBytes' and
-      -- 'moduleStateCounts' (both walk 'defsList').
+      -- Per-def state, shared by 'defStateBytes' and 'moduleStateCounts'.
       defStates :: [DefState]
       defStates = map defState defsList
 
@@ -407,9 +402,7 @@ buildGraphJson GraphInput{..} =
             | (s, t) <- transitiveDefEdges adjList
             ]
 
-      -- (6) Module edges -----------------------------------------------
-      -- Fold leaf edges directly into a 'Set (Int, Int)' of distinct
-      -- module pairs, then add import edges.
+      -- (6) Module edges: distinct leaf-edge module pairs, plus imports --
       moduleEdgeSet :: S.Set (Int, Int)
       moduleEdgeSet =
         let addLeafEdges !acc d =
@@ -448,8 +441,7 @@ buildGraphJson GraphInput{..} =
         ]
 
       -- (7b) Per-module {defined, postulate, hole, failed} counts ------
-      -- Lets views render a per-module state-mix bar without
-      -- re-scanning every def in JS.
+      -- Lets views render a state-mix bar without re-scanning defs in JS.
       moduleStateCounts :: [[Int]]
       moduleStateCounts =
         let zero = Counts 0 0 0 0
@@ -474,9 +466,7 @@ buildGraphJson GraphInput{..} =
         in [ let Counts d p h f = withFailed m in [d, p, h, f] | m <- modules ]
 
       -- (7c) Topological depth from entry per module -------------------
-      -- BFS from the entry module's index over the module edge set.
-      -- -1 for modules unreachable from the entry, or when no entry is
-      -- known.
+      -- BFS from the entry over module edges; -1 if unreachable or no entry.
       moduleDepth :: [Int32]
       moduleDepth = case giEntryModule >>= (`M.lookup` moduleIndexMap) of
         Nothing       -> replicate nModules (-1)
@@ -490,11 +480,8 @@ buildGraphJson GraphInput{..} =
              ]
 
       -- (7d) Module-DAG layout for the big-module-dag-pods view --------
-      -- Pre-computed pod bounding boxes (x, y, width, height) per
-      -- module, packed as a flat Float32 array of length 4 * nModules.
-      -- Rank assignment from sources (in-degree 0), then column-pack
-      -- within each rank centred on x=0, with fixed pod width /
-      -- collapsed height. O(V+E).
+      -- Pod bounding boxes (x, y, w, h) per module, flat Float32 of
+      -- length 4 * nModules. Algorithm in 'buildModuleDagLayout'.
       modulePodLayout :: [Float]
       modulePodLayout = buildModuleDagLayout nModules moduleEdgePairs
 
@@ -556,8 +543,7 @@ buildGraphJson GraphInput{..} =
           ",\"edges\":" ++ edgesObjectJson outOffsets outTargets inOffsets inTargets
         EmitLazy   -> ""
 
-      -- Per-edge 'EdgeProv' as packed int8, parallel to 'outTargets'.
-      -- Inline mode only.
+      -- Per-edge 'EdgeProv' as packed int8, parallel to 'outTargets'; inline only.
       defEdgesProvJson = case mode of
         EmitInline ->
           ",\"definitionEdgesProvenance\":" ++ jsB64Int8 outTargetsProv
@@ -568,15 +554,13 @@ buildGraphJson GraphInput{..} =
           ",\"transitiveEdges\":" ++ jsB64Int32 defTransitivePacked
         EmitLazy   -> ""
 
-      -- Optional diagnostic field; absent when @--no-externals@ wasn't
-      -- passed.
+      -- Optional diagnostic field; absent without @--no-externals@.
       externalsSummaryField = case giExternalsSummary of
         Just es -> ",\"externals_summary\":" ++ externalsSummaryJson es
         Nothing -> ""
 
       -- Optional module-level soundness escapes (file @OPTIONS@ pragmas);
-      -- absent when no module declares one, so escape-free corpora stay
-      -- byte-identical.
+      -- omitted when empty so escape-free corpora stay byte-identical.
       moduleOptionEscapesField
         | null giModuleOptionEscapes = ""
         | otherwise = ",\"moduleOptionEscapes\":"
@@ -821,9 +805,8 @@ packedAnalyticalJson defsList defs =
     kinds = [ encodeDefKind (defKind qn) | qn <- defsList ]
     lns   = [ maybe (-1) fromIntegral (defLine qn) | qn <- defsList ] :: [Int32]
     accs  = [ encodeDefAccess (defAccess qn) | qn <- defsList ]
-    -- One Int8 bitmask per def, ALWAYS present (like kinds/lines/access);
-    -- 0 = no escapes. Bit layout (MUST match packed_analytical_check.py
-    -- and README): bit 0 (1) = non-terminating, bit 1 (2) = trustme.
+    -- One Int8 bitmask per def, always present; 0 = no escapes. Bit
+    -- layout in 'encodeUnsafeByte' (MUST match packed_analytical_check.py).
     unsafes = [ encodeUnsafeByte (defUnsafe qn) | qn <- defsList ] :: [Int8]
     sigs  = [ defSig qn | qn <- defsList ]
 
@@ -943,9 +926,8 @@ encodeUnsafeByte = foldl' (\acc t -> acc .|. tagBit t) 0
 -- ** Per-NodeRef analytical lookups (shared by packed-analytical + expanded)
 --
 -- Both forms key these by 'NodeRef' over the same @defsList@, so a NodeRef
--- with no local 'ADDef' gets the same default in both — this is what
--- keeps packed-analytical node-for-node identical to expanded. Do not
--- inline these back per-form.
+-- with no local 'ADDef' gets the same default in both — this keeps
+-- packed-analytical node-for-node identical to expanded. Don't inline per-form.
 
 -- | Structural kind by NodeRef; 'DKOther' for QNames with no 'ADDef'.
 mkDefKind :: [ADDef] -> (NodeRef -> DefKind)
@@ -1115,8 +1097,7 @@ buildSearchIndex modules defs =
       -- dedup once per bigram.
       bigramMap :: M.Map String [Int]
       bigramMap
-        -- Above 'bigramThreshold' total names, emit an empty map; the
-        -- JS search falls back to a linear scan over 'names'.
+        -- Above 'bigramThreshold' total names, emit an empty map (JS falls back to linear scan).
         | length names > bigramThreshold = M.empty
         | otherwise = M.map dedupSortedInt $
             foldl' insertNameBigrams M.empty (zip [0..] names)
@@ -1263,8 +1244,7 @@ buildModuleDagLayout nMods edges
                     | s == t    = m
                     | otherwise = IM.insertWith (+) t 1 m
 
-          -- Longest-path rank via Kahn's algorithm: source nodes get
-          -- rank 0, every other node gets max(rank predecessors) + 1.
+          -- Longest-path rank via Kahn's algorithm (see 'kahnRanks').
           rank :: IM.IntMap Int
           rank = kahnRanks nMods adjOut inDeg
 
@@ -1376,9 +1356,8 @@ toExpandedGraph GraphInput{..} =
       defState :: NodeRef -> DefState
       defState qn = M.findWithDefault Defined qn giStateMap
 
-      -- Per-NodeRef analytical lookups, shared with the packed-analytical
-      -- path so the two forms agree node-for-node (incl. the default for
-      -- QNames with no local ADDef).
+      -- Per-NodeRef analytical lookups, shared with packed-analytical
+      -- (see 'mkDefKind') so the two forms agree node-for-node.
       defKind   = mkDefKind   giDefs
       defLine   = mkDefLine   giDefs
       defAccess = mkDefAccess giDefs
