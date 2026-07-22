@@ -97,6 +97,16 @@ jobs:
         python3 schema/check_schema.py ci-out/generated.schema.json \
           schema/graph-v2-expanded.schema.json
 
+    - name: --show-defaults documents every config key
+      # The commented sample .agda-deps.yml emitted by --show-defaults must
+      # list exactly the keys the FromJSON Config instance reads. Guards
+      # against a flag added to the parser (Config.hs) but not to the sample
+      # (Config.showDefaultsYaml), or a stale/misspelled key in the sample.
+      run: |
+        cabal run -v0 agda-deps -- --show-defaults > ci-out/show-defaults.yml
+        python3 schema/show_defaults_check.py ci-out/show-defaults.yml \
+          src/AgdaDeps/Config.hs
+
     - name: Check expanded output against the golden snapshot
       # Content regression guard (beyond shape/schema): node states, kinds,
       # edges, provenance, reexports, subterm hashes must match the

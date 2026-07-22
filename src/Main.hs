@@ -31,7 +31,8 @@ import Data.IORef ( writeIORef )
 import AgdaDeps.Backend ( backendWithSeed, precomputedGraphRef )
 import AgdaDeps.Config
   ( applyConfig, defaultConfig, discoverConfigPath, loadConfig
-  , extractConfigArg, inferFormatFromOutput, cfgResolveDeps )
+  , extractConfigArg, inferFormatFromOutput, cfgResolveDeps
+  , showDefaultsYaml )
 import AgdaDeps.Driver  ( runAgdaArgsKeepGoing, wantsKeepGoing )
 import AgdaDeps.Backend.Wire ( expandedSchemaJson )
 import AgdaDeps.Help
@@ -67,6 +68,11 @@ main = do
   -- output and exits (no Agda run, no input file needed).
   when ("--emit-schema" `elem` rawArgs) $
     putStrLn expandedSchemaJson >> exitSuccess
+  -- --show-defaults prints a sample .agda-deps.yml (every option with its
+  -- default value, commented out) and exits, so the user can seed a config
+  -- file: `agda-deps --show-defaults > Project/.agda-deps.yml`.
+  when ("--show-defaults" `elem` rawArgs) $
+    putStr showDefaultsYaml >> exitSuccess
   -- Detect --quiet before any 'info' call.
   setQuiet ("--quiet" `elem` rawArgs)
 

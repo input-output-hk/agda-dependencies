@@ -7,6 +7,24 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-07-22 — `agda-deps` — `--show-defaults` seeds a config file
+
+New intercept flag, alongside `--help` / `--version` / `--emit-schema`:
+
+- **`--show-defaults`** prints a commented sample `.agda-deps.yml` — every
+  YAML key with its built-in default value and a one-line description, all
+  commented out — then exits. Seed a project config with
+  `agda-deps --show-defaults > .agda-deps.yml`, then uncomment and edit only
+  the keys you want to override.
+
+The sample text lives in `Config.showDefaultsYaml`, reading the printed
+defaults from `defaultOptions` / `defaultPalette` so they can't drift; the key
+names are kept in lock-step with the `FromJSON Config` instance (a build-time
+guarantee both are the same 30 keys). Because a comment-only file decodes to
+YAML `Null`, `FromJSON Config` now treats a `Null` (empty / comment-only)
+document as an empty config, so a freshly-seeded file reproduces the defaults
+verbatim before anything is uncommented.
+
 ## 2026-07-16 — `agda-deps` — filter `variable`-block names on Agda 2.8 too
 
 `ignoreDef` dropped Agda's synthesised `variable`-block definitions

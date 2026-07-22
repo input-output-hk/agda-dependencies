@@ -4,9 +4,11 @@
 module AgdaDeps.Options
   ( -- * Output format
     OutputFormat(..)
+  , formatSlug
 
     -- * JSON emission mode
   , JsonMode(..)
+  , jsonModeSlug
 
     -- * HTML view
   , View(..)
@@ -81,6 +83,17 @@ instance NFData OutputFormat where
   rnf FmtDot  = ()
   rnf FmtHtml = ()
   rnf FmtJson = ()
+
+-- | Canonical CLI slug for an 'OutputFormat'. Kept in sync with 'formatOpt'.
+formatSlug :: OutputFormat -> String
+formatSlug FmtDot  = "dot"
+formatSlug FmtHtml = "html"
+formatSlug FmtJson = "json"
+
+-- | Canonical CLI slug for a 'JsonMode'. Kept in sync with 'jsonModeOpt'.
+jsonModeSlug :: JsonMode -> String
+jsonModeSlug JsonPacked   = "packed"
+jsonModeSlug JsonExpanded = "expanded"
 
 -- | HTML view variant. Selects which JS app the @--format=html@ output
 -- ships. All views consume the same v2 @graph.json@ payload built by

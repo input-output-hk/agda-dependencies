@@ -198,7 +198,7 @@ backendWithSeed seed = Backend'
       , Option []    ["with-source"] (NoArg withSourceOpt)
         "Embed each definition's source snippet (signature + body) into the\nHTML output, fetched on demand. Requires --lazy (the self-contained\ninline variant was removed); without it, has no effect. Clicking a leaf\nopens its definition in a side drawer. To link out to whole `agda --html`\npages instead, see --agda-html-dir."
       , Option []    ["agda-html-dir"] (ReqArg agdaHtmlDirOpt "DIR")
-        "Path to the pages written by `agda --html`, RELATIVE to the\ngenerated HTML (e.g. --agda-html-dir=html). HTML views then show an\n\"Open source\" link that opens DIR/<Module.Name>.html. Off by default;\nwhen unset the output is unchanged. Best served over HTTP."
+        "Path to the pages written by `agda --html`, RELATIVE to the\ngenerated HTML (e.g. --agda-html-dir=html). The sunburst-hierarchy view\nthen shows an \"Open source\" link opening DIR/<Module.Name>.html. Off by\ndefault; when unset the output is unchanged. Best served over HTTP."
       , Option []    ["lazy"] (NoArg lazyOpt)
         "HTML output only: split into a small deps.html shell plus\ngraph.json and per-module modules/<Module>.json,\nsnippets/<Module>.json files, loaded lazily via fetch().\nRequires HTTP serving (e.g. python -m http.server)."
       , Option []    ["exclude"] (ReqArg excludeOpt "PREFIX")
@@ -217,7 +217,7 @@ backendWithSeed seed = Backend'
       , Option []    ["skip-agda"] (NoArg skipAgdaOpt)
         "Don't invoke Agda at all. Render a module-level graph straight\nfrom the source-file scan (line-parses 'module' / 'import')."
       , Option []    ["incremental"] (NoArg incrementalOpt)
-        "Cache each module's compiled dependency fragment under\n<out-dir>/.agda-deps-cache, keyed on the module's interface hash,\nand skip the per-definition walk on later runs when the module is\nunchanged. Requires Agda >= 2.9; disabled under --keep-going."
+        "Cache each module's compiled dependency fragment under\n<out-dir>/.agda-deps-cache, keyed on the module's interface hash,\nand skip the per-definition walk on later runs when the module is\nunchanged. Requires Agda >= 2.8; disabled under --keep-going."
       , Option []    ["cache-dir"] (ReqArg cacheDirOpt "DIR")
         "Override the --incremental cache location (fragments +\nserialise manifest). Default: <out-dir>/.agda-deps-cache. No\neffect without --incremental."
       , Option []    ["packed-analytical"] (NoArg packedAnalyticalOpt)

@@ -36,7 +36,7 @@ xdg-open out/deps.html
 ```
 
 `module-dag-pods` (the default) is a top-down DAG of expandable module pods — the
-right start for projects under ~10k modules. Switch views:
+right start for projects under ~5k modules. Switch views:
 
 - `--view=cytoscape` — force-directed compound graph; one canvas with everything.
 - `--view=sigma` / `--view=big-module-dag-pods` — WebGL, scales to 100k+ modules.

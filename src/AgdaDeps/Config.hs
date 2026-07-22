@@ -28,6 +28,9 @@ module AgdaDeps.Config
     -- * Merge
   , applyConfig
 
+    -- * Sample config
+  , showDefaultsYaml
+
     -- * argv helpers
   , extractConfigArg
   , inferFormatFromOutput
@@ -51,7 +54,8 @@ import System.FilePath
 
 import AgdaDeps.Options
   ( Options(..), OutputFormat(..), JsonMode(..), View(..)
-  , ColorPalette(..), defaultPalette
+  , ColorPalette(..), defaultPalette, defaultOptions
+  , viewSlug, formatSlug, jsonModeSlug
   )
 
 -- | YAML config payload. Every field is 'Maybe' so an empty file
@@ -225,45 +229,52 @@ instance FromJSON Theme where
   parseJSON = parseEnum "theme" parseTheme
 
 instance FromJSON Config where
-  parseJSON = withObject "agda-deps config" $ \o -> do
-    cfgOutDir          <- o .:? "out-dir"
-    cfgFormat          <- o .:? "format"
-    cfgView            <- o .:? "view"
-    cfgTheme           <- o .:? "theme"
-    cfgColorDefined    <- o .:? "color-defined"
-    cfgColorPostulate  <- o .:? "color-postulate"
-    cfgColorHole       <- o .:? "color-hole"
-    cfgColorFailed     <- o .:? "color-failed"
-    cfgWithSource      <- o .:? "with-source"
-    cfgLazy            <- o .:? "lazy"
-    cfgExcludeModules  <- o .:? "exclude"
-    cfgNoSourceFor     <- o .:? "no-source-for"
-    -- max-snippet-bytes: number; 0 disables the cap.
-    rawMaxSnip         <- o .:? "max-snippet-bytes" :: A.Parser (Maybe Int)
-    let cfgMaxSnippetBytes = case rawMaxSnip of
-          Nothing -> Nothing
-          Just 0  -> Just Nothing
-          Just n
-            | n > 0     -> Just (Just n)
-            | otherwise -> Nothing  -- negatives ignored
-    cfgGzip            <- o .:? "gzip"
-    cfgKeepGoing       <- o .:? "keep-going"
-    cfgSkipAgda        <- o .:? "skip-agda"
-    cfgIncremental     <- o .:? "incremental"
-    cfgCacheDir        <- o .:? "cache-dir"
-    cfgPackedAnalytical <- o .:? "packed-analytical"
-    cfgQuiet           <- o .:? "quiet"
-    cfgNoExternals     <- o .:? "no-externals"
-    cfgJsonMode        <- o .:? "json-mode"
-    cfgLenientImports  <- o .:? "lenient-imports"
-    cfgResolveDeps     <- o .:? "resolve-deps"
-    cfgWithTermHashes  <- o .:? "with-term-hashes"
-    cfgMinTermDepth    <- o .:? "min-term-depth"
-    cfgWithSignatures  <- o .:? "with-signatures"
-    cfgNormaliseSignatures <- o .:? "normalise-signatures"
-    cfgShowImplicit    <- o .:? "signature-implicits"
-    cfgAgdaHtmlDir     <- o .:? "agda-html-dir"
-    pure Config{..}
+  -- A comment-only (or empty) YAML document decodes to 'Null'. Treat it as
+  -- an empty config — all defaults — so a freshly-seeded file from
+  -- @agda-deps --show-defaults > .agda-deps.yml@ loads cleanly before the
+  -- user uncomments anything.
+  parseJSON A.Null = pure defaultConfig
+  parseJSON v = withObject "agda-deps config" parseObj v
+    where
+      parseObj o = do
+        cfgOutDir          <- o .:? "out-dir"
+        cfgFormat          <- o .:? "format"
+        cfgView            <- o .:? "view"
+        cfgTheme           <- o .:? "theme"
+        cfgColorDefined    <- o .:? "color-defined"
+        cfgColorPostulate  <- o .:? "color-postulate"
+        cfgColorHole       <- o .:? "color-hole"
+        cfgColorFailed     <- o .:? "color-failed"
+        cfgWithSource      <- o .:? "with-source"
+        cfgLazy            <- o .:? "lazy"
+        cfgExcludeModules  <- o .:? "exclude"
+        cfgNoSourceFor     <- o .:? "no-source-for"
+        -- max-snippet-bytes: number; 0 disables the cap.
+        rawMaxSnip         <- o .:? "max-snippet-bytes" :: A.Parser (Maybe Int)
+        let cfgMaxSnippetBytes = case rawMaxSnip of
+              Nothing -> Nothing
+              Just 0  -> Just Nothing
+              Just n
+                | n > 0     -> Just (Just n)
+                | otherwise -> Nothing  -- negatives ignored
+        cfgGzip            <- o .:? "gzip"
+        cfgKeepGoing       <- o .:? "keep-going"
+        cfgSkipAgda        <- o .:? "skip-agda"
+        cfgIncremental     <- o .:? "incremental"
+        cfgCacheDir        <- o .:? "cache-dir"
+        cfgPackedAnalytical <- o .:? "packed-analytical"
+        cfgQuiet           <- o .:? "quiet"
+        cfgNoExternals     <- o .:? "no-externals"
+        cfgJsonMode        <- o .:? "json-mode"
+        cfgLenientImports  <- o .:? "lenient-imports"
+        cfgResolveDeps     <- o .:? "resolve-deps"
+        cfgWithTermHashes  <- o .:? "with-term-hashes"
+        cfgMinTermDepth    <- o .:? "min-term-depth"
+        cfgWithSignatures  <- o .:? "with-signatures"
+        cfgNormaliseSignatures <- o .:? "normalise-signatures"
+        cfgShowImplicit    <- o .:? "signature-implicits"
+        cfgAgdaHtmlDir     <- o .:? "agda-html-dir"
+        pure Config{..}
 
 -- ---------------------------------------------------------------------------
 -- Merge
@@ -312,6 +323,161 @@ applyConfig c opts0 =
       , optShowImplicit    = fromMaybe (optShowImplicit   opts1) (cfgShowImplicit   c)
       , optAgdaHtmlDir     = maybe (optAgdaHtmlDir opts1) Just (cfgAgdaHtmlDir c)
       }
+
+-- ---------------------------------------------------------------------------
+-- Sample config
+-- ---------------------------------------------------------------------------
+
+-- | The text of the sample @.agda-deps.yml@ printed by
+-- @agda-deps --show-defaults@: every YAML key with its built-in default
+-- value and a one-line description, all commented out so redirecting the
+-- output to a file (@agda-deps --show-defaults > .agda-deps.yml@)
+-- reproduces the defaults exactly — the user uncomments only the keys
+-- they want to override.
+--
+-- Defaults are read from 'defaultOptions' \/ 'defaultPalette' so they can
+-- never drift from the real defaults. Keys and descriptions are kept in
+-- sync by hand with the 'FromJSON' 'Config' instance and 'applyConfig';
+-- adding a flag means adding its entry here too.
+showDefaultsYaml :: String
+showDefaultsYaml = unlines $
+  [ "# agda-deps configuration (.agda-deps.yml)"
+  , "#"
+  , "# Written by `agda-deps --show-defaults`. Save it next to your project's"
+  , "# *.agda-lib (or point at it with --config=PATH). Every option is shown"
+  , "# with its built-in default and commented out; uncomment and edit the ones"
+  , "# you want to change. Merge order: defaults < this file < CLI flags."
+  , ""
+  , "# --- Output ----------------------------------------------------------------"
+  , ""
+  , "# Output directory or file. Default: none (usually set with -o on the CLI)."
+  , "# A .html / .json / .dot extension here also selects the format."
+  , "#out-dir: deps"
+  , ""
+  , "# Output format: dot | html | json."
+  , "#format: " ++ formatSlug (optFormat defaultOptions)
+  , ""
+  , "# HTML view (only used with format: html). One of: cytoscape,"
+  , "# ide-three-pane, module-dag-pods, source-centric, notion-doc,"
+  , "# wiki-backlinks, sigma, big-module-dag-pods, critical-path-holes,"
+  , "# progress-dashboard, cartographic-atlas, sunburst-hierarchy,"
+  , "# reading-order-narrative, pixel-grid-overview."
+  , "#view: " ++ viewSlug (optView defaultOptions)
+  , ""
+  , "# --- Node colours ----------------------------------------------------------"
+  , ""
+  , "# Colour preset for the four definition states: default | light | dark |"
+  , "# colorblind. The color-* keys below override individual slots. Default: none."
+  , "#theme: default"
+  , ""
+  , "# Per-state node colours (#RRGGBB); quote them so YAML doesn't read # as a"
+  , "# comment. D = Defined, P = Postulate, H = Hole, F = Failed (--keep-going)."
+  , "#color-defined: " ++ yColor (colorDefined defaultPalette)
+  , "#color-postulate: " ++ yColor (colorPostulate defaultPalette)
+  , "#color-hole: " ++ yColor (colorHole defaultPalette)
+  , "#color-failed: " ++ yColor (colorFailed defaultPalette)
+  , ""
+  , "# --- HTML source snippets --------------------------------------------------"
+  , ""
+  , "# Embed source snippets in the HTML (requires lazy: true; served over HTTP)."
+  , "#with-source: " ++ yBool (optWithSource defaultOptions)
+  , ""
+  , "# Split HTML output into per-module files. Needs an HTTP server: browsers"
+  , "# block fetch() on file://."
+  , "#lazy: " ++ yBool (optLazy defaultOptions)
+  , ""
+  , "# Module-name prefixes to exclude from source snippets (with lazy +"
+  , "# with-source). Example: [Agda.Builtin, Data]"
+  , "#no-source-for: []"
+  , ""
+  , "# Maximum bytes per embedded source snippet; 0 disables the cap."
+  , "#max-snippet-bytes: " ++ maxSnip
+  , ""
+  , "# Location of `agda --html` pages, resolved by the browser relative to the"
+  , "# output HTML; adds an \"Open source\" link. Default: none."
+  , "#agda-html-dir: html"
+  , ""
+  , "# --- JSON output -----------------------------------------------------------"
+  , ""
+  , "# JSON layout: packed (CSR adjacency + base64 typed arrays) | expanded"
+  , "# (arrays of records)."
+  , "#json-mode: " ++ jsonModeSlug (optJsonMode defaultOptions)
+  , ""
+  , "# Add the per-def analytical arrays (kind / line / access / type / subterm)"
+  , "# to packed JSON. Only affects json-mode: packed."
+  , "#packed-analytical: " ++ yBool (optPackedAnalytical defaultOptions)
+  , ""
+  , "# --- Type signatures (expanded JSON) ---------------------------------------"
+  , ""
+  , "# Emit each definition's reified type as the per-def \"type\" field."
+  , "#with-signatures: " ++ yBool (optWithSignatures defaultOptions)
+  , ""
+  , "# Normalise type signatures before rendering. Needs with-signatures."
+  , "#normalise-signatures: " ++ yBool (optNormaliseSignatures defaultOptions)
+  , ""
+  , "# Show implicit / irrelevant arguments in rendered signatures. Needs"
+  , "# with-signatures."
+  , "#signature-implicits: " ++ yBool (optShowImplicit defaultOptions)
+  , ""
+  , "# --- Subterm hashes (expanded JSON) ----------------------------------------"
+  , ""
+  , "# Emit a canonical-form hash for every subterm walked."
+  , "#with-term-hashes: " ++ yBool (optWithTermHashes defaultOptions)
+  , ""
+  , "# Minimum AST depth for an emitted subterm hash; 1 disables the filter."
+  , "# Needs with-term-hashes."
+  , "#min-term-depth: " ++ show (optMinTermDepth defaultOptions)
+  , ""
+  , "# --- Filtering -------------------------------------------------------------"
+  , ""
+  , "# Module-name prefixes to omit from the graph entirely."
+  , "# Example: [Agda.Builtin, Data]"
+  , "#exclude: []"
+  , ""
+  , "# Drop definitions from outside the project (library / builtin modules)."
+  , "#no-externals: " ++ yBool (optNoExternals defaultOptions)
+  , ""
+  , "# --- Type-checking pipeline ------------------------------------------------"
+  , ""
+  , "# Continue past type-check errors; a failing module is tagged F."
+  , "#keep-going: " ++ yBool (optKeepGoing defaultOptions)
+  , ""
+  , "# Skip Agda entirely; build a module-level graph from a source scan."
+  , "#skip-agda: " ++ yBool (optSkipAgda defaultOptions)
+  , ""
+  , "# Tolerate unsolved metas in imported modules (maps to --allow-unsolved-metas)."
+  , "#lenient-imports: " ++ yBool (optLenientImports defaultOptions)
+  , ""
+  , "# Resolve the .agda-lib depend: closure into an explicit -i list (so no"
+  , "# libraries file is needed)."
+  , "#resolve-deps: false"
+  , ""
+  , "# --- Caching / misc --------------------------------------------------------"
+  , ""
+  , "# Per-module fragment cache keyed on the interface hash. Disabled under"
+  , "# keep-going."
+  , "#incremental: " ++ yBool (optIncremental defaultOptions)
+  , ""
+  , "# Override the --incremental cache location."
+  , "# Default: <out-dir>/.agda-deps-cache."
+  , "#cache-dir: .agda-deps-cache"
+  , ""
+  , "# Gzip the emitted artifacts."
+  , "#gzip: " ++ yBool (optGzip defaultOptions)
+  , ""
+  , "# Suppress progress logging."
+  , "#quiet: " ++ yBool (optQuiet defaultOptions)
+  ]
+  where
+    yBool True  = "true"
+    yBool False = "false"
+
+    -- Colours start with '#', which YAML would read as a comment: quote them.
+    yColor c = "\"" ++ c ++ "\""
+
+    maxSnip = case optMaxSnippetBytes defaultOptions of
+      Nothing -> "0"
+      Just n  -> show n
 
 -- ---------------------------------------------------------------------------
 -- Discovery

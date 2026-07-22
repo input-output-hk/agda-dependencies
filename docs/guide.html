@@ -22,10 +22,10 @@
 <div class="toc-title">On this page</div>
 <nav><a class="lvl2" href="#prerequisites">Prerequisites</a><a class="lvl2" href="#build">Build</a><a class="lvl2" href="#quick-start">Quick start</a><a class="lvl2" href="#backend-flags">Backend flags</a><a class="lvl2" href="#views">Views</a><a class="lvl2" href="#yaml-config">YAML config</a><a class="lvl2" href="#linking-to-source">Linking to source</a><a class="lvl2" href="#large-projects-lazy-output">Large projects: lazy output</a><a class="lvl2" href="#consuming-the-json-output">Consuming the JSON output</a><a class="lvl2" href="#what-gets-filtered-out">What gets filtered out</a><a class="lvl2" href="#ai-disclaimer">AI disclaimer</a></nav>
 </div></aside>
-<div class="prose"><h1 id="agda-deps-an-agda-dependecy-graph-generator-plus-nice-visuals">agda-deps: an Agda dependecy graph generator plus nice visuals.</h1>
-<p><code>agda-deps</code> is an dependency graph generator exposing the relation between
-definitions, postulates, and incomplete definitions/expressions.
-The main idea is to show a simple overview of the state of the library.</p>
+<div class="prose"><h1 id="agda-deps-an-agda-dependency-graph-generator-plus-visualisations">agda-deps: an Agda dependency graph generator plus visualisations</h1>
+<p><code>agda-deps</code> is an Agda compiler backend that emits a dependency graph relating
+definitions, postulates, and incomplete definitions/expressions — a quick
+overview of the state of a library.</p>
 <p>There are two visual outcomes:</p>
 <ul>
 <li>a Graphviz <strong>DOT</strong> file,</li>
@@ -71,7 +71,7 @@ The main idea is to show a simple overview of the state of the library.</p>
 <li><code>Agda &gt;= 2.8 &amp;&amp; &lt; 3</code>. </li>
 </ul>
 <h2 id="build">Build</h2>
-<p>Two builds, Agda 2.8 and 2.9 (wait until there is a rc.)</p>
+<p>Two builds, against Agda 2.8 (default) or 2.9:</p>
 <pre><code>cabal build                                                                        # Agda 2.8.0 (default)
 cabal build --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps   # Agda 2.9.0
 </code></pre>
@@ -84,7 +84,7 @@ dot -Tsvg test/deps.dot -o deps.svg
 <pre><code>cabal run agda-deps -- --format=html -i test/ -o test/ test/Test.agda
 xdg-open test/deps.html
 </code></pre>
-<p>HTML pages have awesome visual effects: pan &amp; zoom, collapsible module clusters,
+<p>HTML pages are interactive: pan &amp; zoom, collapsible module clusters,
 click-to-focus, a module-tree sidebar, layout/spacing controls, and a
 transitive-edge filter.</p>
 <p>Externals (stdlib, <code>Agda.Builtin.*</code>, <code>depend:</code> libraries) start hidden. Under
@@ -95,7 +95,6 @@ imports (repeat <code>-i</code> for the standard library) and passing the top mo
 <pre><code>cabal run agda-deps -- --format=html -i src/ -i /path/to/agda-stdlib/src -o out/ src/MyMain.agda
 </code></pre>
 <h2 id="backend-flags">Backend flags</h2>
-<p>Here is where it gets complicated since we have a lot of config options.</p>
 <p>Everything after <code>--</code> is forwarded to the backend and to Agda's CLI. Standard
 Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</code>,
 <code>--library-file=FILE</code>, <code>--no-libraries</code>, and the trailing positional module.
@@ -147,6 +146,9 @@ Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</co
 <li><code>--version</code> / <code>-V</code> — print the build fingerprint (version, git rev, build
   date, GHC) and exit. <code>--numeric-version</code> prints just the number.</li>
 <li><code>--emit-schema</code> — print the expanded <code>graph.json</code> JSON Schema and exit.</li>
+<li><code>--show-defaults</code> — print a commented sample <code>.agda-deps.yml</code> (every option
+  at its default, commented out) and exit. Seed a config with
+  <code>agda-deps --show-defaults &gt; .agda-deps.yml</code>. See <a href="#yaml-config">YAML config</a>.</li>
 </ul>
 <p>HTML / source flags:</p>
 <ul>
@@ -255,6 +257,12 @@ kebab-case (<code>--no-externals</code> ↔ <code>no-externals</code>). Merge or
 <strong>defaults → config → CLI</strong>. Discovery (first match wins): <code>--config=PATH</code>,
 <code>$AGDA_DEPS_CONFIG</code>, <code>./.agda-deps.yml</code> (or <code>.yaml</code>), then the dotfile in the
 nearest ancestor with a <code>*.agda-lib</code>.</p>
+<p>The quickest way to start is to generate a fully-documented sample — every
+option at its default with a one-line comment — and edit it:</p>
+<pre><code>agda-deps --show-defaults &gt; .agda-deps.yml
+</code></pre>
+<p>The generated file is entirely commented out, so it reproduces the defaults
+as-is; uncomment only the keys you want to change.</p>
 <pre><code class="language-yaml">format: html
 view: module-dag-pods
 theme: dark

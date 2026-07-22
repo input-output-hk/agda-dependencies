@@ -1,8 +1,8 @@
-# agda-deps: an Agda dependecy graph generator plus nice visuals.
+# agda-deps: an Agda dependency graph generator plus visualisations
 
-`agda-deps` is an dependency graph generator exposing the relation between
-definitions, postulates, and incomplete definitions/expressions.
-The main idea is to show a simple overview of the state of the library.
+`agda-deps` is an Agda compiler backend that emits a dependency graph relating
+definitions, postulates, and incomplete definitions/expressions — a quick
+overview of the state of a library.
 
 There are two visual outcomes:
 
@@ -28,7 +28,7 @@ Each node is coloured by the state of its definition:
 
 ## Build
 
-Two builds, Agda 2.8 and 2.9 (wait until there is a rc.)
+Two builds, against Agda 2.8 (default) or 2.9:
 
 ```
 cabal build                                                                        # Agda 2.8.0 (default)
@@ -51,7 +51,7 @@ cabal run agda-deps -- --format=html -i test/ -o test/ test/Test.agda
 xdg-open test/deps.html
 ```
 
-HTML pages have awesome visual effects: pan & zoom, collapsible module clusters,
+HTML pages are interactive: pan & zoom, collapsible module clusters,
 click-to-focus, a module-tree sidebar, layout/spacing controls, and a
 transitive-edge filter.
 
@@ -67,8 +67,6 @@ cabal run agda-deps -- --format=html -i src/ -i /path/to/agda-stdlib/src -o out/
 ```
 
 ## Backend flags
-
-Here is where it gets complicated since we have a lot of config options.
 
 Everything after `--` is forwarded to the backend and to Agda's CLI. Standard
 Agda flags are accepted — `-i DIR` (include path), `-l LIB`,
@@ -121,6 +119,9 @@ Agda flags are accepted — `-i DIR` (include path), `-l LIB`,
 - `--version` / `-V` — print the build fingerprint (version, git rev, build
   date, GHC) and exit. `--numeric-version` prints just the number.
 - `--emit-schema` — print the expanded `graph.json` JSON Schema and exit.
+- `--show-defaults` — print a commented sample `.agda-deps.yml` (every option
+  at its default, commented out) and exit. Seed a config with
+  `agda-deps --show-defaults > .agda-deps.yml`. See [YAML config](#yaml-config).
 
 HTML / source flags:
 
@@ -190,6 +191,16 @@ kebab-case (`--no-externals` ↔ `no-externals`). Merge order is
 **defaults → config → CLI**. Discovery (first match wins): `--config=PATH`,
 `$AGDA_DEPS_CONFIG`, `./.agda-deps.yml` (or `.yaml`), then the dotfile in the
 nearest ancestor with a `*.agda-lib`.
+
+The quickest way to start is to generate a fully-documented sample — every
+option at its default with a one-line comment — and edit it:
+
+```
+agda-deps --show-defaults > .agda-deps.yml
+```
+
+The generated file is entirely commented out, so it reproduces the defaults
+as-is; uncomment only the keys you want to change.
 
 ```yaml
 format: html

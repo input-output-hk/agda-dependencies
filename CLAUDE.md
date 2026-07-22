@@ -209,8 +209,11 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges expands hidden refs int
   check work.
 
 - **Adding a flag.** Extend `Options` + `commandLineFlags` **and** `Config.hs`'s
-  `applyConfig` (kebab-case YAML mirror) **and** `NFData Options`. Merge order:
-  defaults → config → CLI. Don't add a second config mechanism.
+  `applyConfig` + `FromJSON Config` (kebab-case YAML mirror) **and** `NFData
+  Options` **and** `Config.showDefaultsYaml` (the `--show-defaults` sample —
+  its key set is diff-checked against `FromJSON Config` in CI by
+  `schema/show_defaults_check.py`). Merge order: defaults →
+  config → CLI. Don't add a second config mechanism.
 
 - **Adding a view.** Extend `View`; add `viewSlug` + `viewOpt` cases; add the
   template to `extra-source-files` in `agda-deps.cabal`; add the `templateRawFor`
