@@ -1,0 +1,1346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>agda-deps — Module DAG Pods</title>
+<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+<style>
+:root {
+  --c-defined:   #4caf50;
+  --c-postulate: #f44336;
+  --c-hole:      #9c27b0;
+  --c-failed:    #ff9800;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: #16213e;
+  border-bottom: 1px solid #0f3460;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+#toolbar .title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #a0b0d0;
+  margin-right: 4px;
+}
+
+#toolbar button {
+  background: #0f3460;
+  border: 1px solid #1a5276;
+  color: #c0d0e8;
+  padding: 4px 11px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+#toolbar button:hover { background: #1a5276; }
+#toolbar button.active { background: #1a5276; border-color: #4a80b0; }
+#toolbar button#btn-ext.ext-on { background: #0f3460; }
+#toolbar button#btn-ext.ext-off { background: #2a1a2e; border-color: #604070; color: #a090b0; }
+
+#search-box {
+  background: #0f2045;
+  border: 1px solid #1a5276;
+  color: #e0e0e0;
+  padding: 4px 9px;
+  border-radius: 5px;
+  font-size: 12px;
+  width: 190px;
+}
+#search-box::placeholder { color: #4a6080; }
+
+#stats { margin-left: auto; font-size: 11px; color: #506070; white-space: nowrap; }
+
+#main-area {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+#canvas-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  background: #12182a;
+}
+#canvas-wrap.panning { cursor: grabbing; }
+
+/* The SVG edge layer (pointer-events: none so pods are still clickable) */
+#svg-edges {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+#edges-g { /* transformed by JS */ }
+
+/* The pod DOM layer */
+#pods-layer {
+  position: absolute;
+  top: 0; left: 0;
+  transform-origin: 0 0;
+}
+
+/* ── Pod cards ── */
+.pod {
+  position: absolute;
+  border-radius: 9px;
+  border: 1.5px solid #2a4070;
+  background: #16213e;
+  box-shadow: 0 3px 14px rgba(0,0,0,0.45);
+  width: 210px;
+  transition: box-shadow 0.2s, border-color 0.2s;
+  user-select: none;
+}
+.pod.external {
+  border-style: dashed;
+  border-color: #3a4060;
+  background: #111928;
+  opacity: 0.82;
+}
+.pod.entry { border-color: #e94560; box-shadow: 0 0 18px rgba(233,69,96,0.25); }
+.pod.search-match { border-color: #f9ca24 !important; box-shadow: 0 0 14px rgba(249,202,36,0.35) !important; }
+.pod.hidden { display: none !important; }
+
+.pod-header {
+  display: flex;
+  align-items: center;
+  padding: 7px 9px;
+  gap: 5px;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+  transition: background 0.12s;
+}
+.pod-header:hover { background: rgba(255,255,255,0.05); }
+.pod.expanded .pod-header { border-bottom: 1px solid #1e3060; border-radius: 8px 8px 0 0; }
+
+.chevron {
+  font-size: 10px;
+  color: #5070a0;
+  transition: transform 0.22s;
+  flex-shrink: 0;
+  line-height: 1;
+  width: 12px;
+}
+.pod.expanded .chevron { transform: rotate(90deg); }
+
+.pod-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #c0d0f0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pod.external .pod-name { color: #7080a0; font-size: 10px; }
+.pod.entry .pod-name { color: #f07888; }
+
+.pod-swatches {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.swatch {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.swatch.defined   { background: var(--c-defined); }
+.swatch.postulate { background: var(--c-postulate); }
+.swatch.hole      { background: var(--c-hole); }
+.swatch.failed    { background: var(--c-failed); }
+
+.pod-count {
+  font-size: 9px;
+  color: #4a6070;
+  background: #0d1830;
+  border-radius: 8px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+/* ── Expanded definition list ── */
+.pod-defs {
+  display: none;
+  padding: 4px 6px 6px 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #2a4070 transparent;
+}
+.pod.expanded .pod-defs { display: block; }
+
+.def-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+  font-size: 10.5px;
+}
+.def-row:hover { background: rgba(255,255,255,0.07); }
+.def-row.search-match { background: rgba(249,202,36,0.13); }
+
+.def-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.def-dot.defined   { background: var(--c-defined); }
+.def-dot.postulate { background: var(--c-postulate); }
+.def-dot.hole      { background: var(--c-hole); }
+.def-dot.failed    { background: var(--c-failed); }
+
+.def-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #a8bed8;
+}
+
+/* anchor dot — connection point for leaf edges */
+.def-anchor {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.12);
+  flex-shrink: 0;
+}
+
+/* ── Side drawer ── */
+#drawer {
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 360px;
+  background: #16213e;
+  border-left: 1px solid #2a4070;
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  box-shadow: -8px 0 30px rgba(0,0,0,0.5);
+}
+#drawer.open { transform: translateX(0); }
+
+#drawer-hdr {
+  padding: 12px 14px 10px 14px;
+  border-bottom: 1px solid #2a4070;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#drawer-title { flex: 1; min-width: 0; }
+#drawer-def-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #c8d8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#drawer-mod-path {
+  font-size: 10px;
+  color: #5070a0;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#drawer-badge {
+  padding: 2px 8px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 1px;
+}
+#drawer-badge.defined   { background: var(--c-defined); }
+#drawer-badge.postulate { background: var(--c-postulate); }
+#drawer-badge.hole      { background: var(--c-hole); }
+#drawer-badge.failed    { background: var(--c-failed); }
+
+#drawer-close {
+  background: none;
+  border: none;
+  color: #5070a0;
+  font-size: 17px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 1px 2px;
+  flex-shrink: 0;
+}
+#drawer-close:hover { color: #c0d0f0; }
+
+#drawer-source-wrap {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+#drawer-source {
+  font-family: 'Fira Code', 'Consolas', 'SF Mono', monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  color: #a0c0d0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+#drawer-source.agda-html { background: transparent; }
+
+/* Agda HTML inline styles look OK on dark background; tweak anchors */
+#drawer-source a { color: inherit; text-decoration: none; }
+
+/* ── SVG edge styles ── */
+.edge-mod {
+  stroke: #3a6090;
+  stroke-width: 1.8;
+  fill: none;
+  opacity: 0.65;
+}
+.edge-leaf {
+  stroke: #5a88b8;
+  stroke-width: 1;
+  fill: none;
+  stroke-dasharray: 5 3;
+  opacity: 0.5;
+}
+.edge-ext {
+  stroke: #384060;
+  stroke-width: 1.2;
+  fill: none;
+  stroke-dasharray: 3 4;
+  opacity: 0.45;
+}
+
+/* Loading banner */
+#loading {
+  position: fixed; inset: 0;
+  background: #12182a;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 12px;
+  z-index: 9999;
+  font-size: 14px; color: #7090b0;
+}
+#loading.done { display: none; }
+#loading .spinner {
+  width: 30px; height: 30px;
+  border: 3px solid #1e3060;
+  border-top-color: #4a80b0;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="loading"><div class="spinner"></div><div id="loading-msg">Loading graph…</div></div>
+
+<div id="toolbar">
+  <span class="title">agda-deps</span>
+  <button id="btn-expand-all">Expand all</button>
+  <button id="btn-collapse-all">Collapse all</button>
+  <button id="btn-ext" class="ext-on">Externals: on</button>
+  <button id="btn-relayout">Re-layout</button>
+  <input id="search-box" type="text" placeholder="Search modules / defs…" autocomplete="off">
+  <span id="stats"></span>
+</div>
+
+<div id="main-area">
+  <div id="canvas-wrap">
+    <svg id="svg-edges">
+      <defs>
+        <marker id="arr-mod" markerWidth="8" markerHeight="7" refX="7" refY="3.5" orient="auto">
+          <path d="M0,0.5 L0,6.5 L8,3.5 z" fill="#3a6090" opacity="0.8"/>
+        </marker>
+        <marker id="arr-leaf" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <path d="M0,0.5 L0,5.5 L7,3 z" fill="#5a88b8" opacity="0.7"/>
+        </marker>
+        <marker id="arr-ext" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <path d="M0,0.5 L0,5.5 L7,3 z" fill="#384060" opacity="0.6"/>
+        </marker>
+      </defs>
+      <g id="edges-g"></g>
+    </svg>
+    <div id="pods-layer"></div>
+  </div>
+  <div id="drawer">
+    <div id="drawer-hdr">
+      <div id="drawer-title">
+        <div id="drawer-def-name"></div>
+        <div id="drawer-mod-path"></div>
+      </div>
+      <span id="drawer-badge" class="defined">Defined</span>
+      <button id="drawer-close">✕</button>
+    </div>
+    <div id="drawer-source-wrap">
+      <pre id="drawer-source"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+var LAZY = false;
+var WITH_SOURCE = true;
+var GZIP_ENABLED = false;
+var GRAPH = {"v":2,"modules":["Agda.Primitive","Agda.Primitive.Cubical","Bool","Bool.Bool","Coinductive","Coinductive.Stream","Holes","List","List.List","Nat","Nat.Nat","Records","Records.Box","Records.Point","Test","Test.Exp","Where","Where._","_"],"files":["/home/mceresa/Repositories/Projects/AgdaDependencies/test/Bool.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Coinductive.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Holes.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/List.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Nat.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Records.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Test.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Where.agda"],"moduleToFile":"//////////8AAAAAAAAAAAEAAAABAAAAAgAAAAMAAAADAAAABAAAAAQAAAAFAAAABQAAAAUAAAAGAAAABgAAAAcAAAAHAAAA/////w==","fileToModules":[[2,3],[4,5],[6],[7,8],[9,10],[11,12,13],[14,15],[16,17]],"defs":{"names":["Holes.magic","Where._.go","List.List.[]","Test.map","Test._++_","Holes.unsolved#meta.3","Nat._-_","Records.Point.x","Holes.incomplete","Coinductive.mapSuc","List.List._∷_","Test.Exp.Var","Records.Box","Test.sum","Where._.sq","Records.mkPoint","Records.Box.contents","Bool.Bool.false","Coinductive.Stream.constructor","Nat.Nat.suc","Holes.useMagic","Test.Exp.Int","Test.eval","Records.sumCoords","Coinductive.zeros","Coinductive.Stream.head","Test.Plus-1","Nat._*_","List._∷_-1","Records.Point","Nat.suc-0","Bool.Bool","Coinductive.Stream","Where._.bump","List._∷_-0","Records.Box.count","Records.double","Where.sumSquares","Records.origin","List.List","Where.weirdSum","Nat.Nat","Bool.Bool.true","Test.Plus-0","Records.Box.constructor","Coinductive.Stream.tail","Test.Exp","Nat._\u003c_","Nat._==_","Nat._+_","Records.Point.constructor","Test.Exp.Plus","Nat.Nat.zero","Test.Int-0","Test.eval\u0027","Test.Var-0","Records.Point.y"],"modules":"BgAAABEAAAAIAAAADgAAAA4AAAAGAAAACQAAAA0AAAAGAAAABAAAAAgAAAAPAAAACwAAAA4AAAARAAAACwAAAAwAAAADAAAABQAAAAoAAAAGAAAADwAAAA4AAAALAAAABAAAAAUAAAAOAAAACQAAAAcAAAALAAAACQAAAAIAAAAEAAAAEQAAAAcAAAAMAAAACwAAABAAAAALAAAABwAAABAAAAAJAAAAAwAAAA4AAAAMAAAABQAAAA4AAAAJAAAACQAAAAkAAAANAAAADwAAAAoAAAAOAAAADgAAAA4AAAANAAAA","states":"AQAAAAACAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","x":"uY3uP0sfej+2LSo/tYkDP95UxD5euuE/3bW0P67Ytz9vgew/qvG6P0Pn9T50tSVA2bF5P3h/bD9btm4/9+SpP/CFiT9Uxj8/BaPKP6VOoD/V59o/eqUAQNIABkDHS8c/kQ+6P5Vl0D9B8UtAZRmSP2EyFT7qlbI/Io6NPwhaKT/xY8Q/9pfVP83MzDySdFU/ImxwP/OOgz8QWKk/OBAyP2Wq0D/sUbA/4XpMP4j0S0AZ/2Y/INK3P7prFUBvEoM/4uR2PyL9tj/WVsw/S8gvQBx8oT86khNAaW/oP9NNPkBEab8/","y":"IbC6PxDp7z+2hAxAsp0bQH0/FUDjx5A/0NWWP9lf/j80gJ8/DkpAP11tDUCdEQFAVn2uP3Zx6z89m90/okUCQE+vnD+IEUI/DHnEPYxKij9Yyso/eqX0P42X3j9n1ec/1SFXP04o1D5+jNk/zF27P2EyJUC8BfI/L90UPxtkSj+QiMk+Pui5P5XUGUDxY7Q/46XDP+0N/j/VeOE/PugFQEymqj9LyL8/YmcqP5ZD8z9VwaA/5WHBPp/N6j+I9Hs/mN2DP9/gyz+bVf8/5BTlPybksz9KexNAeJzSP0dyEUDvOPU/"},"edges":{"outOffsets":"AAAAAAEAAAAJAAAACwAAAA8AAAATAAAAFAAAABgAAAAbAAAAHQAAACMAAAAnAAAAKgAAAC4AAAA1AAAAOAAAADwAAAA/AAAAQQAAAEMAAABGAAAASQAAAE0AAABUAAAAWQAAAF8AAABhAAAAYQAAAGYAAABmAAAAagAAAGoAAABsAAAAcAAAAHIAAAByAAAAdQAAAHkAAAB8AAAAgQAAAIMAAACGAAAAiAAAAIoAAACKAAAAjQAAAI8AAACSAAAAmQAAAKAAAACkAAAApwAAAKsAAACtAAAArQAAALAAAACwAAAAswAAAA==","outTargets":"KQAAAAEAAAACAAAACgAAAA4AAAAnAAAAKQAAADEAAAA0AAAAAgAAACcAAAACAAAAAwAAAAoAAAAnAAAAAgAAAAQAAAAKAAAAJwAAACkAAAAGAAAAEwAAACkAAAA0AAAAHQAAACkAAAAyAAAABQAAACkAAAAJAAAAEwAAABkAAAAgAAAAKQAAAC0AAAAKAAAAHAAAACIAAAAnAAAACwAAAC4AAAA3AAAAEAAAACMAAAApAAAALAAAAAIAAAAKAAAADQAAACcAAAApAAAAMQAAADQAAAAbAAAAJwAAACkAAAAHAAAAHQAAACkAAAA4AAAADAAAACkAAAAsAAAAEQAAAB8AAAASAAAAIAAAABMAAAAeAAAAKQAAAAAAAAApAAAAMQAAABUAAAApAAAALgAAADUAAAALAAAAFQAAABYAAAApAAAALgAAADEAAAAzAAAABwAAAB0AAAApAAAAMQAAADgAAAAYAAAAGQAAACAAAAApAAAALQAAADQAAAASAAAAIAAAABMAAAAbAAAAKQAAADEAAAA0AAAABwAAACkAAAAyAAAAOAAAABEAAAAqAAAAEgAAABkAAAAgAAAALQAAACkAAAAxAAAADAAAACkAAAAsAAAADAAAABsAAAAjAAAAKQAAAAEAAAAnAAAAKQAAAAcAAAAdAAAAKQAAADQAAAA4AAAAAgAAAAoAAAAhAAAAKQAAADEAAAATAAAANAAAAB8AAAAqAAAADAAAACkAAAAsAAAAEgAAACAAAAALAAAAFQAAADMAAAARAAAAEwAAAB8AAAApAAAAKgAAAC8AAAA0AAAAEQAAABMAAAAfAAAAKQAAACoAAAAwAAAANAAAABMAAAApAAAAMQAAADQAAAAdAAAAKQAAADIAAAAaAAAAKwAAAC4AAAAzAAAAKQAAADQAAAApAAAALgAAADQAAAAdAAAAKQAAADIAAAA=","inOffsets":"AAAAAAEAAAADAAAACQAAAAoAAAALAAAADAAAAA0AAAARAAAAEQAAABIAAAAYAAAAGwAAAB8AAAAgAAAAIQAAACEAAAAiAAAAJgAAACoAAAAyAAAAMgAAADUAAAA2AAAANgAAADcAAAA6AAAAOwAAAD4AAAA/AAAARQAAAEYAAABKAAAAUAAAAFEAAABSAAAAVAAAAFQAAABUAAAAVAAAAFwAAABcAAAAfgAAAIIAAACDAAAAhwAAAIoAAACPAAAAkAAAAJEAAACaAAAAngAAAKEAAACtAAAArgAAAK4AAACvAAAAswAAAA==","inTargets":"FAAAAAEAAAAlAAAAAQAAAAIAAAADAAAABAAAAA0AAAAnAAAAAwAAAAQAAAAIAAAABgAAAA8AAAAXAAAAHQAAACYAAAAJAAAAAQAAAAMAAAAEAAAACgAAAA0AAAAnAAAACwAAABYAAAAuAAAAEAAAACMAAAAkAAAALAAAAA0AAAABAAAADAAAABEAAAAfAAAALwAAADAAAAASAAAAGQAAACAAAAAtAAAABgAAAAkAAAATAAAAGwAAACkAAAAvAAAAMAAAADEAAAAVAAAAFgAAAC4AAAAWAAAAGAAAAAkAAAAYAAAAIAAAADMAAAAOAAAAGwAAACQAAAAKAAAABwAAAA8AAAAXAAAAJgAAADIAAAA4AAAAEwAAABEAAAAqAAAALwAAADAAAAAJAAAAEgAAABgAAAAZAAAAIAAAAC0AAAAoAAAACgAAAAwAAAAkAAAAAQAAAAIAAAADAAAABAAAAAoAAAANAAAADgAAACUAAAAAAAAAAQAAAAUAAAAGAAAABwAAAAgAAAAJAAAADAAAAA0AAAAOAAAADwAAABAAAAATAAAAFAAAABUAAAAWAAAAFwAAABgAAAAbAAAAHQAAACEAAAAjAAAAJAAAACUAAAAmAAAAKAAAACwAAAAvAAAAMAAAADEAAAAyAAAANAAAADYAAAA4AAAAHwAAACoAAAAvAAAAMAAAADMAAAAMAAAAEAAAACMAAAAsAAAACQAAABgAAAAgAAAACwAAABUAAAAWAAAAMwAAADYAAAAvAAAAMAAAAAEAAAANAAAAFAAAABYAAAAXAAAAGwAAACEAAAAoAAAAMQAAAAcAAAAdAAAAMgAAADgAAAAWAAAALgAAADMAAAABAAAABgAAAA0AAAAYAAAAGwAAACYAAAApAAAALwAAADAAAAAxAAAANAAAADYAAAAVAAAACwAAAA8AAAAXAAAAHQAAACYAAAA="},"transitiveEdges":"QAcAADkHAABNBwAAMgcAALEFAACjBQAAJQoAABcKAAAiBAAAFAQAAIEFAACMBQAAeAUAAHEFAACFBQAAKgIAACECAAAUAgAAGgIAAC4CAABxCgAAUwoAAEkKAACJCwAAjgsAAIYLAAB1CwAA1gQAANsEAADCBAAA4gQAAKECAAB+AgAAqgIAAA8FAAAUBQAAFwUAABkFAAD7BAAA8QQAAC8MAAA6DAAADgMAABkDAAAMAwAAFgMAAOcCAADvAgAACwEAAOYAAADuAAAA0gAAAK0AAAC1AAAAngYAAHwGAACtBgAApwYAAKwBAAC4AQAAwQEAAJUMAAChDAAAqgwAAD8LAABLCwAAVAsAAHQDAACAAwAAXgMAAI8DAAA8BQAASAUAACYFAABXBQAAkwgAAJ8IAACqCAAAfQgAAK4IAADVAgAAvAIAAM8CAADYAgAAuQMAAJwDAAC8AwAA9AcAANcHAAD3BwAA9QkAANgJAAD4CQAALQgAABAIAAAnCAAA8QEAAJ0EAAD4BgAAEQcAAOgDAADaAwAAeQkAAIQJAACxCAAAuQgAAJkAAAB0AAAAYQIAAEQCAABcAgAAVgIAAFUJAAA0CQAAvQsAAMgLAABkBAAATgQAAFkEAAASCwAAHQsAAPwKAAB/AQAAigEAAGkBAAAsBgAANwYAABYGAAA0BgAAzwoAANkKAADBCgAA5AoAANoKAADDCgAAlgoAAKAKAACICgAAqwoAAKEKAACKCgAAZggAAGQIAABHAwAAYgAAAG0AAABgAAAAagAAAEcAAAA7AAAAQwAAABEJAAAZCQAAggcAAA==","moduleEdges":[[1,0],[2,0],[2,3],[3,2],[4,0],[4,5],[4,9],[4,10],[5,4],[6,0],[6,9],[7,0],[7,8],[8,7],[9,0],[9,2],[9,3],[9,10],[10,9],[11,0],[11,9],[11,10],[11,12],[11,13],[12,9],[12,11],[13,9],[13,11],[14,0],[14,4],[14,6],[14,7],[14,8],[14,9],[14,10],[14,11],[14,15],[14,16],[15,9],[15,14],[16,0],[16,7],[16,9],[16,17],[17,7],[17,8],[17,9],[17,10],[18,4],[18,6],[18,7],[18,9],[18,11],[18,16]],"transitiveModuleEdges":[[2,0],[4,0],[4,9],[4,10],[6,0],[7,0],[9,0],[9,2],[9,3],[11,0],[11,9],[11,10],[11,12],[11,13],[12,9],[13,9],[14,0],[14,4],[14,6],[14,7],[14,8],[14,9],[14,10],[14,11],[14,16],[15,9],[16,0],[16,7],[16,9],[17,7],[17,8],[17,9],[17,10],[18,7],[18,9]],"moduleStates":"AAAAAAAAAAAAAAAAAAAAAAAAAA==","moduleStateCounts":[[0,0,0,0],[0,0,0,0],[1,0,0,0],[2,0,0,0],[3,0,0,0],[3,0,0,0],[1,1,2,0],[3,0,0,0],[2,0,0,0],[7,0,0,0],[2,0,0,0],[6,0,0,0],[3,0,0,0],[3,0,0,0],[10,0,0,0],[3,0,0,0],[2,0,0,0],[3,0,0,0],[0,0,0,0]],"moduleDepth":"AQAAAP////8CAAAAAgAAAAEAAAACAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAgAAAAIAAAAAAAAAAQAAAAEAAAACAAAA/////w==","fileTree":[{"name":"home","parent":-1,"fileIndex":null},{"name":"mceresa","parent":0,"fileIndex":null},{"name":"Repositories","parent":1,"fileIndex":null},{"name":"Projects","parent":2,"fileIndex":null},{"name":"AgdaDependencies","parent":3,"fileIndex":null},{"name":"test","parent":4,"fileIndex":null},{"name":"Bool.agda","parent":5,"fileIndex":0},{"name":"Coinductive.agda","parent":5,"fileIndex":1},{"name":"Holes.agda","parent":5,"fileIndex":2},{"name":"List.agda","parent":5,"fileIndex":3},{"name":"Nat.agda","parent":5,"fileIndex":4},{"name":"Records.agda","parent":5,"fileIndex":5},{"name":"Test.agda","parent":5,"fileIndex":6},{"name":"Where.agda","parent":5,"fileIndex":7}],"moduleTree":[{"name":"Agda","parent":-1,"moduleIndex":null},{"name":"Primitive","parent":0,"moduleIndex":0},{"name":"Cubical","parent":1,"moduleIndex":1},{"name":"Bool","parent":-1,"moduleIndex":2},{"name":"Bool","parent":3,"moduleIndex":3},{"name":"Coinductive","parent":-1,"moduleIndex":4},{"name":"Stream","parent":5,"moduleIndex":5},{"name":"Holes","parent":-1,"moduleIndex":6},{"name":"List","parent":-1,"moduleIndex":7},{"name":"List","parent":8,"moduleIndex":8},{"name":"Nat","parent":-1,"moduleIndex":9},{"name":"Nat","parent":10,"moduleIndex":10},{"name":"Records","parent":-1,"moduleIndex":11},{"name":"Box","parent":12,"moduleIndex":12},{"name":"Point","parent":12,"moduleIndex":13},{"name":"Test","parent":-1,"moduleIndex":14},{"name":"Exp","parent":15,"moduleIndex":15},{"name":"Where","parent":-1,"moduleIndex":16},{"name":"_","parent":17,"moduleIndex":17},{"name":"_","parent":-1,"moduleIndex":18}],"entryModule":"Test","externalModules":"","bundleFiles":{"Bool":"snippets/Bool.json","Bool.Bool":"snippets/Bool.Bool.json","Coinductive":"snippets/Coinductive.json","Coinductive.Stream":"snippets/Coinductive.Stream.json","Holes":"snippets/Holes.json","List":"snippets/List.json","List.List":"snippets/List.List.json","Nat":"snippets/Nat.json","Nat.Nat":"snippets/Nat.Nat.json","Records":"snippets/Records.json","Records.Box":"snippets/Records.Box.json","Records.Point":"snippets/Records.Point.json","Test":"snippets/Test.json","Test.Exp":"snippets/Test.Exp.json","Where":"snippets/Where.json","Where._":"snippets/Where._.json"},"searchIndex":{"names":["agda.primitive","agda.primitive.cubical","bool","bool.bool","coinductive","coinductive.stream","holes","list","list.list","nat","nat.nat","records","records.box","records.point","test","test.exp","where","where._","_","holes.magic","where._.go","list.list.[]","test.map","test._++_","holes.unsolved#meta.3","nat._-_","records.point.x","holes.incomplete","coinductive.mapsuc","list.list._∷_","test.exp.var","records.box","test.sum","where._.sq","records.mkpoint","records.box.contents","bool.bool.false","coinductive.stream.constructor","nat.nat.suc","holes.usemagic","test.exp.int","test.eval","records.sumcoords","coinductive.zeros","coinductive.stream.head","test.plus-1","nat._*_","list._∷_-1","records.point","nat.suc-0","bool.bool","coinductive.stream","where._.bump","list._∷_-0","records.box.count","records.double","where.sumsquares","records.origin","list.list","where.weirdsum","nat.nat","bool.bool.true","test.plus-0","records.box.constructor","coinductive.stream.tail","test.exp","nat._\u003c_","nat._==_","nat._+_","records.point.constructor","test.exp.plus","nat.nat.zero","test.int-0","test.eval\u0027","test.var-0","records.point.y"],"kinds":"AAAAAAAAAAAAAAAAAAAAAAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ==","bigrams":{"#m":[24],"*_":[46],"++":[23],"+_":[23,68],"-0":[49,53,62,72,74],"-1":[45,47],"-_":[25],".3":[24],".[":[21],"._":[17,20,23,25,29,33,46,47,52,53,66,67,68],".b":[3,12,31,35,36,50,52,54,61,63],".c":[1,35,37,54,63,69],".d":[55],".e":[15,30,40,41,65,70,73],".f":[36],".g":[20],".h":[44],".i":[27,40,72],".l":[8,21,29,58],".m":[19,22,28,34],".n":[10,38,60,71],".o":[57],".p":[0,1,13,26,45,48,62,69,70,75],".s":[5,32,33,37,38,42,44,49,51,56,64],".t":[61,64],".u":[24,39],".v":[30,74],".w":[59],".x":[26],".y":[75],".z":[43,71],"\u003c_":[66],"==":[67],"=_":[67],"[]":[21],"_*":[46],"_+":[23,68],"_-":[25,47,53],"_.":[20,33,52],"_\u003c":[66],"_=":[67],"_∷":[29,47,53],"a.":[0,1,24],"ad":[44],"ag":[0,1,19,39],"ai":[64],"al":[1,36,41,73],"am":[5,37,44,51,64],"ap":[22,28],"ar":[30,56,74],"at":[9,10,25,38,46,49,60,66,67,68,71],"bi":[1],"bl":[55],"bo":[2,3,12,31,35,36,50,54,61,63],"bu":[52],"c-":[49],"ca":[1],"co":[4,5,11,12,13,26,27,28,31,34,35,37,42,43,44,48,51,54,55,57,63,64,69,75],"ct":[4,5,28,37,43,44,51,63,64,69],"cu":[1],"d#":[24],"da":[0,1],"do":[55],"ds":[11,12,13,26,31,34,35,42,48,54,55,57,59,63,69,75],"du":[4,5,28,37,43,44,51,64],"e.":[1,5,17,20,28,33,37,43,44,51,52,56,59,64],"ea":[5,37,44,51,64],"ec":[11,12,13,26,31,34,35,42,48,54,55,57,63,69,75],"ed":[24],"ei":[59],"em":[39],"en":[35],"er":[16,17,20,33,43,52,56,59,71],"es":[6,14,15,19,22,23,24,27,30,32,39,40,41,45,56,62,65,70,72,73,74],"et":[24,27],"ev":[41,73],"ex":[15,30,40,65,70],"fa":[36],"gd":[0,1],"gi":[19,39,57],"go":[20],"he":[16,17,20,33,44,52,56,59],"ho":[6,19,24,27,39],"ic":[1,19,39],"ig":[57],"il":[64],"im":[0,1],"in":[4,5,13,26,27,28,34,37,40,43,44,48,51,57,64,69,72,75],"ir":[59],"is":[7,8,21,29,47,53,58],"it":[0,1],"iv":[0,1,4,5,28,37,43,44,51,64],"kp":[34],"l\u0027":[73],"l.":[3,36,50,61],"le":[6,19,24,27,39,55],"li":[7,8,21,29,47,53,58],"ls":[36],"lu":[45,62,70],"lv":[24],"m.":[37,44,64],"ma":[19,22,28,39],"mc":[42],"me":[24],"mi":[0,1],"mk":[34],"mp":[27,52],"ms":[56],"na":[9,10,25,38,46,49,60,66,67,68,71],"nc":[27],"nd":[4,5,28,37,43,44,51,64],"ns":[24,37,63,69],"nt":[13,26,34,35,40,48,54,69,72,75],"oi":[4,5,13,26,28,34,37,43,44,48,51,64,69,75],"ol":[2,3,6,19,24,27,36,39,50,61],"om":[27],"on":[35,37,63,69],"oo":[2,3,36,42,50,61],"or":[11,12,13,26,31,34,35,37,42,48,54,55,57,63,69,75],"os":[43],"ou":[54,55],"ox":[12,31,35,54,63],"p.":[30,40,70],"pl":[27,45,62,70],"po":[13,26,34,48,69,75],"pr":[0,1],"ps":[28],"qu":[56],"r-":[74],"rd":[11,12,13,26,31,34,35,42,48,54,55,57,59,63,69,75],"re":[5,11,12,13,16,17,20,26,31,33,34,35,37,42,44,48,51,52,54,55,56,57,59,63,64,69,75],"ri":[0,1,57],"ro":[43,71],"ru":[37,61,63,69],"s-":[45,62],"s.":[12,13,19,24,26,27,31,34,35,39,42,48,54,55,57,63,69,75],"se":[36,39],"so":[24],"sq":[33,56],"st":[5,7,8,14,15,21,22,23,29,30,32,37,40,41,44,45,47,51,53,58,62,63,64,65,69,70,72,73,74],"su":[28,32,38,42,49,56,59],"t-":[72],"t.":[8,10,15,21,22,23,25,26,29,30,32,38,40,41,45,46,47,49,53,58,60,62,65,66,67,68,69,70,71,72,73,74,75],"ta":[24,64],"te":[14,15,22,23,27,30,32,35,40,41,45,62,65,70,72,73,74],"ti":[0,1,4,5,28,37,43,44,51,64],"to":[37,63,69],"tr":[5,37,44,51,61,63,64,69],"ts":[35],"ua":[56],"ub":[1,55],"uc":[4,5,28,37,38,43,44,49,51,63,64,69],"ue":[61],"um":[32,42,52,56,59],"un":[24,54],"us":[39,45,62,70],"va":[30,41,73,74],"ve":[0,1,4,5,24,28,37,43,44,51,64],"we":[59],"wh":[16,17,20,33,52,56,59],"x.":[35,54,63],"xp":[15,30,40,65,70],"ze":[43,71],"∷_":[29,47,53]}}};
+var GRAPH_URL = null;
+var SNIPPETS_BASE = null;
+var MODULES_BASE = null;
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// DECODER HELPERS (v2 schema)
+// ═══════════════════════════════════════════════════════════════════
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64ToInt32(b64)   { return new Int32Array(b64ToBytes(b64).buffer); }
+function b64ToInt8(b64)    { return new Int8Array (b64ToBytes(b64).buffer); }
+function b64ToFloat32(b64) { return new Float32Array(b64ToBytes(b64).buffer); }
+
+// ═══════════════════════════════════════════════════════════════════
+// GRAPH LOADING
+// ═══════════════════════════════════════════════════════════════════
+async function fetchJson(url) {
+  if (GZIP_ENABLED) {
+    try {
+      const rg = await fetch(url + '.gz');
+      if (rg.ok) {
+        const buf = await rg.arrayBuffer();
+        let inflated;
+        if (typeof DecompressionStream !== 'undefined') {
+          const ds = new DecompressionStream('gzip');
+          const w = ds.writable.getWriter();
+          w.write(buf); w.close();
+          const chunks = [];
+          const reader = ds.readable.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+          }
+          inflated = new TextDecoder().decode(
+            new Uint8Array(chunks.reduce((a, b) => a + b.length, 0)).fill(0).reduce(
+              (acc, _, i) => { acc[i] = chunks.flat()[i]; return acc; }, new Uint8Array(
+                chunks.reduce((a, c) => { const o = a.offset; for (let j=0; j<c.length; j++) a.buf[o+j]=c[j]; a.offset+=c.length; return a; },
+                  { buf: new Uint8Array(chunks.reduce((s,c) => s+c.length, 0)), offset: 0 }).buf.buffer
+              )
+            )
+          );
+          // simpler path:
+          const fullBuf = new Uint8Array(chunks.reduce((s,c)=>s+c.length,0));
+          let off = 0;
+          for (const c of chunks) { fullBuf.set(c, off); off += c.length; }
+          inflated = new TextDecoder().decode(fullBuf);
+        } else if (typeof pako !== 'undefined') {
+          inflated = new TextDecoder().decode(pako.inflate(new Uint8Array(buf)));
+        } else {
+          throw new Error('no decompressor');
+        }
+        return JSON.parse(inflated);
+      }
+    } catch (_) { /* fall through */ }
+  }
+  const r = await fetch(url);
+  return r.json();
+}
+
+async function loadGraph() {
+  if (LAZY) return fetchJson(GRAPH_URL);
+  return GRAPH;
+}
+
+async function loadModuleDetail(g, modName) {
+  if (!g.moduleFiles || !g.moduleFiles[modName]) return null;
+  return fetchJson(g.moduleFiles[modName]);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SNIPPET / SOURCE LOADING
+// ═══════════════════════════════════════════════════════════════════
+var snippetCache = Object.create(null);
+
+async function loadSnippetBundle(g, modName) {
+  if (snippetCache[modName] !== undefined) return snippetCache[modName];
+  if (!g.bundleFiles || !g.bundleFiles[modName]) {
+    snippetCache[modName] = {};
+    return {};
+  }
+  try {
+    const b = await fetchJson(g.bundleFiles[modName]);
+    const indexed = Object.create(null);
+    Object.keys(b).forEach(k => { indexed[k] = b[k]; });
+    snippetCache[modName] = indexed;
+    return indexed;
+  } catch (e) {
+    snippetCache[modName] = {};
+    return {};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════
+const state = {
+  expanded:     new Set(),   // module names currently expanded
+  showExt:      true,        // show external modules
+  search:       '',
+  zoom:         1,
+  panX:         0,
+  panY:         0,
+  layoutDone:   false,
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// GRAPH STRUCTURES (populated after data loads)
+// ═══════════════════════════════════════════════════════════════════
+let G = null;                 // raw graph data (v2)
+let modules  = [];            // [{name, isExternal, isEntry, defCount, stateCounts}]
+let modByName = Object.create(null);
+let modEdges  = [];           // [{src, tgt}] — inter-module edges
+let modEdgeSet = new Set();   // "src|||tgt"
+
+// Def data for inline mode (decoded arrays)
+let defsNames   = null;  // string[]
+let defsMods    = null;  // Int32Array  — module index per def
+let defsStates  = null;  // Int8Array   — 0=Defined 1=Post 2=Hole 3=Failed
+let defsHash    = null;  // number[]    — hashQName per def (from outOffsets logic)
+let defsByModIdx = Object.create(null);  // modIdx -> [{localName, state, defIdx}]
+
+// Per-module detail cache (lazy mode)
+const detailCache = Object.create(null);  // modName -> detail JSON
+
+// DOM refs
+const podsLayer = document.getElementById('pods-layer');
+const edgesG    = document.getElementById('edges-g');
+const podEls    = Object.create(null);   // modName -> DOM element
+const podPos    = Object.create(null);   // modName -> {x, y, w, h}
+
+// ═══════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════
+const STATE_NAMES = ['defined', 'postulate', 'hole', 'failed'];
+
+function stateClass(s) {
+  if (typeof s === 'number') return STATE_NAMES[s] || 'defined';
+  return (s || 'defined').toLowerCase();
+}
+
+function stateLabel(s) {
+  const c = stateClass(s);
+  return c.charAt(0).toUpperCase() + c.slice(1);
+}
+
+function shortModName(name) {
+  if (name.length <= 24) return name;
+  const parts = name.split('.');
+  if (parts.length > 3) return '…' + parts.slice(-2).join('.');
+  return name;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DATA PARSING
+// ═══════════════════════════════════════════════════════════════════
+function parseGraph(g) {
+  G = g;
+
+  // Decode binary fields
+  const extSet = new Set();
+  if (g.externalModules) {
+    const extArr = b64ToInt32(g.externalModules);
+    for (let i = 0; i < extArr.length; i++) extSet.add(extArr[i]);
+  }
+
+  const modStates = g.moduleStates ? b64ToInt8(g.moduleStates) : null;
+
+  // Build modules[]
+  modules = [];
+  modByName = Object.create(null);
+  const entryName = g.entryModule || null;
+
+  for (let mi = 0; mi < g.modules.length; mi++) {
+    const name = g.modules[mi];
+    const isExt = extSet.has(mi);
+    const isEntry = name === entryName;
+    const sc = (g.moduleStateCounts && g.moduleStateCounts[mi]) ? g.moduleStateCounts[mi] : [0,0,0,0];
+    const defCount = sc[0] + sc[1] + sc[2] + sc[3];
+    const mod = { name, isExt, isEntry, defCount, sc };
+    modules.push(mod);
+    modByName[name] = mod;
+  }
+
+  // Parse def arrays (inline mode)
+  if (g.defs) {
+    defsNames  = g.defs.names;
+    defsMods   = b64ToInt32(g.defs.modules);
+    defsStates = b64ToInt8(g.defs.states);
+
+    // Group by module index
+    defsByModIdx = Object.create(null);
+    for (let di = 0; di < defsNames.length; di++) {
+      const mi = defsMods[di];
+      if (!defsByModIdx[mi]) defsByModIdx[mi] = [];
+      defsByModIdx[mi].push({ localName: defsNames[di], state: defsStates[di], defIdx: di });
+    }
+  }
+
+  // Build module edges from moduleEdges (integer pairs into modules[])
+  modEdges = [];
+  modEdgeSet = new Set();
+  if (g.moduleEdges) {
+    for (const [si, ti] of g.moduleEdges) {
+      const src = g.modules[si];
+      const tgt = g.modules[ti];
+      if (!src || !tgt || src === tgt) continue;
+      const key = src + '|||' + tgt;
+      if (!modEdgeSet.has(key)) {
+        modEdgeSet.add(key);
+        modEdges.push({ src, tgt });
+      }
+    }
+  }
+
+  // Also synthesise module edges from leaf edges (inline only)
+  // for modules that have defs but weren't covered by moduleEdges
+  if (g.edges && g.defs) {
+    const outOffsets = b64ToInt32(g.edges.outOffsets);
+    const outTargets = b64ToInt32(g.edges.outTargets);
+    for (let di = 0; di < defsNames.length; di++) {
+      const srcMi = defsMods[di];
+      const start = outOffsets[di];
+      const end   = outOffsets[di + 1];
+      for (let ei = start; ei < end; ei++) {
+        const tdi  = outTargets[ei];
+        const tgtMi = defsMods[tdi];
+        if (srcMi === tgtMi) continue;
+        const src = g.modules[srcMi];
+        const tgt = g.modules[tgtMi];
+        if (!src || !tgt) continue;
+        const key = src + '|||' + tgt;
+        if (!modEdgeSet.has(key)) {
+          modEdgeSet.add(key);
+          modEdges.push({ src, tgt });
+        }
+      }
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// POD BUILDING
+// ═══════════════════════════════════════════════════════════════════
+function buildPods() {
+  podsLayer.innerHTML = '';
+  Object.keys(podEls).forEach(k => delete podEls[k]);
+
+  for (const mod of modules) {
+    const el = document.createElement('div');
+    let cls = 'pod';
+    if (mod.isExt)   cls += ' external';
+    if (mod.isEntry) cls += ' entry';
+    el.className = cls;
+    el.dataset.mod = mod.name;
+
+    // Header
+    const hdr = document.createElement('div');
+    hdr.className = 'pod-header';
+
+    const chev = document.createElement('span');
+    chev.className = 'chevron';
+    chev.textContent = '▶';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'pod-name';
+    nameEl.textContent = shortModName(mod.name);
+    nameEl.title = mod.name;
+
+    const swatches = document.createElement('div');
+    swatches.className = 'pod-swatches';
+    const stateKeys = ['defined','postulate','hole','failed'];
+    for (let si = 0; si < 4; si++) {
+      if (mod.sc[si] > 0) {
+        const s = document.createElement('span');
+        s.className = 'swatch ' + stateKeys[si];
+        s.title = mod.sc[si] + ' ' + stateKeys[si];
+        swatches.appendChild(s);
+      }
+    }
+
+    const countEl = document.createElement('div');
+    countEl.className = 'pod-count';
+    countEl.textContent = mod.defCount;
+
+    hdr.appendChild(chev);
+    hdr.appendChild(nameEl);
+    hdr.appendChild(swatches);
+    hdr.appendChild(countEl);
+
+    // Defs list (populated on expand for lazy; inline-filled immediately)
+    const defsList = document.createElement('div');
+    defsList.className = 'pod-defs';
+    defsList.dataset.loaded = LAZY ? 'no' : 'yes';
+
+    if (!LAZY) {
+      // Fill from inline data
+      const mi = G.modules.indexOf(mod.name);
+      const defs = defsByModIdx[mi] || [];
+      fillDefsList(defsList, defs, mod.name, null);
+    }
+
+    el.appendChild(hdr);
+    el.appendChild(defsList);
+    podsLayer.appendChild(el);
+    podEls[mod.name] = el;
+
+    hdr.addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePod(mod.name);
+    });
+  }
+}
+
+function fillDefsList(defsList, defs, modName, bundle) {
+  defsList.innerHTML = '';
+  for (const d of defs) {
+    const localName = typeof d.localName === 'string' ? d.localName : d.name;
+    const stCls = stateClass(d.state);
+
+    const row = document.createElement('div');
+    row.className = 'def-row';
+    row.dataset.defName = localName;
+    row.dataset.modName = modName;
+
+    const dot = document.createElement('span');
+    dot.className = 'def-dot ' + stCls;
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'def-name';
+    // Strip module prefix for display
+    const fullName = localName.startsWith(modName + '.') ? localName.slice(modName.length + 1) : localName;
+    nameSpan.textContent = fullName;
+    nameSpan.title = localName;
+
+    const anchor = document.createElement('span');
+    anchor.className = 'def-anchor';
+    anchor.dataset.defKey = modName + '::' + localName;
+
+    row.appendChild(dot);
+    row.appendChild(nameSpan);
+    row.appendChild(anchor);
+    defsList.appendChild(row);
+
+    row.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openDrawer(modName, localName, stCls, bundle);
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EXPAND / COLLAPSE
+// ═══════════════════════════════════════════════════════════════════
+async function togglePod(modName) {
+  const el = podEls[modName];
+  if (!el) return;
+
+  if (state.expanded.has(modName)) {
+    // Collapse
+    state.expanded.delete(modName);
+    el.classList.remove('expanded');
+    scheduleRelayout();
+    return;
+  }
+
+  // Expand
+  state.expanded.add(modName);
+  el.classList.add('expanded');
+
+  // Lazy: load detail + optionally snippets
+  if (LAZY) {
+    const defsList = el.querySelector('.pod-defs');
+    if (defsList.dataset.loaded === 'no') {
+      defsList.innerHTML = '<div style="color:#5070a0;font-size:10px;padding:4px 4px;">Loading…</div>';
+      try {
+        const detail = await loadModuleDetail(G, modName);
+        detailCache[modName] = detail;
+
+        let bundle = null;
+        if (WITH_SOURCE) bundle = await loadSnippetBundle(G, modName);
+
+        let defs = [];
+        if (detail && detail.defs) {
+          defs = detail.defs.names.map((n, i) => ({
+            localName: n,
+            state: Array.isArray(detail.defs.states) ? detail.defs.states[i] :
+              b64ToInt8(detail.defs.states)[i]
+          }));
+        }
+        fillDefsList(defsList, defs, modName, bundle);
+        defsList.dataset.loaded = 'yes';
+      } catch (err) {
+        defsList.innerHTML = '<div style="color:#a04050;font-size:10px;padding:4px;">Failed to load.</div>';
+      }
+    }
+  }
+
+  scheduleRelayout();
+}
+
+let relayoutTimer = null;
+function scheduleRelayout() {
+  if (relayoutTimer) clearTimeout(relayoutTimer);
+  relayoutTimer = setTimeout(() => {
+    computeAndApplyLayout();
+    drawEdges();
+  }, 40);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DAGRE LAYOUT
+// ═══════════════════════════════════════════════════════════════════
+const POD_W       = 210;
+const POD_H_COLL  = 42;   // collapsed header height approx
+const COL_SEP     = 50;
+const ROW_SEP     = 70;
+
+function podHeight(modName) {
+  const el = podEls[modName];
+  if (!el) return POD_H_COLL;
+  return Math.max(POD_H_COLL, el.offsetHeight || POD_H_COLL);
+}
+
+function computeAndApplyLayout() {
+  if (typeof dagre === 'undefined') {
+    console.warn('dagre not loaded; using fallback layout');
+    fallbackLayout();
+    return;
+  }
+
+  // Separate internal and external modules
+  const internalMods = modules.filter(m => !m.isExt);
+  const externalMods = modules.filter(m => m.isExt);
+
+  // Build dagre graph for internals
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({
+    rankdir: 'TB',
+    nodesep: COL_SEP,
+    ranksep: ROW_SEP,
+    marginx:  20,
+    marginy:  20,
+    ranker: 'network-simplex',
+  });
+  g.setDefaultEdgeLabel(() => ({}));
+
+  for (const mod of internalMods) {
+    const h = podHeight(mod.name);
+    g.setNode(mod.name, { width: POD_W, height: h, label: mod.name });
+  }
+
+  for (const { src, tgt } of modEdges) {
+    const sm = modByName[src], tm = modByName[tgt];
+    if (!sm || !tm || sm.isExt || tm.isExt) continue;
+    if (!g.hasNode(src) || !g.hasNode(tgt)) continue;
+    g.setEdge(src, tgt);
+  }
+
+  dagre.layout(g);
+
+  // Apply positions
+  let maxY = 0;
+  for (const mod of internalMods) {
+    const n = g.node(mod.name);
+    if (!n) continue;
+    const x = n.x - POD_W / 2;
+    const y = n.y - n.height / 2;
+    podPos[mod.name] = { x, y, w: POD_W, h: n.height };
+    maxY = Math.max(maxY, y + n.height);
+  }
+
+  // Place externals in a row below the internal DAG
+  if (state.showExt && externalMods.length > 0) {
+    const extY = maxY + ROW_SEP + 20;
+    const totalExtW = externalMods.length * POD_W + (externalMods.length - 1) * COL_SEP;
+    let extX = -totalExtW / 2;
+    for (const mod of externalMods) {
+      const h = podHeight(mod.name);
+      podPos[mod.name] = { x: extX, y: extY, w: POD_W, h };
+      extX += POD_W + COL_SEP;
+    }
+  }
+
+  applyPodPositions();
+}
+
+function fallbackLayout() {
+  // Simple BFS rank layout without dagre
+  const mNames = modules.map(m => m.name);
+  const inDeg = Object.create(null);
+  mNames.forEach(m => inDeg[m] = 0);
+  modEdges.forEach(({ src, tgt }) => { inDeg[tgt] = (inDeg[tgt] || 0) + 1; });
+
+  const rank = Object.create(null);
+  const queue = [];
+  mNames.forEach(m => {
+    if (!inDeg[m]) { rank[m] = 0; queue.push(m); }
+  });
+  let qi = 0;
+  while (qi < queue.length) {
+    const m = queue[qi++];
+    for (const { src, tgt } of modEdges) {
+      if (src !== m) continue;
+      rank[tgt] = Math.max(rank[tgt] || 0, rank[m] + 1);
+      queue.push(tgt);
+    }
+  }
+  mNames.forEach(m => { if (rank[m] === undefined) rank[m] = 0; });
+
+  const byRank = Object.create(null);
+  mNames.forEach(m => {
+    const r = rank[m];
+    (byRank[r] = byRank[r] || []).push(m);
+  });
+
+  const ranks = Object.keys(byRank).map(Number).sort((a, b) => a - b);
+  let yOff = 20;
+  ranks.forEach(r => {
+    const row = byRank[r];
+    const totalW = row.length * POD_W + (row.length - 1) * COL_SEP;
+    let xStart = -totalW / 2;
+    let rowH = 0;
+    row.forEach(m => rowH = Math.max(rowH, podHeight(m)));
+    row.forEach(m => {
+      podPos[m] = { x: xStart, y: yOff, w: POD_W, h: podHeight(m) };
+      xStart += POD_W + COL_SEP;
+    });
+    yOff += rowH + ROW_SEP;
+  });
+
+  applyPodPositions();
+}
+
+function applyPodPositions() {
+  for (const mod of modules) {
+    const el = podEls[mod.name];
+    if (!el) continue;
+    const pos = podPos[mod.name];
+    if (!pos) continue;
+    el.style.left = pos.x + 'px';
+    el.style.top  = pos.y + 'px';
+  }
+  updateExtVisibility();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EDGE DRAWING
+// ═══════════════════════════════════════════════════════════════════
+function getModCenter(modName, side) {
+  const pos = podPos[modName];
+  const el  = podEls[modName];
+  if (!pos || !el) return null;
+  const w = pos.w || POD_W;
+  const h = el.offsetHeight || pos.h || POD_H_COLL;
+  const cx = pos.x + w / 2;
+  return side === 'bottom'
+    ? { x: cx, y: pos.y + h }
+    : { x: cx, y: pos.y };
+}
+
+function getAnchorPos(modName, defKey) {
+  const anchor = podsLayer.querySelector(`.def-anchor[data-def-key="${CSS.escape(modName + '::' + defKey)}"]`);
+  if (!anchor) return null;
+  const ar = anchor.getBoundingClientRect();
+  const wr = document.getElementById('canvas-wrap').getBoundingClientRect();
+  // Convert screen coords → world coords (accounting for pan+zoom)
+  const sx = (ar.left + ar.width / 2 - wr.left - state.panX) / state.zoom;
+  const sy = (ar.top + ar.height / 2 - wr.top  - state.panY) / state.zoom;
+  return { x: sx, y: sy };
+}
+
+function bezierPath(x1, y1, x2, y2) {
+  const dy  = Math.abs(y2 - y1);
+  const cp  = Math.min(Math.max(dy * 0.45, 30), 150);
+  const dir = y2 >= y1 ? 1 : -1;
+  return `M${x1},${y1} C${x1},${y1 + dir * cp} ${x2},${y2 - dir * cp} ${x2},${y2}`;
+}
+
+function isVisible(modName) {
+  const mod = modByName[modName];
+  if (!mod) return false;
+  if (mod.isExt && !state.showExt) return false;
+  return true;
+}
+
+function drawEdges() {
+  edgesG.innerHTML = '';
+
+  for (const { src, tgt } of modEdges) {
+    if (!isVisible(src) || !isVisible(tgt)) continue;
+
+    const srcExp = state.expanded.has(src);
+    const tgtExp = state.expanded.has(tgt);
+
+    if (srcExp && tgtExp && G.edges && !LAZY) {
+      // Try leaf-level edges between these two expanded pods
+      let drew = false;
+      const outOffsets = b64ToInt32(G.edges.outOffsets);
+      const outTargets = b64ToInt32(G.edges.outTargets);
+      const srcMi = G.modules.indexOf(src);
+      const tgtMi = G.modules.indexOf(tgt);
+
+      const srcDefs = defsByModIdx[srcMi] || [];
+      for (const sd of srcDefs) {
+        const start = outOffsets[sd.defIdx];
+        const end   = outOffsets[sd.defIdx + 1];
+        for (let ei = start; ei < end; ei++) {
+          const tdi = outTargets[ei];
+          if (defsMods[tdi] !== tgtMi) continue;
+          const td = (defsByModIdx[tgtMi] || []).find(d => d.defIdx === tdi);
+          if (!td) continue;
+
+          const fp = getAnchorPos(src, sd.localName);
+          const tp = getAnchorPos(tgt, td.localName);
+          if (!fp || !tp) continue;
+
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', bezierPath(fp.x, fp.y, tp.x, tp.y));
+          path.setAttribute('class', 'edge-leaf');
+          path.setAttribute('marker-end', 'url(#arr-leaf)');
+          edgesG.appendChild(path);
+          drew = true;
+        }
+      }
+
+      if (!drew) {
+        // Fallback to module edge
+        drawModEdge(src, tgt, false);
+      }
+    } else if (srcExp && tgtExp && LAZY && detailCache[src] && detailCache[tgt]) {
+      // Leaf edges in lazy mode from cached detail
+      let drew = false;
+      const detail = detailCache[src];
+      if (detail && detail.outEdges) {
+        const tgtMi = G.modules.indexOf(tgt);
+        for (const [localIdx, , tgtModIdx] of detail.outEdges) {
+          if (tgtModIdx !== tgtMi) continue;
+          const srcDef = detail.defs && detail.defs.names[localIdx];
+          const tgtDetailDefs = detailCache[tgt] && detailCache[tgt].defs;
+          // We don't know the tgt def name from this edge, fall through
+          if (!srcDef || !tgtDetailDefs) continue;
+
+          const fp = getAnchorPos(src, srcDef);
+          if (!fp) continue;
+          const tp = getModCenter(tgt, 'top');
+          if (!tp) continue;
+
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', bezierPath(fp.x, fp.y, tp.x, tp.y));
+          path.setAttribute('class', 'edge-leaf');
+          path.setAttribute('marker-end', 'url(#arr-leaf)');
+          edgesG.appendChild(path);
+          drew = true;
+        }
+      }
+      if (!drew) drawModEdge(src, tgt, false);
+    } else {
+      // Module-level edge
+      const isExtEdge = (modByName[src] && modByName[src].isExt) ||
+                        (modByName[tgt] && modByName[tgt].isExt);
+      drawModEdge(src, tgt, isExtEdge);
+    }
+  }
+}
+
+function drawModEdge(src, tgt, isExt) {
+  const from = getModCenter(src, 'bottom');
+  const to   = getModCenter(tgt, 'top');
+  if (!from || !to) return;
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', bezierPath(from.x, from.y, to.x, to.y));
+  path.setAttribute('class', isExt ? 'edge-ext' : 'edge-mod');
+  path.setAttribute('marker-end', isExt ? 'url(#arr-ext)' : 'url(#arr-mod)');
+  edgesG.appendChild(path);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DRAWER
+// ═══════════════════════════════════════════════════════════════════
+async function openDrawer(modName, defName, stCls, bundleArg) {
+  document.getElementById('drawer-def-name').textContent =
+    defName.startsWith(modName + '.') ? defName.slice(modName.length + 1) : defName;
+  document.getElementById('drawer-mod-path').textContent = modName;
+  const badge = document.getElementById('drawer-badge');
+  badge.textContent = stateLabel(stCls);
+  badge.className = stCls;
+
+  const srcEl = document.getElementById('drawer-source');
+  srcEl.className = '';
+  srcEl.innerHTML = '';
+
+  document.getElementById('drawer').classList.add('open');
+
+  if (!WITH_SOURCE) {
+    srcEl.textContent = '-- Source not available.\n-- Re-run with --with-source to enable.\n';
+    return;
+  }
+
+  srcEl.textContent = '-- Loading…';
+
+  try {
+    let bundle = bundleArg;
+    if (!bundle) bundle = await loadSnippetBundle(G, modName);
+    if (!bundle) { srcEl.textContent = '-- No source bundle for this module.'; return; }
+
+    // Look up by defName (full or local)
+    const fullKey = defName;
+    const localKey = defName.startsWith(modName + '.') ? defName.slice(modName.length + 1) : defName;
+    const entry = bundle[fullKey] || bundle[localKey];
+
+    if (!entry) {
+      srcEl.textContent = '-- Source not found for: ' + defName;
+      return;
+    }
+
+    // entry.source may be highlighted HTML (contains <a> tags) or plain text
+    const src = entry.source || '';
+    if (src.includes('<a ') || src.includes('<span')) {
+      srcEl.className = 'agda-html';
+      srcEl.innerHTML = src;
+    } else {
+      srcEl.textContent = src;
+    }
+  } catch (e) {
+    srcEl.textContent = '-- Error loading source: ' + e.message;
+  }
+}
+
+document.getElementById('drawer-close').addEventListener('click', () => {
+  document.getElementById('drawer').classList.remove('open');
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// SEARCH
+// ═══════════════════════════════════════════════════════════════════
+function applySearch() {
+  const q = state.search.toLowerCase().trim();
+
+  for (const mod of modules) {
+    const el = podEls[mod.name];
+    if (!el) continue;
+    const modMatch = q && mod.name.toLowerCase().includes(q);
+    el.classList.toggle('search-match', !!modMatch);
+  }
+
+  // Also highlight matching def rows
+  podsLayer.querySelectorAll('.def-row').forEach(row => {
+    const dn = (row.dataset.defName || '').toLowerCase();
+    const mn = (row.dataset.modName || '').toLowerCase();
+    const match = q && (dn.includes(q) || mn.includes(q));
+    row.classList.toggle('search-match', !!match);
+  });
+
+  // Also use searchIndex if available
+  if (G && G.searchIndex && q) {
+    const si = G.searchIndex;
+    const names = si.names;
+    for (let i = 0; i < names.length; i++) {
+      if (names[i].toLowerCase().includes(q)) {
+        const modName = names[i];
+        const el = podEls[modName];
+        if (el) el.classList.add('search-match');
+      }
+    }
+  }
+}
+
+document.getElementById('search-box').addEventListener('input', (e) => {
+  state.search = e.target.value;
+  applySearch();
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// EXTERNAL VISIBILITY
+// ═══════════════════════════════════════════════════════════════════
+function updateExtVisibility() {
+  for (const mod of modules) {
+    if (!mod.isExt) continue;
+    const el = podEls[mod.name];
+    if (!el) continue;
+    el.classList.toggle('hidden', !state.showExt);
+  }
+  drawEdges();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PAN & ZOOM
+// ═══════════════════════════════════════════════════════════════════
+const canvasWrap = document.getElementById('canvas-wrap');
+
+function applyTransform() {
+  podsLayer.style.transform =
+    `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+  edgesG.setAttribute('transform',
+    `translate(${state.panX} ${state.panY}) scale(${state.zoom})`);
+}
+
+let dragging = false, dragStart = null;
+canvasWrap.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  dragging = true;
+  dragStart = { x: e.clientX - state.panX, y: e.clientY - state.panY };
+  canvasWrap.classList.add('panning');
+});
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  state.panX = e.clientX - dragStart.x;
+  state.panY = e.clientY - dragStart.y;
+  applyTransform();
+  drawEdges();
+});
+window.addEventListener('mouseup', () => {
+  if (!dragging) return;
+  dragging = false;
+  canvasWrap.classList.remove('panning');
+  drawEdges();
+});
+
+canvasWrap.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.88 : 1.14;
+  const rect = canvasWrap.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  state.panX = mx - delta * (mx - state.panX);
+  state.panY = my - delta * (my - state.panY);
+  state.zoom = Math.min(4, Math.max(0.1, state.zoom * delta));
+  applyTransform();
+  drawEdges();
+}, { passive: false });
+
+// ═══════════════════════════════════════════════════════════════════
+// TOOLBAR BUTTONS
+// ═══════════════════════════════════════════════════════════════════
+document.getElementById('btn-expand-all').addEventListener('click', () => {
+  for (const mod of modules) {
+    state.expanded.add(mod.name);
+    const el = podEls[mod.name];
+    if (el) el.classList.add('expanded');
+    // For inline mode defs are already populated; lazy mode shows spinner on first expand
+  }
+  scheduleRelayout();
+});
+
+document.getElementById('btn-collapse-all').addEventListener('click', () => {
+  state.expanded.clear();
+  for (const mod of modules) {
+    const el = podEls[mod.name];
+    if (el) el.classList.remove('expanded');
+  }
+  scheduleRelayout();
+});
+
+const btnExt = document.getElementById('btn-ext');
+btnExt.addEventListener('click', () => {
+  state.showExt = !state.showExt;
+  btnExt.textContent = 'Externals: ' + (state.showExt ? 'on' : 'off');
+  btnExt.classList.toggle('ext-on', state.showExt);
+  btnExt.classList.toggle('ext-off', !state.showExt);
+  computeAndApplyLayout();
+  drawEdges();
+});
+
+document.getElementById('btn-relayout').addEventListener('click', () => {
+  computeAndApplyLayout();
+  drawEdges();
+});
+
+window.addEventListener('resize', () => {
+  drawEdges();
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════
+async function main() {
+  const loadMsg = document.getElementById('loading-msg');
+
+  try {
+    loadMsg.textContent = 'Loading graph…';
+    const g = await loadGraph();
+    parseGraph(g);
+
+    loadMsg.textContent = 'Building pods…';
+    buildPods();
+
+    loadMsg.textContent = 'Computing layout…';
+    // Give the browser a frame to render the pods before measuring heights
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    computeAndApplyLayout();
+
+    // Center view
+    const cw = canvasWrap.clientWidth;
+    const ch = canvasWrap.clientHeight;
+    state.panX = cw / 2;
+    state.panY = 40;
+    applyTransform();
+
+    // Another frame after positioning, then draw edges
+    await new Promise(r => requestAnimationFrame(r));
+    computeAndApplyLayout();
+    drawEdges();
+
+    // Stats
+    const nInternal = modules.filter(m => !m.isExt).length;
+    const nExt = modules.filter(m => m.isExt).length;
+    const nDefs = modules.reduce((s, m) => s + m.defCount, 0);
+    document.getElementById('stats').textContent =
+      `${nInternal} modules · ${nDefs} defs · ${modEdges.length} edges` +
+      (nExt > 0 ? ` · ${nExt} external` : '');
+
+    document.getElementById('loading').classList.add('done');
+  } catch (err) {
+    loadMsg.textContent = 'Error: ' + err.message;
+    console.error(err);
+  }
+}
+
+main();
+</script>
+</body>
+</html>

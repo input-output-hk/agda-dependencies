@@ -1,0 +1,24 @@
+digraph G {
+  rankdir=TB;
+  node [shape=box, style="rounded", fontname="sans-serif"];
+  "Bool" [label="Bool", color="#3a6090"];
+  "Coinductive" [label="Coinductive", color="#3a6090"];
+  "Holes" [label="Holes", color="#3a6090"];
+  "List" [label="List", color="#3a6090"];
+  "Nat" [label="Nat", color="#3a6090"];
+  "Records" [label="Records", color="#3a6090"];
+  "Test" [label="Test", color="#e94560", penwidth=2];
+  "Where" [label="Where", color="#3a6090"];
+  "Records" -> "Nat";
+  "Where" -> "List";
+  "Where" -> "Nat";
+  "Coinductive" -> "Nat";
+  "Test" -> "Coinductive";
+  "Test" -> "Holes";
+  "Test" -> "List";
+  "Test" -> "Nat";
+  "Test" -> "Records";
+  "Test" -> "Where";
+  "Holes" -> "Nat";
+  "Nat" -> "Bool";
+}

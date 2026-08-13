@@ -1,0 +1,1406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>agda-deps · Wiki Backlinks</title>
+<script>window.__gzipEnabled = false;</script>
+<script>
+  if (window.__gzipEnabled && typeof DecompressionStream === 'undefined') {
+    document.write('<scr'+'ipt src="https://unpkg.com/pako@2.1.0/dist/pako_inflate.min.js"></scr'+'ipt>');
+  }
+</script>
+<style>
+:root {
+  --c-defined:   #4caf50;
+  --c-postulate: #f44336;
+  --c-hole:      #9c27b0;
+  --c-failed:    #ff9800;
+
+  --bg:          #ffffff;
+  --bg2:         #f7f7f8;
+  --bg3:         #f0f0f2;
+  --border:      #e4e4e7;
+  --border-lt:   #f0f0f2;
+  --text:        #18181b;
+  --text2:       #71717a;
+  --text3:       #a1a1aa;
+  --link:        #2563eb;
+  --link-h:      #1d4ed8;
+  --accent:      #f4f4f5;
+  --accent-h:    #e4e4e7;
+  --topbar-h:    56px;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --r:   6px;
+  --r-s: 4px;
+  --sh-s: 0 1px 2px rgba(0,0,0,0.05);
+  --sh:   0 2px 8px rgba(0,0,0,0.08);
+  --sh-l: 0 8px 24px rgba(0,0,0,0.12);
+
+  --s-def-bg:   #f0fdf4; --s-def-bd:  #86efac; --s-def-fg:  var(--c-defined);
+  --s-post-bg:  #fef2f2; --s-post-bd: #fca5a5; --s-post-fg: var(--c-postulate);
+  --s-hole-bg:  #faf5ff; --s-hole-bd: #c4b5fd; --s-hole-fg: var(--c-hole);
+  --s-fail-bg:  #fff7ed; --s-fail-bd: #fed7aa; --s-fail-fg: var(--c-failed);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── TOP BAR ── */
+#wb-topbar {
+  height: var(--topbar-h);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  flex-shrink: 0;
+  z-index: 100;
+  box-shadow: var(--sh-s);
+}
+
+#wb-logo {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#wb-logo .logo-box {
+  width: 28px; height: 28px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border-radius: var(--r-s);
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-size: 13px; font-weight: 800;
+  flex-shrink: 0;
+}
+
+#wb-nav { display: flex; gap: 2px; flex-shrink: 0; }
+.wb-nav-btn {
+  width: 30px; height: 30px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--r-s);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text2);
+  font-size: 15px;
+  transition: all 0.12s;
+  font-family: var(--sans);
+}
+.wb-nav-btn:hover:not(:disabled) { background: var(--accent); color: var(--text); }
+.wb-nav-btn:disabled { opacity: 0.3; cursor: default; }
+
+#wb-search-wrap {
+  flex: 1;
+  max-width: 480px;
+  position: relative;
+}
+#wb-search {
+  width: 100%;
+  height: 34px;
+  border: 1.5px solid var(--border);
+  border-radius: 20px;
+  padding: 0 14px 0 36px;
+  font-size: 13.5px;
+  font-family: var(--sans);
+  background: var(--bg2);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+#wb-search:focus {
+  border-color: var(--link);
+  background: var(--bg);
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+}
+#wb-search::placeholder { color: var(--text3); }
+.wb-search-icon {
+  position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  color: var(--text3); font-size: 14px; pointer-events: none;
+  line-height: 1;
+}
+
+#wb-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0; right: 0;
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--r);
+  box-shadow: var(--sh-l);
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 300;
+}
+#wb-dropdown.open { display: block; }
+.dd-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-bottom: 1px solid var(--border-lt);
+}
+.dd-item:last-child { border-bottom: none; }
+.dd-item:hover, .dd-item.active { background: var(--accent); }
+.dd-name { font-weight: 500; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dd-mod  { color: var(--text3); font-size: 12px; font-style: italic; flex-shrink: 0; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dd-kind { font-size: 11px; padding: 1px 6px; border-radius: 9px; font-weight: 600;
+           text-transform: uppercase; letter-spacing: 0.04em;
+           background: var(--bg3); color: var(--text2); flex-shrink: 0; }
+.dd-empty { padding: 16px; text-align: center; color: var(--text3); font-size: 13px; }
+
+.wb-kbd-hint { font-size: 11px; color: var(--text3); margin-left: auto; white-space: nowrap; flex-shrink: 0; }
+kbd {
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 3px; padding: 1px 5px; font-size: 10.5px;
+  font-family: var(--sans);
+}
+
+#wb-ext-toggle {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--text2);
+  cursor: pointer; white-space: nowrap;
+  padding: 4px 8px;
+  border-radius: var(--r-s);
+  transition: background 0.12s;
+  user-select: none;
+  flex-shrink: 0;
+}
+#wb-ext-toggle:hover { background: var(--accent); }
+.wb-toggle {
+  width: 32px; height: 18px;
+  background: var(--border);
+  border-radius: 9px;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.wb-toggle.on { background: var(--link); }
+.wb-toggle::after {
+  content: ''; position: absolute;
+  width: 12px; height: 12px;
+  background: white;
+  border-radius: 50%;
+  top: 3px; left: 3px;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.wb-toggle.on::after { transform: translateX(14px); }
+
+/* ── MAIN ── */
+#wb-main {
+  flex: 1;
+  overflow-y: auto;
+  position: relative;
+}
+
+#wb-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 14px;
+  color: var(--text2);
+}
+
+#wb-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 24px 60px;
+  opacity: 1;
+  transition: opacity 0.12s;
+}
+#wb-page.fading { opacity: 0; }
+
+/* ── BREADCRUMB ── */
+#wb-breadcrumb, #wb-mod-breadcrumb {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 12.5px; color: var(--text3);
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.bc-seg {
+  color: var(--link);
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: var(--r-s);
+  transition: background 0.1s;
+}
+.bc-seg:hover { background: var(--accent); text-decoration: underline; }
+.bc-sep { color: var(--text3); }
+.bc-cur { color: var(--text2); font-weight: 500; }
+
+/* ── TITLE ── */
+#wb-def-title, #wb-mod-title {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+#wb-def-title h1, #wb-mod-title h1 {
+  font-size: 26px; font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+/* ── STATE BADGE ── */
+.wb-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+.wb-badge[data-state="0"] { background: var(--s-def-bg);  color: var(--s-def-fg);  border: 1px solid var(--s-def-bd); }
+.wb-badge[data-state="1"] { background: var(--s-post-bg); color: var(--s-post-fg); border: 1px solid var(--s-post-bd); }
+.wb-badge[data-state="2"] { background: var(--s-hole-bg); color: var(--s-hole-fg); border: 1px solid var(--s-hole-bd); }
+.wb-badge[data-state="3"] { background: var(--s-fail-bg); color: var(--s-fail-fg); border: 1px solid var(--s-fail-bd); }
+
+/* ── STATE DOT ── */
+.wb-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.wb-dot[data-state="0"] { background: var(--c-defined); }
+.wb-dot[data-state="1"] { background: var(--c-postulate); }
+.wb-dot[data-state="2"] { background: var(--c-hole); }
+.wb-dot[data-state="3"] { background: var(--c-failed); }
+.wb-dot[data-state="mod"] { background: #6366f1; }
+
+/* ── SPARKLINE ── */
+#wb-spark-section {
+  margin-bottom: 24px;
+  padding: 14px 16px;
+  background: var(--bg2);
+  border: 1px solid var(--border-lt);
+  border-radius: var(--r);
+}
+.wb-sec-label {
+  font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text3);
+  font-weight: 600; margin-bottom: 10px;
+}
+#wb-spark-svg { display: block; width: 100%; overflow: visible; }
+
+/* ── SOURCE ── */
+#wb-src-section { margin-bottom: 28px; }
+#wb-src-wrap {
+  border-radius: var(--r);
+  overflow: hidden;
+  border: 1px solid var(--border-lt);
+  border-left: 4px solid var(--text3);
+  position: relative;
+}
+#wb-src-wrap[data-state="0"] { border-left-color: var(--c-defined); }
+#wb-src-wrap[data-state="1"] { border-left-color: var(--c-postulate); }
+#wb-src-wrap[data-state="2"] { border-left-color: var(--c-hole); }
+#wb-src-wrap[data-state="3"] { border-left-color: var(--c-failed); }
+/* Agda-highlighted source (HTML snippets from backend) */
+#wb-src-wrap .Agda-source {
+  background: #1e1e2e;
+  padding: 16px;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.65;
+  overflow-x: auto;
+  min-height: 60px;
+}
+/* plain-text fallback */
+#wb-src-pre {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  padding: 16px;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.65;
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0;
+}
+/* Agda highlighting classes (same as main template) */
+.Agda{color:#cdd6f4;background:#1e1e2e}.Agda .Comment{color:#6c7086}.Agda .Keyword{color:#cba6f7}
+.Agda .String{color:#a6e3a1}.Agda .Number{color:#fab387}.Agda .Hole{color:#f38ba8;background:#45273a}
+.Agda .Pragma{color:#6c7086}.Agda .Operator{color:#89dceb}
+.Agda .Bound,.Agda .Generalizable{color:#cdd6f4}
+.Agda .InductiveConstructor{color:#a6e3a1}.Agda .CoinductiveConstructor{color:#94e2d5}
+.Agda .Datatype{color:#89b4fa}.Agda .Field{color:#f2cdcd}.Agda .Function{color:#89dceb}
+.Agda .Module{color:#cba6f7}.Agda .Postulate{color:#f38ba8}
+.Agda .Primitive{color:#fab387}.Agda .Record{color:#89b4fa}
+.Agda a{color:inherit;text-decoration:none}
+
+/* ── LINKS COLUMNS ── */
+#wb-links-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+@media (max-width: 600px) { #wb-links-row { grid-template-columns: 1fr; } }
+.wb-col {
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.wb-col-hdr {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--border-lt);
+  display: flex; align-items: center; gap: 8px;
+}
+.wb-col-hdr .ch-title { font-weight: 600; font-size: 13px; color: var(--text); }
+.wb-col-hdr .ch-count {
+  background: var(--bg3); color: var(--text2);
+  border-radius: 10px; font-size: 11px; font-weight: 600; padding: 1px 7px;
+}
+.wb-col-body { max-height: 380px; overflow-y: auto; }
+.wb-dep-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-lt);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.wb-dep-row:last-child { border-bottom: none; }
+.wb-dep-row:hover { background: var(--accent); }
+.wb-dep-row .dr-name {
+  font-weight: 500; color: var(--link);
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wb-dep-row.ext .dr-name { color: var(--text3); }
+.wb-dep-row .dr-mod {
+  font-size: 11.5px; color: var(--text3); font-style: italic;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 120px;
+}
+.wb-dep-row .dr-arrow { color: var(--text3); font-size: 12px; flex-shrink: 0; }
+.wb-dep-row:hover .dr-arrow { color: var(--link); }
+.wb-empty { padding: 20px 14px; color: var(--text3); font-size: 13px; font-style: italic; }
+
+/* ── MODULE VIEW ── */
+.wb-mod-icon {
+  width: 42px; height: 42px;
+  background: linear-gradient(135deg, #6366f1, #2563eb);
+  border-radius: var(--r);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; color: white; flex-shrink: 0;
+}
+.wb-ext-badge {
+  font-size: 11px; padding: 2px 8px;
+  background: var(--bg3); color: var(--text2);
+  border-radius: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+
+.wb-state-bar {
+  height: 6px; border-radius: 3px;
+  overflow: hidden; margin-bottom: 20px;
+  background: var(--bg3);
+  display: flex;
+}
+.wb-state-seg { transition: width 0.4s; }
+
+.wb-stats { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+.wb-stat {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border-lt);
+  border-radius: 20px;
+  font-size: 12.5px; color: var(--text2);
+}
+.wb-stat strong { color: var(--text); font-weight: 600; }
+
+.wb-mod-sec { margin-bottom: 24px; }
+.wb-mod-sec-title {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  margin-bottom: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.wb-mod-sec-title .ms-ct {
+  background: var(--bg3); color: var(--text2);
+  border-radius: 10px; font-size: 11px; font-weight: 600; padding: 1px 7px;
+}
+
+.wb-def-grid { display: flex; flex-direction: column; gap: 2px; }
+.wb-def-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-lt);
+  border-radius: var(--r-s);
+  cursor: pointer;
+  transition: all 0.12s;
+  background: var(--bg);
+}
+.wb-def-card:hover { border-color: var(--link); background: #eff6ff; transform: translateX(2px); }
+.wb-def-card .dc-name { font-weight: 500; color: var(--link); flex: 1; }
+.wb-def-card .dc-hint { font-size: 11.5px; color: var(--text3); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.wb-mod-list { display: flex; flex-direction: column; gap: 4px; }
+.wb-mod-link {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-lt);
+  border-radius: var(--r-s);
+  cursor: pointer; font-weight: 500;
+  color: var(--link);
+  transition: all 0.12s; background: var(--bg);
+}
+.wb-mod-link:hover { border-color: var(--link); background: #eff6ff; }
+.wb-mod-link.ext { color: var(--text3); }
+.wb-mod-link.ext:hover { background: var(--accent); border-color: var(--border); }
+
+.wb-divider { height: 1px; background: var(--border-lt); margin: 28px 0; }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+/* views */
+#wb-def-view, #wb-mod-view { display: none; }
+#wb-def-view.active, #wb-mod-view.active { display: block; }
+
+/* lazy fetch error */
+#wb-fetch-err {
+  display: none;
+  background: #fef2f2; color: #b91c1c;
+  border: 1px solid #fca5a5;
+  border-radius: var(--r); padding: 12px 16px;
+  margin-bottom: 20px; font-size: 13px;
+}
+#wb-fetch-err.visible { display: block; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="wb-topbar">
+  <div id="wb-logo">
+    <div class="logo-box">λ</div>
+    agda-deps
+  </div>
+
+  <div id="wb-nav">
+    <button class="wb-nav-btn" id="wb-back"    title="Back (Alt+←)" disabled>&#8592;</button>
+    <button class="wb-nav-btn" id="wb-forward" title="Forward (Alt+→)" disabled>&#8594;</button>
+  </div>
+
+  <div id="wb-search-wrap">
+    <span class="wb-search-icon">⌕</span>
+    <input type="text" id="wb-search" placeholder="Quick switcher — search defs &amp; modules…"
+           autocomplete="off" spellcheck="false">
+    <div id="wb-dropdown"></div>
+  </div>
+
+  <span class="wb-kbd-hint"><kbd>Ctrl</kbd><kbd>K</kbd></span>
+
+  <div id="wb-ext-toggle" title="Show/hide external (stdlib) definitions">
+    <div class="wb-toggle on" id="wb-toggle-sw"></div>
+    Show externals
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="wb-main">
+  <div id="wb-loading">Loading graph…</div>
+  <div id="wb-page" style="display:none">
+
+    <div id="wb-fetch-err"></div>
+
+    <!-- DEF VIEW -->
+    <div id="wb-def-view">
+      <div id="wb-breadcrumb"></div>
+      <div id="wb-def-title">
+        <h1 id="wb-def-name"></h1>
+        <span id="wb-def-badge" class="wb-badge"></span>
+      </div>
+
+      <div id="wb-spark-section">
+        <div class="wb-sec-label">Local graph</div>
+        <svg id="wb-spark-svg" height="120"></svg>
+      </div>
+
+      <div id="wb-src-section">
+        <div class="wb-sec-label">Source</div>
+        <div id="wb-src-wrap"><pre id="wb-src-pre"></pre></div>
+      </div>
+
+      <div id="wb-links-row">
+        <div class="wb-col">
+          <div class="wb-col-hdr">
+            <span class="ch-title">Depends on</span>
+            <span class="ch-count" id="wb-deps-ct">0</span>
+          </div>
+          <div class="wb-col-body" id="wb-deps-list"></div>
+        </div>
+        <div class="wb-col">
+          <div class="wb-col-hdr">
+            <span class="ch-title">Used by</span>
+            <span class="ch-count" id="wb-used-ct">0</span>
+          </div>
+          <div class="wb-col-body" id="wb-used-list"></div>
+        </div>
+      </div>
+    </div><!-- /def-view -->
+
+    <!-- MODULE VIEW -->
+    <div id="wb-mod-view">
+      <div id="wb-mod-breadcrumb"></div>
+      <div id="wb-mod-title">
+        <div class="wb-mod-icon">◈</div>
+        <div>
+          <h1 id="wb-mod-name"></h1>
+          <span id="wb-mod-ext-badge"></span>
+        </div>
+      </div>
+      <div class="wb-state-bar" id="wb-mod-state-bar"></div>
+      <div class="wb-stats" id="wb-mod-stats"></div>
+      <div class="wb-mod-sec">
+        <div class="wb-mod-sec-title">Definitions <span class="ms-ct" id="wb-mod-defs-ct">0</span></div>
+        <div class="wb-def-grid" id="wb-mod-defs"></div>
+      </div>
+      <div class="wb-divider"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div class="wb-mod-sec">
+          <div class="wb-mod-sec-title">Imports <span class="ms-ct" id="wb-mod-imp-ct">0</span></div>
+          <div class="wb-mod-list" id="wb-mod-imp"></div>
+        </div>
+        <div class="wb-mod-sec">
+          <div class="wb-mod-sec-title">Imported by <span class="ms-ct" id="wb-mod-iby-ct">0</span></div>
+          <div class="wb-mod-list" id="wb-mod-iby"></div>
+        </div>
+      </div>
+    </div><!-- /mod-view -->
+
+  </div><!-- /wb-page -->
+</div><!-- /wb-main -->
+
+<script>
+// ─── DATA LOADING PRELUDE ──────────────────────────────────────────────────
+var LAZY = false;
+var WITH_SOURCE = false;
+var GZIP_ENABLED = false;
+var GRAPH = {"v":2,"modules":["Agda.Primitive","Agda.Primitive.Cubical","Bool","Bool.Bool","Coinductive","Coinductive.Stream","Holes","List","List.List","Nat","Nat.Nat","Records","Records.Box","Records.Point","Test","Test.Exp","Where","Where._","_"],"files":["/home/mceresa/Repositories/Projects/AgdaDependencies/test/Bool.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Coinductive.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Holes.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/List.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Nat.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Records.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Test.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Where.agda"],"moduleToFile":"//////////8AAAAAAAAAAAEAAAABAAAAAgAAAAMAAAADAAAABAAAAAQAAAAFAAAABQAAAAUAAAAGAAAABgAAAAcAAAAHAAAA/////w==","fileToModules":[[2,3],[4,5],[6],[7,8],[9,10],[11,12,13],[14,15],[16,17]],"defs":{"names":["Holes.magic","Where._.go","List.List.[]","Test.map","Test._++_","Holes.unsolved#meta.3","Nat._-_","Records.Point.x","Holes.incomplete","Coinductive.mapSuc","List.List._∷_","Test.Exp.Var","Records.Box","Test.sum","Where._.sq","Records.mkPoint","Records.Box.contents","Bool.Bool.false","Coinductive.Stream.constructor","Nat.Nat.suc","Holes.useMagic","Test.Exp.Int","Test.eval","Records.sumCoords","Coinductive.zeros","Coinductive.Stream.head","Test.Plus-1","Nat._*_","List._∷_-1","Records.Point","Nat.suc-0","Bool.Bool","Coinductive.Stream","Where._.bump","List._∷_-0","Records.Box.count","Records.double","Where.sumSquares","Records.origin","List.List","Where.weirdSum","Nat.Nat","Bool.Bool.true","Test.Plus-0","Records.Box.constructor","Coinductive.Stream.tail","Test.Exp","Nat._\u003c_","Nat._==_","Nat._+_","Records.Point.constructor","Test.Exp.Plus","Nat.Nat.zero","Test.Int-0","Test.eval\u0027","Test.Var-0","Records.Point.y"],"modules":"BgAAABEAAAAIAAAADgAAAA4AAAAGAAAACQAAAA0AAAAGAAAABAAAAAgAAAAPAAAACwAAAA4AAAARAAAACwAAAAwAAAADAAAABQAAAAoAAAAGAAAADwAAAA4AAAALAAAABAAAAAUAAAAOAAAACQAAAAcAAAALAAAACQAAAAIAAAAEAAAAEQAAAAcAAAAMAAAACwAAABAAAAALAAAABwAAABAAAAAJAAAAAwAAAA4AAAAMAAAABQAAAA4AAAAJAAAACQAAAAkAAAANAAAADwAAAAoAAAAOAAAADgAAAA4AAAANAAAA","states":"AQAAAAACAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","x":"uY3uP0sfej+2LSo/tYkDP95UxD5euuE/3bW0P67Ytz9vgew/qvG6P0Pn9T50tSVA2bF5P3h/bD9btm4/9+SpP/CFiT9Uxj8/BaPKP6VOoD/V59o/eqUAQNIABkDHS8c/kQ+6P5Vl0D9B8UtAZRmSP2EyFT7qlbI/Io6NPwhaKT/xY8Q/9pfVP83MzDySdFU/ImxwP/OOgz8QWKk/OBAyP2Wq0D/sUbA/4XpMP4j0S0AZ/2Y/INK3P7prFUBvEoM/4uR2PyL9tj/WVsw/S8gvQBx8oT86khNAaW/oP9NNPkBEab8/","y":"IbC6PxDp7z+2hAxAsp0bQH0/FUDjx5A/0NWWP9lf/j80gJ8/DkpAP11tDUCdEQFAVn2uP3Zx6z89m90/okUCQE+vnD+IEUI/DHnEPYxKij9Yyso/eqX0P42X3j9n1ec/1SFXP04o1D5+jNk/zF27P2EyJUC8BfI/L90UPxtkSj+QiMk+Pui5P5XUGUDxY7Q/46XDP+0N/j/VeOE/PugFQEymqj9LyL8/YmcqP5ZD8z9VwaA/5WHBPp/N6j+I9Hs/mN2DP9/gyz+bVf8/5BTlPybksz9KexNAeJzSP0dyEUDvOPU/"},"edges":{"outOffsets":"AAAAAAEAAAAJAAAACwAAAA8AAAATAAAAFAAAABgAAAAbAAAAHQAAACMAAAAnAAAAKgAAAC4AAAA1AAAAOAAAADwAAAA/AAAAQQAAAEMAAABGAAAASQAAAE0AAABUAAAAWQAAAF8AAABhAAAAYQAAAGYAAABmAAAAagAAAGoAAABsAAAAcAAAAHIAAAByAAAAdQAAAHkAAAB8AAAAgQAAAIMAAACGAAAAiAAAAIoAAACKAAAAjQAAAI8AAACSAAAAmQAAAKAAAACkAAAApwAAAKsAAACtAAAArQAAALAAAACwAAAAswAAAA==","outTargets":"KQAAAAEAAAACAAAACgAAAA4AAAAnAAAAKQAAADEAAAA0AAAAAgAAACcAAAACAAAAAwAAAAoAAAAnAAAAAgAAAAQAAAAKAAAAJwAAACkAAAAGAAAAEwAAACkAAAA0AAAAHQAAACkAAAAyAAAABQAAACkAAAAJAAAAEwAAABkAAAAgAAAAKQAAAC0AAAAKAAAAHAAAACIAAAAnAAAACwAAAC4AAAA3AAAAEAAAACMAAAApAAAALAAAAAIAAAAKAAAADQAAACcAAAApAAAAMQAAADQAAAAbAAAAJwAAACkAAAAHAAAAHQAAACkAAAA4AAAADAAAACkAAAAsAAAAEQAAAB8AAAASAAAAIAAAABMAAAAeAAAAKQAAAAAAAAApAAAAMQAAABUAAAApAAAALgAAADUAAAALAAAAFQAAABYAAAApAAAALgAAADEAAAAzAAAABwAAAB0AAAApAAAAMQAAADgAAAAYAAAAGQAAACAAAAApAAAALQAAADQAAAASAAAAIAAAABMAAAAbAAAAKQAAADEAAAA0AAAABwAAACkAAAAyAAAAOAAAABEAAAAqAAAAEgAAABkAAAAgAAAALQAAACkAAAAxAAAADAAAACkAAAAsAAAADAAAABsAAAAjAAAAKQAAAAEAAAAnAAAAKQAAAAcAAAAdAAAAKQAAADQAAAA4AAAAAgAAAAoAAAAhAAAAKQAAADEAAAATAAAANAAAAB8AAAAqAAAADAAAACkAAAAsAAAAEgAAACAAAAALAAAAFQAAADMAAAARAAAAEwAAAB8AAAApAAAAKgAAAC8AAAA0AAAAEQAAABMAAAAfAAAAKQAAACoAAAAwAAAANAAAABMAAAApAAAAMQAAADQAAAAdAAAAKQAAADIAAAAaAAAAKwAAAC4AAAAzAAAAKQAAADQAAAApAAAALgAAADQAAAAdAAAAKQAAADIAAAA=","inOffsets":"AAAAAAEAAAADAAAACQAAAAoAAAALAAAADAAAAA0AAAARAAAAEQAAABIAAAAYAAAAGwAAAB8AAAAgAAAAIQAAACEAAAAiAAAAJgAAACoAAAAyAAAAMgAAADUAAAA2AAAANgAAADcAAAA6AAAAOwAAAD4AAAA/AAAARQAAAEYAAABKAAAAUAAAAFEAAABSAAAAVAAAAFQAAABUAAAAVAAAAFwAAABcAAAAfgAAAIIAAACDAAAAhwAAAIoAAACPAAAAkAAAAJEAAACaAAAAngAAAKEAAACtAAAArgAAAK4AAACvAAAAswAAAA==","inTargets":"FAAAAAEAAAAlAAAAAQAAAAIAAAADAAAABAAAAA0AAAAnAAAAAwAAAAQAAAAIAAAABgAAAA8AAAAXAAAAHQAAACYAAAAJAAAAAQAAAAMAAAAEAAAACgAAAA0AAAAnAAAACwAAABYAAAAuAAAAEAAAACMAAAAkAAAALAAAAA0AAAABAAAADAAAABEAAAAfAAAALwAAADAAAAASAAAAGQAAACAAAAAtAAAABgAAAAkAAAATAAAAGwAAACkAAAAvAAAAMAAAADEAAAAVAAAAFgAAAC4AAAAWAAAAGAAAAAkAAAAYAAAAIAAAADMAAAAOAAAAGwAAACQAAAAKAAAABwAAAA8AAAAXAAAAJgAAADIAAAA4AAAAEwAAABEAAAAqAAAALwAAADAAAAAJAAAAEgAAABgAAAAZAAAAIAAAAC0AAAAoAAAACgAAAAwAAAAkAAAAAQAAAAIAAAADAAAABAAAAAoAAAANAAAADgAAACUAAAAAAAAAAQAAAAUAAAAGAAAABwAAAAgAAAAJAAAADAAAAA0AAAAOAAAADwAAABAAAAATAAAAFAAAABUAAAAWAAAAFwAAABgAAAAbAAAAHQAAACEAAAAjAAAAJAAAACUAAAAmAAAAKAAAACwAAAAvAAAAMAAAADEAAAAyAAAANAAAADYAAAA4AAAAHwAAACoAAAAvAAAAMAAAADMAAAAMAAAAEAAAACMAAAAsAAAACQAAABgAAAAgAAAACwAAABUAAAAWAAAAMwAAADYAAAAvAAAAMAAAAAEAAAANAAAAFAAAABYAAAAXAAAAGwAAACEAAAAoAAAAMQAAAAcAAAAdAAAAMgAAADgAAAAWAAAALgAAADMAAAABAAAABgAAAA0AAAAYAAAAGwAAACYAAAApAAAALwAAADAAAAAxAAAANAAAADYAAAAVAAAACwAAAA8AAAAXAAAAHQAAACYAAAA="},"transitiveEdges":"QAcAADkHAABNBwAAMgcAALEFAACjBQAAJQoAABcKAAAiBAAAFAQAAIEFAACMBQAAeAUAAHEFAACFBQAAKgIAACECAAAUAgAAGgIAAC4CAABxCgAAUwoAAEkKAACJCwAAjgsAAIYLAAB1CwAA1gQAANsEAADCBAAA4gQAAKECAAB+AgAAqgIAAA8FAAAUBQAAFwUAABkFAAD7BAAA8QQAAC8MAAA6DAAADgMAABkDAAAMAwAAFgMAAOcCAADvAgAACwEAAOYAAADuAAAA0gAAAK0AAAC1AAAAngYAAHwGAACtBgAApwYAAKwBAAC4AQAAwQEAAJUMAAChDAAAqgwAAD8LAABLCwAAVAsAAHQDAACAAwAAXgMAAI8DAAA8BQAASAUAACYFAABXBQAAkwgAAJ8IAACqCAAAfQgAAK4IAADVAgAAvAIAAM8CAADYAgAAuQMAAJwDAAC8AwAA9AcAANcHAAD3BwAA9QkAANgJAAD4CQAALQgAABAIAAAnCAAA8QEAAJ0EAAD4BgAAEQcAAOgDAADaAwAAeQkAAIQJAACxCAAAuQgAAJkAAAB0AAAAYQIAAEQCAABcAgAAVgIAAFUJAAA0CQAAvQsAAMgLAABkBAAATgQAAFkEAAASCwAAHQsAAPwKAAB/AQAAigEAAGkBAAAsBgAANwYAABYGAAA0BgAAzwoAANkKAADBCgAA5AoAANoKAADDCgAAlgoAAKAKAACICgAAqwoAAKEKAACKCgAAZggAAGQIAABHAwAAYgAAAG0AAABgAAAAagAAAEcAAAA7AAAAQwAAABEJAAAZCQAAggcAAA==","moduleEdges":[[1,0],[2,0],[2,3],[3,2],[4,0],[4,5],[4,9],[4,10],[5,4],[6,0],[6,9],[7,0],[7,8],[8,7],[9,0],[9,2],[9,3],[9,10],[10,9],[11,0],[11,9],[11,10],[11,12],[11,13],[12,9],[12,11],[13,9],[13,11],[14,0],[14,4],[14,6],[14,7],[14,8],[14,9],[14,10],[14,11],[14,15],[14,16],[15,9],[15,14],[16,0],[16,7],[16,9],[16,17],[17,7],[17,8],[17,9],[17,10],[18,4],[18,6],[18,7],[18,9],[18,11],[18,16]],"transitiveModuleEdges":[[2,0],[4,0],[4,9],[4,10],[6,0],[7,0],[9,0],[9,2],[9,3],[11,0],[11,9],[11,10],[11,12],[11,13],[12,9],[13,9],[14,0],[14,4],[14,6],[14,7],[14,8],[14,9],[14,10],[14,11],[14,16],[15,9],[16,0],[16,7],[16,9],[17,7],[17,8],[17,9],[17,10],[18,7],[18,9]],"moduleStates":"AAAAAAAAAAAAAAAAAAAAAAAAAA==","moduleStateCounts":[[0,0,0,0],[0,0,0,0],[1,0,0,0],[2,0,0,0],[3,0,0,0],[3,0,0,0],[1,1,2,0],[3,0,0,0],[2,0,0,0],[7,0,0,0],[2,0,0,0],[6,0,0,0],[3,0,0,0],[3,0,0,0],[10,0,0,0],[3,0,0,0],[2,0,0,0],[3,0,0,0],[0,0,0,0]],"moduleDepth":"AQAAAP////8CAAAAAgAAAAEAAAACAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAgAAAAIAAAAAAAAAAQAAAAEAAAACAAAA/////w==","fileTree":[{"name":"home","parent":-1,"fileIndex":null},{"name":"mceresa","parent":0,"fileIndex":null},{"name":"Repositories","parent":1,"fileIndex":null},{"name":"Projects","parent":2,"fileIndex":null},{"name":"AgdaDependencies","parent":3,"fileIndex":null},{"name":"test","parent":4,"fileIndex":null},{"name":"Bool.agda","parent":5,"fileIndex":0},{"name":"Coinductive.agda","parent":5,"fileIndex":1},{"name":"Holes.agda","parent":5,"fileIndex":2},{"name":"List.agda","parent":5,"fileIndex":3},{"name":"Nat.agda","parent":5,"fileIndex":4},{"name":"Records.agda","parent":5,"fileIndex":5},{"name":"Test.agda","parent":5,"fileIndex":6},{"name":"Where.agda","parent":5,"fileIndex":7}],"moduleTree":[{"name":"Agda","parent":-1,"moduleIndex":null},{"name":"Primitive","parent":0,"moduleIndex":0},{"name":"Cubical","parent":1,"moduleIndex":1},{"name":"Bool","parent":-1,"moduleIndex":2},{"name":"Bool","parent":3,"moduleIndex":3},{"name":"Coinductive","parent":-1,"moduleIndex":4},{"name":"Stream","parent":5,"moduleIndex":5},{"name":"Holes","parent":-1,"moduleIndex":6},{"name":"List","parent":-1,"moduleIndex":7},{"name":"List","parent":8,"moduleIndex":8},{"name":"Nat","parent":-1,"moduleIndex":9},{"name":"Nat","parent":10,"moduleIndex":10},{"name":"Records","parent":-1,"moduleIndex":11},{"name":"Box","parent":12,"moduleIndex":12},{"name":"Point","parent":12,"moduleIndex":13},{"name":"Test","parent":-1,"moduleIndex":14},{"name":"Exp","parent":15,"moduleIndex":15},{"name":"Where","parent":-1,"moduleIndex":16},{"name":"_","parent":17,"moduleIndex":17},{"name":"_","parent":-1,"moduleIndex":18}],"entryModule":"Test","externalModules":"","searchIndex":{"names":["agda.primitive","agda.primitive.cubical","bool","bool.bool","coinductive","coinductive.stream","holes","list","list.list","nat","nat.nat","records","records.box","records.point","test","test.exp","where","where._","_","holes.magic","where._.go","list.list.[]","test.map","test._++_","holes.unsolved#meta.3","nat._-_","records.point.x","holes.incomplete","coinductive.mapsuc","list.list._∷_","test.exp.var","records.box","test.sum","where._.sq","records.mkpoint","records.box.contents","bool.bool.false","coinductive.stream.constructor","nat.nat.suc","holes.usemagic","test.exp.int","test.eval","records.sumcoords","coinductive.zeros","coinductive.stream.head","test.plus-1","nat._*_","list._∷_-1","records.point","nat.suc-0","bool.bool","coinductive.stream","where._.bump","list._∷_-0","records.box.count","records.double","where.sumsquares","records.origin","list.list","where.weirdsum","nat.nat","bool.bool.true","test.plus-0","records.box.constructor","coinductive.stream.tail","test.exp","nat._\u003c_","nat._==_","nat._+_","records.point.constructor","test.exp.plus","nat.nat.zero","test.int-0","test.eval\u0027","test.var-0","records.point.y"],"kinds":"AAAAAAAAAAAAAAAAAAAAAAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ==","bigrams":{"#m":[24],"*_":[46],"++":[23],"+_":[23,68],"-0":[49,53,62,72,74],"-1":[45,47],"-_":[25],".3":[24],".[":[21],"._":[17,20,23,25,29,33,46,47,52,53,66,67,68],".b":[3,12,31,35,36,50,52,54,61,63],".c":[1,35,37,54,63,69],".d":[55],".e":[15,30,40,41,65,70,73],".f":[36],".g":[20],".h":[44],".i":[27,40,72],".l":[8,21,29,58],".m":[19,22,28,34],".n":[10,38,60,71],".o":[57],".p":[0,1,13,26,45,48,62,69,70,75],".s":[5,32,33,37,38,42,44,49,51,56,64],".t":[61,64],".u":[24,39],".v":[30,74],".w":[59],".x":[26],".y":[75],".z":[43,71],"\u003c_":[66],"==":[67],"=_":[67],"[]":[21],"_*":[46],"_+":[23,68],"_-":[25,47,53],"_.":[20,33,52],"_\u003c":[66],"_=":[67],"_∷":[29,47,53],"a.":[0,1,24],"ad":[44],"ag":[0,1,19,39],"ai":[64],"al":[1,36,41,73],"am":[5,37,44,51,64],"ap":[22,28],"ar":[30,56,74],"at":[9,10,25,38,46,49,60,66,67,68,71],"bi":[1],"bl":[55],"bo":[2,3,12,31,35,36,50,54,61,63],"bu":[52],"c-":[49],"ca":[1],"co":[4,5,11,12,13,26,27,28,31,34,35,37,42,43,44,48,51,54,55,57,63,64,69,75],"ct":[4,5,28,37,43,44,51,63,64,69],"cu":[1],"d#":[24],"da":[0,1],"do":[55],"ds":[11,12,13,26,31,34,35,42,48,54,55,57,59,63,69,75],"du":[4,5,28,37,43,44,51,64],"e.":[1,5,17,20,28,33,37,43,44,51,52,56,59,64],"ea":[5,37,44,51,64],"ec":[11,12,13,26,31,34,35,42,48,54,55,57,63,69,75],"ed":[24],"ei":[59],"em":[39],"en":[35],"er":[16,17,20,33,43,52,56,59,71],"es":[6,14,15,19,22,23,24,27,30,32,39,40,41,45,56,62,65,70,72,73,74],"et":[24,27],"ev":[41,73],"ex":[15,30,40,65,70],"fa":[36],"gd":[0,1],"gi":[19,39,57],"go":[20],"he":[16,17,20,33,44,52,56,59],"ho":[6,19,24,27,39],"ic":[1,19,39],"ig":[57],"il":[64],"im":[0,1],"in":[4,5,13,26,27,28,34,37,40,43,44,48,51,57,64,69,72,75],"ir":[59],"is":[7,8,21,29,47,53,58],"it":[0,1],"iv":[0,1,4,5,28,37,43,44,51,64],"kp":[34],"l\u0027":[73],"l.":[3,36,50,61],"le":[6,19,24,27,39,55],"li":[7,8,21,29,47,53,58],"ls":[36],"lu":[45,62,70],"lv":[24],"m.":[37,44,64],"ma":[19,22,28,39],"mc":[42],"me":[24],"mi":[0,1],"mk":[34],"mp":[27,52],"ms":[56],"na":[9,10,25,38,46,49,60,66,67,68,71],"nc":[27],"nd":[4,5,28,37,43,44,51,64],"ns":[24,37,63,69],"nt":[13,26,34,35,40,48,54,69,72,75],"oi":[4,5,13,26,28,34,37,43,44,48,51,64,69,75],"ol":[2,3,6,19,24,27,36,39,50,61],"om":[27],"on":[35,37,63,69],"oo":[2,3,36,42,50,61],"or":[11,12,13,26,31,34,35,37,42,48,54,55,57,63,69,75],"os":[43],"ou":[54,55],"ox":[12,31,35,54,63],"p.":[30,40,70],"pl":[27,45,62,70],"po":[13,26,34,48,69,75],"pr":[0,1],"ps":[28],"qu":[56],"r-":[74],"rd":[11,12,13,26,31,34,35,42,48,54,55,57,59,63,69,75],"re":[5,11,12,13,16,17,20,26,31,33,34,35,37,42,44,48,51,52,54,55,56,57,59,63,64,69,75],"ri":[0,1,57],"ro":[43,71],"ru":[37,61,63,69],"s-":[45,62],"s.":[12,13,19,24,26,27,31,34,35,39,42,48,54,55,57,63,69,75],"se":[36,39],"so":[24],"sq":[33,56],"st":[5,7,8,14,15,21,22,23,29,30,32,37,40,41,44,45,47,51,53,58,62,63,64,65,69,70,72,73,74],"su":[28,32,38,42,49,56,59],"t-":[72],"t.":[8,10,15,21,22,23,25,26,29,30,32,38,40,41,45,46,47,49,53,58,60,62,65,66,67,68,69,70,71,72,73,74,75],"ta":[24,64],"te":[14,15,22,23,27,30,32,35,40,41,45,62,65,70,72,73,74],"ti":[0,1,4,5,28,37,43,44,51,64],"to":[37,63,69],"tr":[5,37,44,51,61,63,64,69],"ts":[35],"ua":[56],"ub":[1,55],"uc":[4,5,28,37,38,43,44,49,51,63,64,69],"ue":[61],"um":[32,42,52,56,59],"un":[24,54],"us":[39,45,62,70],"va":[30,41,73,74],"ve":[0,1,4,5,24,28,37,43,44,51,64],"we":[59],"wh":[16,17,20,33,52,56,59],"x.":[35,54,63],"xp":[15,30,40,65,70],"ze":[43,71],"∷_":[29,47,53]}}};
+var GRAPH_URL = null;
+var SNIPPETS_BASE = null;
+var MODULES_BASE = null;
+
+// ─── BASE64 DECODERS ───────────────────────────────────────────────────────
+function b64Bytes(b64) {
+  var bin = atob(b64), out = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64I32(b64)   { return new Int32Array(b64Bytes(b64).buffer); }
+function b64I8(b64)    { return new Int8Array(b64Bytes(b64).buffer); }
+function b64F32(b64)   { return new Float32Array(b64Bytes(b64).buffer); }
+
+// ─── FETCH HELPERS ─────────────────────────────────────────────────────────
+async function fetchJson(url) {
+  if (GZIP_ENABLED && window.pako) {
+    try {
+      var r = await fetch(url + '.gz');
+      if (r.ok) {
+        var ab = await r.arrayBuffer();
+        var txt = pako.inflate(new Uint8Array(ab), {to:'string'});
+        return JSON.parse(txt);
+      }
+    } catch(e) {}
+  }
+  var r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching ' + url);
+  return r.json();
+}
+
+// ─── APP STATE ──────────────────────────────────────────────────────────────
+var g = null;          // GRAPH object (v2 schema)
+var defNames   = [];   // string[] parallel to defs.names
+var defModules = null; // Int32Array
+var defStates  = null; // Int8Array
+var defX       = null, defY = null;  // Float32Array (may be absent)
+var outOffsets = null, outTargets = null;
+var inOffsets  = null, inTargets  = null;
+var modules    = [];   // string[]  (g.modules)
+var externalSet = new Set();   // module indices that are external
+var modDefMap   = new Map();   // moduleIdx → [defIdx]
+var modImports  = new Map();   // moduleIdx → Set<moduleIdx>
+var modImportedBy = new Map(); // moduleIdx → Set<moduleIdx>
+var searchIndex = null;
+
+var showExt = true;
+var history = [], histIdx = -1;
+
+// snippet cache: modName → {hashKey: {source, sourceLine}}
+var snippetCache = Object.create(null);
+// lazy detail cache: modName → detail json
+var detailCache  = Object.create(null);
+
+// ─── INIT ───────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    g = LAZY ? await fetchJson(GRAPH_URL) : GRAPH;
+  } catch(e) {
+    showErr('Failed to load graph data: ' + e.message +
+            (LAZY ? '. Make sure you serve via HTTP, not file://.' : ''));
+    document.getElementById('wb-loading').textContent = 'Error loading graph.';
+    return;
+  }
+
+  modules = g.modules || [];
+  if (g.externalModules) {
+    var eArr = b64I32(g.externalModules);
+    for (var i = 0; i < eArr.length; i++) externalSet.add(eArr[i]);
+  }
+
+  // build modImports / modImportedBy from moduleEdges
+  modules.forEach((_,i) => { modImports.set(i, new Set()); modImportedBy.set(i, new Set()); });
+  (g.moduleEdges || []).forEach(function(e) {
+    var s = e[0], t = e[1];
+    if (modImports.has(s))    modImports.get(s).add(t);
+    if (modImportedBy.has(t)) modImportedBy.get(t).add(s);
+  });
+
+  // searchIndex
+  searchIndex = g.searchIndex || null;
+
+  if (LAZY) {
+    // bulk-fetch all module details at startup for fast searching
+    await loadAllDetails();
+  } else {
+    // inline mode: decode defs from GRAPH
+    inlineDecodeDefs();
+  }
+
+  document.getElementById('wb-loading').style.display = 'none';
+  document.getElementById('wb-page').style.display    = 'block';
+
+  // initial page: entry module's first def, or module summary
+  var entryIdx = g.entryModule ? modules.indexOf(g.entryModule) : -1;
+  if (entryIdx >= 0) {
+    var defs = modDefMap.get(entryIdx) || [];
+    if (defs.length > 0) {
+      navigate({type:'def', idx: defs[0]});
+    } else {
+      navigate({type:'mod', idx: entryIdx});
+    }
+  } else if (defNames.length > 0) {
+    navigate({type:'def', idx: 0});
+  } else if (modules.length > 0) {
+    navigate({type:'mod', idx: 0});
+  }
+}
+
+function inlineDecodeDefs() {
+  var d = g.defs;
+  if (!d) return;
+  defNames   = d.names || [];
+  defModules = d.modules ? b64I32(d.modules) : null;
+  defStates  = d.states  ? b64I8(d.states)   : null;
+  defX       = d.x       ? b64F32(d.x)       : null;
+  defY       = d.y       ? b64F32(d.y)       : null;
+
+  if (g.edges) {
+    outOffsets = b64I32(g.edges.outOffsets);
+    outTargets = b64I32(g.edges.outTargets);
+    inOffsets  = b64I32(g.edges.inOffsets);
+    inTargets  = b64I32(g.edges.inTargets);
+  }
+
+  // build modDefMap
+  for (var i = 0; i < defNames.length; i++) {
+    var m = defModules ? defModules[i] : -1;
+    if (m < 0) continue;
+    if (!modDefMap.has(m)) modDefMap.set(m, []);
+    modDefMap.get(m).push(i);
+  }
+}
+
+async function loadAllDetails() {
+  if (!g.moduleFiles) return;
+  var promises = Object.keys(g.moduleFiles).map(function(modName) {
+    return loadDetail(modName);
+  });
+  await Promise.all(promises);
+}
+
+async function loadDetail(modName) {
+  if (detailCache[modName]) return detailCache[modName];
+  if (!g.moduleFiles || !g.moduleFiles[modName]) return null;
+  try {
+    var det = await fetchJson(MODULES_BASE + g.moduleFiles[modName].replace(/^modules\//, ''));
+    detailCache[modName] = det;
+    // integrate into global arrays if not already there
+    integrateDetail(modName, det);
+    return det;
+  } catch(e) { detailCache[modName] = null; return null; }
+}
+
+function integrateDetail(modName, det) {
+  if (!det) return;
+  var modIdx = modules.indexOf(modName);
+  // det.defs: {names, states, ...} + det.edges: {outOffsets,outTargets,inOffsets,inTargets}
+  // We keep a flat per-def record array for lazy mode
+  var names  = det.defs && det.defs.names  ? det.defs.names  : [];
+  var states = det.defs && det.defs.states ? b64I8(det.defs.states) : null;
+  var baseIdx = defNames.length;
+  for (var i = 0; i < names.length; i++) {
+    defNames.push(names[i]);
+    defModules = appendI32(defModules, modIdx);
+    defStates  = appendI8(defStates,   states ? states[i] : 0);
+    if (!modDefMap.has(modIdx)) modDefMap.set(modIdx, []);
+    modDefMap.get(modIdx).push(baseIdx + i);
+  }
+  // store edge data on the detail for lookup
+  if (det.edges) {
+    det._outOff = b64I32(det.edges.outOffsets);
+    det._outTgt = b64I32(det.edges.outTargets);
+    det._inOff  = b64I32(det.edges.inOffsets);
+    det._inTgt  = b64I32(det.edges.inTargets);
+  }
+}
+
+// grow typed arrays
+function appendI32(arr, val) {
+  var n = arr ? arr.length : 0;
+  var out = new Int32Array(n + 1);
+  if (arr) out.set(arr);
+  out[n] = val;
+  return out;
+}
+function appendI8(arr, val) {
+  var n = arr ? arr.length : 0;
+  var out = new Int8Array(n + 1);
+  if (arr) out.set(arr);
+  out[n] = val;
+  return out;
+}
+
+// ─── EDGE ACCESS ────────────────────────────────────────────────────────────
+function outNeighbors(i) {
+  if (LAZY) {
+    // find which detail holds def i
+    return lazyNeighbors(i, 'out');
+  }
+  if (!outOffsets) return [];
+  var s = outOffsets[i], e = outOffsets[i+1], r = [];
+  for (var k = s; k < e; k++) r.push(outTargets[k]);
+  return r;
+}
+function inNeighbors(i) {
+  if (LAZY) return lazyNeighbors(i, 'in');
+  if (!inOffsets) return [];
+  var s = inOffsets[i], e = inOffsets[i+1], r = [];
+  for (var k = s; k < e; k++) r.push(inTargets[k]);
+  return r;
+}
+
+// In lazy mode, def indices are local within each module detail.
+// We track a lookup: global defIdx → {modName, localIdx}
+var defOrigin = new Map(); // globalIdx → {modName, localIdx}
+
+function integrateDetail(modName, det) {
+  if (!det) return;
+  var modIdx = modules.indexOf(modName);
+  var names  = det.defs && det.defs.names  ? det.defs.names  : [];
+  var states = det.defs && det.defs.states ? b64I8(det.defs.states) : null;
+
+  // check if already integrated (avoid duplicates)
+  if (modDefMap.has(modIdx) && modDefMap.get(modIdx).length > 0) return;
+
+  var baseIdx = defNames.length;
+  for (var i = 0; i < names.length; i++) {
+    var gIdx = baseIdx + i;
+    defNames.push(names[i]);
+    defModules = appendI32(defModules, modIdx);
+    defStates  = appendI8(defStates,  states ? states[i] : 0);
+    defOrigin.set(gIdx, {modName: modName, localIdx: i});
+    if (!modDefMap.has(modIdx)) modDefMap.set(modIdx, []);
+    modDefMap.get(modIdx).push(gIdx);
+  }
+  if (det.edges) {
+    det._outOff = b64I32(det.edges.outOffsets);
+    det._outTgt = b64I32(det.edges.outTargets);
+    det._inOff  = b64I32(det.edges.inOffsets);
+    det._inTgt  = b64I32(det.edges.inTargets);
+  }
+}
+
+function lazyNeighbors(gIdx, dir) {
+  var orig = defOrigin.get(gIdx);
+  if (!orig) return [];
+  var det = detailCache[orig.modName];
+  if (!det) return [];
+  var off = dir === 'out' ? det._outOff : det._inOff;
+  var tgt = dir === 'out' ? det._outTgt : det._inTgt;
+  if (!off || !tgt) return [];
+  var li = orig.localIdx;
+  if (li + 1 >= off.length) return [];
+  // targets are local-to-module indices; resolve to global
+  var s = off[li], e = off[li+1], r = [];
+  for (var k = s; k < e; k++) {
+    var localT = tgt[k];
+    // find globalIdx for this module's localT
+    var mods = modDefMap.get(modules.indexOf(orig.modName)) || [];
+    var base = mods[0] !== undefined ? mods[0] - 0 : 0;
+    // compute base from defOrigin inverse
+    r.push(base + localT);
+  }
+  return r;
+}
+
+// ─── SNIPPET LOADING ────────────────────────────────────────────────────────
+async function loadSnippets(modName) {
+  if (snippetCache[modName] !== undefined) return snippetCache[modName];
+  if (!WITH_SOURCE || !g.bundleFiles || !g.bundleFiles[modName]) {
+    snippetCache[modName] = null; return null;
+  }
+  try {
+    var url = SNIPPETS_BASE + g.bundleFiles[modName].replace(/^snippets\//, '');
+    var bundle = await fetchJson(url);
+    var indexed = Object.create(null);
+    Object.keys(bundle).forEach(function(k) { indexed[k] = bundle[k]; });
+    snippetCache[modName] = indexed;
+    return indexed;
+  } catch(e) { snippetCache[modName] = null; return null; }
+}
+
+// For inline mode: snippet keys are hashQName integers stored as string keys
+// We need to match defName → snippet. Use defNames as the link.
+// Backend stores snippets keyed by hashQName (integer). The detail/inline graph
+// carries defs.names as full qualified names. We match by name's last segment
+// since snippets are bundled per module and keyed by hash.
+// In practice, inline mode has snippets in snippetMap keyed by hash.
+// We'll look up by iterating keys and matching the name suffix.
+function lookupSnippet(bundle, defFullName, modName) {
+  if (!bundle) return null;
+  // bundle keys are integer hashes — we match by trying all keys
+  // and comparing the source's embedded anchor id (which is the local name)
+  var local = defFullName;
+  if (modName && defFullName.startsWith(modName + '.')) {
+    local = defFullName.slice(modName.length + 1);
+  }
+  // try direct key match (non-hash keyed bundles from older format)
+  if (bundle[local]) return bundle[local];
+  if (bundle[defFullName]) return bundle[defFullName];
+  // hash-keyed: scan for embedded anchor matching local name
+  var keys = Object.keys(bundle);
+  for (var i = 0; i < keys.length; i++) {
+    var entry = bundle[keys[i]];
+    var src = (entry && entry.source) || '';
+    // Agda emits <a id="LocalName"> in the highlighted HTML
+    if (src.indexOf('id="' + local + '"') >= 0) return entry;
+    if (src.indexOf('id="' + defFullName + '"') >= 0) return entry;
+  }
+  return null;
+}
+
+// ─── STATE HELPERS ──────────────────────────────────────────────────────────
+var STATE_NAMES = ['Defined','Postulate','Hole','Failed'];
+function stateName(s) { return STATE_NAMES[s] || 'Defined'; }
+function stateColor(s) {
+  var p = getComputedStyle(document.documentElement);
+  return [
+    p.getPropertyValue('--c-defined').trim()   || '#16a34a',
+    p.getPropertyValue('--c-postulate').trim()  || '#dc2626',
+    p.getPropertyValue('--c-hole').trim()       || '#7c3aed',
+    p.getPropertyValue('--c-failed').trim()     || '#ea580c',
+  ][s] || '#6366f1';
+}
+
+function defModIdx(i)  { return defModules ? defModules[i] : -1; }
+function defModName(i) { var m = defModIdx(i); return m >= 0 ? modules[m] : '?'; }
+function defState(i)   { return defStates ? defStates[i] : 0; }
+function isExtDef(i)   { return externalSet.has(defModIdx(i)); }
+function isExtMod(mi)  { return externalSet.has(mi); }
+
+// ─── NAVIGATION ─────────────────────────────────────────────────────────────
+function navigate(entry, push) {
+  if (push === undefined) push = true;
+  if (push) {
+    history = history.slice(0, histIdx + 1);
+    history.push(entry);
+    histIdx = history.length - 1;
+  }
+  updateNavBtns();
+  var page = document.getElementById('wb-page');
+  page.classList.add('fading');
+  setTimeout(function() {
+    page.classList.remove('fading');
+    if (entry.type === 'def') renderDef(entry.idx);
+    else                      renderMod(entry.idx);
+  }, 80);
+}
+
+function updateNavBtns() {
+  document.getElementById('wb-back').disabled    = histIdx <= 0;
+  document.getElementById('wb-forward').disabled = histIdx >= history.length - 1;
+}
+
+document.getElementById('wb-back').onclick = function() {
+  if (histIdx > 0) { histIdx--; navigate(history[histIdx], false); }
+};
+document.getElementById('wb-forward').onclick = function() {
+  if (histIdx < history.length - 1) { histIdx++; navigate(history[histIdx], false); }
+};
+
+document.addEventListener('keydown', function(e) {
+  if ((e.altKey||e.metaKey) && e.key==='ArrowLeft')  { e.preventDefault(); document.getElementById('wb-back').click(); }
+  if ((e.altKey||e.metaKey) && e.key==='ArrowRight') { e.preventDefault(); document.getElementById('wb-forward').click(); }
+  if ((e.ctrlKey||e.metaKey) && e.key==='k') { e.preventDefault(); focusSearch(); }
+});
+
+// ─── BREADCRUMB ─────────────────────────────────────────────────────────────
+function buildBreadcrumb(container, modName, curLabel) {
+  container.innerHTML = '';
+  var parts = modName.split('.');
+  parts.forEach(function(p, i) {
+    var seg = parts.slice(0, i+1).join('.');
+    var modI = modules.indexOf(seg);
+    var sp = document.createElement('span');
+    sp.className = 'bc-seg';
+    sp.textContent = p;
+    sp.onclick = function() { navigate({type:'mod', idx: modI >= 0 ? modI : 0}); };
+    container.appendChild(sp);
+    if (i < parts.length - 1) {
+      var sep = document.createElement('span'); sep.className = 'bc-sep'; sep.textContent = '.';
+      container.appendChild(sep);
+    }
+  });
+  if (curLabel) {
+    var sep2 = document.createElement('span'); sep2.className = 'bc-sep'; sep2.textContent = ' · ';
+    var cur  = document.createElement('span'); cur.className  = 'bc-cur'; cur.textContent  = curLabel;
+    container.appendChild(sep2);
+    container.appendChild(cur);
+  }
+}
+
+// ─── SPARKLINE ──────────────────────────────────────────────────────────────
+function renderSparkline(defIdx) {
+  var svg = document.getElementById('wb-spark-svg');
+  svg.innerHTML = '';
+  var W = svg.parentElement.clientWidth || 700, H = 120;
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.setAttribute('width', W);
+
+  var outs = outNeighbors(defIdx).filter(function(i) { return showExt || !isExtDef(i); });
+  var ins  = inNeighbors(defIdx).filter(function(i)  { return showExt || !isExtDef(i); });
+
+  // cap at 15 each side for readability
+  outs = outs.slice(0, 15); ins = ins.slice(0, 15);
+
+  var cx = W/2, cy = H/2, orbitR = Math.min(W/2 - 28, 90);
+
+  function arcNodes(ids, angleStart, angleRange) {
+    return ids.map(function(id, i) {
+      var frac = ids.length === 1 ? 0.5 : i / (ids.length - 1);
+      var ang  = (angleStart + frac * angleRange) * Math.PI / 180;
+      return {idx: id, x: cx + orbitR * Math.cos(ang), y: cy + orbitR * Math.sin(ang)};
+    });
+  }
+
+  var leftNodes  = arcNodes(ins,  150, 60);   // incoming: left arc
+  var rightNodes = arcNodes(outs, -30, 60);   // outgoing: right arc
+
+  function svgEl(tag, attrs) {
+    var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    Object.keys(attrs).forEach(function(k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+
+  // edges
+  function drawEdge(x1,y1,x2,y2,color) {
+    svg.appendChild(svgEl('line',{x1:x1,y1:y1,x2:x2,y2:y2,
+      stroke:color,'stroke-width':'1.5','stroke-opacity':'0.35'}));
+  }
+  leftNodes.forEach(function(n) {
+    drawEdge(n.x, n.y, cx, cy, stateColor(defState(n.idx)));
+  });
+  rightNodes.forEach(function(n) {
+    drawEdge(cx, cy, n.x, n.y, stateColor(defState(n.idx)));
+  });
+
+  // neighbor nodes
+  function drawNeighbor(n) {
+    var s = defState(n.idx), ext = isExtDef(n.idx);
+    var col = ext ? '#bbb' : stateColor(s);
+    var nm  = defNames[n.idx] || '?';
+    var label = nm.split('.').pop();
+    var g2 = svgEl('g', {style:'cursor:pointer'});
+    g2.appendChild(svgEl('circle',{cx:n.x,cy:n.y,r:6,
+      fill: ext ? '#ddd' : col, stroke: ext ? '#bbb' : col, 'stroke-width':'1.5',
+      'fill-opacity': ext ? '0.5' : '0.85'}));
+    var txt = svgEl('text',{x:n.x,y:n.y+16,
+      'text-anchor':'middle','font-size':'10','fill': ext?'#aaa':'#555',
+      'font-family':'system-ui,sans-serif'});
+    txt.textContent = label.length > 12 ? label.slice(0,11)+'…' : label;
+    g2.appendChild(txt);
+    g2.addEventListener('click', function() { navigate({type:'def',idx:n.idx}); });
+    g2.addEventListener('mouseenter', function() { g2.querySelector('circle').setAttribute('stroke-width','2.5'); });
+    g2.addEventListener('mouseleave', function() { g2.querySelector('circle').setAttribute('stroke-width','1.5'); });
+    svg.appendChild(g2);
+  }
+  leftNodes.forEach(drawNeighbor);
+  rightNodes.forEach(drawNeighbor);
+
+  // direction labels
+  if (leftNodes.length > 0) {
+    var lt = svgEl('text',{x:8,y:14,'font-size':'10','fill':'#aaa','font-family':'system-ui,sans-serif'});
+    lt.textContent = 'used by'; svg.appendChild(lt);
+  }
+  if (rightNodes.length > 0) {
+    var rt = svgEl('text',{x:W-8,y:14,'font-size':'10','fill':'#aaa',
+      'text-anchor':'end','font-family':'system-ui,sans-serif'});
+    rt.textContent = 'depends on'; svg.appendChild(rt);
+  }
+
+  // center node
+  var fc = stateColor(defState(defIdx));
+  var cg = svgEl('g',{});
+  cg.appendChild(svgEl('circle',{cx:cx,cy:cy,r:11,fill:fc,'fill-opacity':'0.15'}));
+  cg.appendChild(svgEl('circle',{cx:cx,cy:cy,r: 8,fill:fc,stroke:'white','stroke-width':'2'}));
+  svg.appendChild(cg);
+}
+
+// ─── RENDER DEF VIEW ────────────────────────────────────────────────────────
+async function renderDef(idx) {
+  var name    = defNames[idx] || '?';
+  var modIdx  = defModIdx(idx);
+  var modName = modIdx >= 0 ? modules[modIdx] : '';
+  var state   = defState(idx);
+  var localName = modName && name.startsWith(modName + '.') ? name.slice(modName.length+1) : name;
+
+  showView('def');
+  buildBreadcrumb(document.getElementById('wb-breadcrumb'), modName, localName);
+
+  document.getElementById('wb-def-name').textContent = localName;
+  var badge = document.getElementById('wb-def-badge');
+  badge.textContent = stateName(state);
+  badge.setAttribute('data-state', state);
+
+  renderSparkline(idx);
+
+  // source
+  var srcWrap = document.getElementById('wb-src-wrap');
+  var srcPre  = document.getElementById('wb-src-pre');
+  srcWrap.setAttribute('data-state', state);
+  srcWrap.innerHTML = '';
+  srcPre = document.createElement('pre');
+  srcPre.id = 'wb-src-pre';
+  srcWrap.appendChild(srcPre);
+
+  if (WITH_SOURCE && modName) {
+    var bundle = await loadSnippets(modName);
+    if (!bundle && LAZY && g.moduleFiles && g.moduleFiles[modName]) {
+      await loadDetail(modName);
+      bundle = await loadSnippets(modName);
+    }
+    var snip = lookupSnippet(bundle, name, modName);
+    if (snip && snip.source) {
+      if (/<[a-zA-Z]/.test(snip.source)) {
+        // Agda-highlighted HTML
+        var wrapper = document.createElement('div');
+        wrapper.className = 'Agda Agda-source';
+        wrapper.innerHTML = snip.source;
+        srcWrap.innerHTML = '';
+        srcWrap.appendChild(wrapper);
+      } else {
+        srcPre.textContent = snip.source;
+        srcWrap.innerHTML = '';
+        srcWrap.appendChild(srcPre);
+      }
+    } else {
+      srcPre.textContent = '-- source not available';
+    }
+  } else {
+    srcPre.textContent = WITH_SOURCE ? '-- loading…' : '-- source view disabled';
+  }
+
+  // deps / used-by
+  var outs = outNeighbors(idx);
+  var ins  = inNeighbors(idx);
+  renderDepList('wb-deps-list', 'wb-deps-ct', outs);
+  renderDepList('wb-used-list', 'wb-used-ct', ins);
+
+  document.getElementById('wb-main').scrollTop = 0;
+}
+
+function renderDepList(listId, countId, indices) {
+  var el = document.getElementById(listId);
+  var visible = indices.filter(function(i) { return showExt || !isExtDef(i); });
+  document.getElementById(countId).textContent = visible.length;
+  el.innerHTML = '';
+  if (visible.length === 0) {
+    el.innerHTML = '<div class="wb-empty">(none)</div>';
+    return;
+  }
+  visible.forEach(function(i) {
+    var nm  = defNames[i] || '?';
+    var mod = defModName(i);
+    var s   = defState(i);
+    var ext = isExtDef(i);
+    var localNm = mod && nm.startsWith(mod+'.') ? nm.slice(mod.length+1) : nm;
+
+    var row = document.createElement('div');
+    row.className = 'wb-dep-row' + (ext ? ' ext' : '');
+
+    var dot = document.createElement('span');
+    dot.className = 'wb-dot'; dot.setAttribute('data-state', s);
+
+    var name = document.createElement('span');
+    name.className = 'dr-name'; name.textContent = localNm;
+
+    var modEl = document.createElement('span');
+    modEl.className = 'dr-mod'; modEl.textContent = mod;
+
+    var arrow = document.createElement('span');
+    arrow.className = 'dr-arrow'; arrow.textContent = '→';
+
+    row.append(dot, name, modEl, arrow);
+    row.onclick = function() { navigate({type:'def', idx:i}); };
+    el.appendChild(row);
+  });
+}
+
+// ─── RENDER MODULE VIEW ─────────────────────────────────────────────────────
+function renderMod(modIdx) {
+  var modName = modules[modIdx] || '?';
+  var ext = isExtMod(modIdx);
+  showView('mod');
+
+  // breadcrumb
+  var bc = document.getElementById('wb-mod-breadcrumb');
+  bc.innerHTML = '';
+  var parts = modName.split('.');
+  parts.forEach(function(p, i) {
+    if (i < parts.length - 1) {
+      var seg  = parts.slice(0,i+1).join('.');
+      var segI = modules.indexOf(seg);
+      var sp = document.createElement('span'); sp.className = 'bc-seg'; sp.textContent = p;
+      sp.onclick = function() { navigate({type:'mod', idx: segI >= 0 ? segI : modIdx}); };
+      bc.appendChild(sp);
+      var sep = document.createElement('span'); sep.className = 'bc-sep'; sep.textContent = '.';
+      bc.appendChild(sep);
+    } else {
+      var cur = document.createElement('span'); cur.className = 'bc-cur'; cur.textContent = p;
+      bc.appendChild(cur);
+    }
+  });
+
+  document.getElementById('wb-mod-name').textContent = modName;
+  var extBadge = document.getElementById('wb-mod-ext-badge');
+  extBadge.textContent = ext ? 'external' : '';
+  extBadge.className = ext ? 'wb-ext-badge' : '';
+
+  // state bar from moduleStateCounts
+  var bar = document.getElementById('wb-mod-state-bar');
+  bar.innerHTML = '';
+  var counts = g.moduleStateCounts ? g.moduleStateCounts[modIdx] : null;
+  if (counts) {
+    var total = counts[0]+counts[1]+counts[2]+counts[3] || 1;
+    var cols = ['var(--c-defined)','var(--c-postulate)','var(--c-hole)','var(--c-failed)'];
+    counts.forEach(function(ct, si) {
+      if (!ct) return;
+      var seg = document.createElement('div');
+      seg.className = 'wb-state-seg';
+      seg.style.width = ((ct/total)*100) + '%';
+      seg.style.background = cols[si];
+      bar.appendChild(seg);
+    });
+  }
+
+  // stats
+  var stats = document.getElementById('wb-mod-stats');
+  stats.innerHTML = '';
+  var defList = modDefMap.get(modIdx) || [];
+  var statInfo = [{label:'Definitions',val:defList.length}];
+  if (counts) {
+    if(counts[0]) statInfo.push({label:'Defined',   val:counts[0], s:0});
+    if(counts[1]) statInfo.push({label:'Postulates',val:counts[1], s:1});
+    if(counts[2]) statInfo.push({label:'Holes',     val:counts[2], s:2});
+    if(counts[3]) statInfo.push({label:'Failed',    val:counts[3], s:3});
+  }
+  statInfo.forEach(function(si) {
+    var pill = document.createElement('div'); pill.className = 'wb-stat';
+    if (si.s !== undefined) {
+      var dot = document.createElement('span'); dot.className = 'wb-dot'; dot.setAttribute('data-state', si.s);
+      pill.appendChild(dot);
+    }
+    var strong = document.createElement('strong'); strong.textContent = si.val;
+    var span   = document.createElement('span');   span.textContent   = ' ' + si.label;
+    pill.append(strong, span); stats.appendChild(pill);
+  });
+
+  // definitions list
+  document.getElementById('wb-mod-defs-ct').textContent = defList.length;
+  var defsEl = document.getElementById('wb-mod-defs');
+  defsEl.innerHTML = '';
+  defList.forEach(function(di) {
+    var nm = defNames[di] || '?';
+    var modNm = defModName(di);
+    var local = modNm && nm.startsWith(modNm+'.') ? nm.slice(modNm.length+1) : nm;
+    var s  = defState(di);
+    var card = document.createElement('div'); card.className = 'wb-def-card';
+    var dot  = document.createElement('span'); dot.className = 'wb-dot'; dot.setAttribute('data-state', s);
+    var name = document.createElement('span'); name.className = 'dc-name'; name.textContent = local;
+    var hint = document.createElement('span'); hint.className = 'dc-hint'; hint.textContent = nm;
+    card.append(dot, name, hint);
+    card.onclick = function() { navigate({type:'def', idx:di}); };
+    defsEl.appendChild(card);
+  });
+
+  // imports / imported-by
+  var imps    = [...(modImports.get(modIdx)||[])].filter(function(mi){ return showExt||!isExtMod(mi); });
+  var impsBys = [...(modImportedBy.get(modIdx)||[])].filter(function(mi){ return showExt||!isExtMod(mi); });
+
+  function renderModList(listId, countId, indices) {
+    document.getElementById(countId).textContent = indices.length;
+    var el = document.getElementById(listId); el.innerHTML = '';
+    if (!indices.length) { el.innerHTML = '<div class="wb-empty">(none)</div>'; return; }
+    indices.forEach(function(mi) {
+      var nm  = modules[mi] || '?';
+      var ext2= isExtMod(mi);
+      var link = document.createElement('div');
+      link.className = 'wb-mod-link' + (ext2 ? ' ext' : '');
+      var dot  = document.createElement('span'); dot.className = 'wb-dot'; dot.setAttribute('data-state','mod');
+      if (ext2) dot.style.background = '#aaa';
+      var sp   = document.createElement('span'); sp.textContent = nm;
+      link.append(dot, sp);
+      link.onclick = function() { navigate({type:'mod', idx:mi}); };
+      el.appendChild(link);
+    });
+  }
+  renderModList('wb-mod-imp',   'wb-mod-imp-ct',  imps);
+  renderModList('wb-mod-iby',   'wb-mod-iby-ct',  impsBys);
+
+  document.getElementById('wb-main').scrollTop = 0;
+}
+
+function showView(which) {
+  document.getElementById('wb-def-view').className = which === 'def' ? 'active' : '';
+  document.getElementById('wb-mod-view').className = which === 'mod' ? 'active' : '';
+}
+
+// ─── SEARCH ──────────────────────────────────────────────────────────────────
+var searchEl  = document.getElementById('wb-search');
+var dropEl    = document.getElementById('wb-dropdown');
+var ddActive  = -1;
+
+function focusSearch() { searchEl.focus(); searchEl.select(); }
+
+function buildResults(q) {
+  q = q.toLowerCase().trim();
+  var results = [];
+  // modules first
+  modules.forEach(function(nm, mi) {
+    if (!showExt && isExtMod(mi)) return;
+    if (!q || nm.toLowerCase().includes(q))
+      results.push({type:'mod', idx:mi, name:nm, mod:'', ext:isExtMod(mi)});
+  });
+  // defs
+  defNames.forEach(function(nm, di) {
+    if (!showExt && isExtDef(di)) return;
+    var local = nm.split('.').pop();
+    if (!q || nm.toLowerCase().includes(q) || local.toLowerCase().includes(q))
+      results.push({type:'def', idx:di, name:local, mod:defModName(di),
+                    state:defState(di), ext:isExtDef(di)});
+  });
+  return results.slice(0, 60);
+}
+
+function renderDrop(items) {
+  dropEl.innerHTML = ''; ddActive = -1;
+  if (!items.length) {
+    dropEl.innerHTML = '<div class="dd-empty">No results</div>';
+    dropEl.classList.add('open'); return;
+  }
+  items.forEach(function(item, i) {
+    var el = document.createElement('div'); el.className = 'dd-item';
+    if (item.ext) el.style.opacity = '0.6';
+    var dot = document.createElement('span');
+    dot.className = 'wb-dot';
+    dot.setAttribute('data-state', item.type === 'mod' ? 'mod' : item.state);
+    if (item.type === 'mod') dot.style.background = '#6366f1';
+    var name = document.createElement('span'); name.className = 'dd-name'; name.textContent = item.name;
+    var mod  = document.createElement('span'); mod.className  = 'dd-mod';
+    mod.textContent = item.type === 'def' ? item.mod : (item.ext ? 'external' : 'module');
+    var kind = document.createElement('span'); kind.className = 'dd-kind';
+    kind.textContent = item.type === 'mod' ? 'mod' : STATE_NAMES[item.state||0].toLowerCase();
+    el.append(dot, name, mod, kind);
+    el.onclick = function() { navigate({type:item.type, idx:item.idx}); closeDrop(); };
+    el.onmouseenter = function() { setDD(i); };
+    dropEl.appendChild(el);
+  });
+  dropEl.classList.add('open');
+}
+
+function setDD(i) {
+  var items = dropEl.querySelectorAll('.dd-item');
+  items.forEach(function(el,j){ el.classList.toggle('active', j===i); });
+  ddActive = i;
+}
+function closeDrop() { dropEl.classList.remove('open'); ddActive = -1; }
+
+searchEl.addEventListener('input', function() {
+  var q = searchEl.value;
+  if (!q.trim()) { closeDrop(); return; }
+  renderDrop(buildResults(q));
+});
+searchEl.addEventListener('keydown', function(e) {
+  var items = dropEl.querySelectorAll('.dd-item');
+  if (e.key==='ArrowDown') { e.preventDefault(); setDD(Math.min(ddActive+1, items.length-1)); }
+  else if (e.key==='ArrowUp')  { e.preventDefault(); setDD(Math.max(ddActive-1, 0)); }
+  else if (e.key==='Enter') {
+    var target = ddActive >= 0 ? items[ddActive] : items[0];
+    if (target) { target.click(); }
+    closeDrop();
+  }
+  else if (e.key==='Escape') closeDrop();
+});
+searchEl.addEventListener('focus', function() {
+  if (searchEl.value.trim()) renderDrop(buildResults(searchEl.value));
+});
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('#wb-search-wrap')) closeDrop();
+});
+
+// ─── EXTERNALS TOGGLE ────────────────────────────────────────────────────────
+document.getElementById('wb-ext-toggle').onclick = function() {
+  showExt = !showExt;
+  document.getElementById('wb-toggle-sw').classList.toggle('on', showExt);
+  if (history[histIdx]) navigate(history[histIdx], false);
+};
+
+// ─── ERROR DISPLAY ───────────────────────────────────────────────────────────
+function showErr(msg) {
+  var el = document.getElementById('wb-fetch-err');
+  el.textContent = msg; el.classList.add('visible');
+}
+
+// ─── START ───────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

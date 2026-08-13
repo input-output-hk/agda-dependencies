@@ -1,0 +1,1381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>agda-deps — Document View</title>
+<style>
+/* ── Reset & tokens ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --c-defined:    #4caf50;
+  --c-postulate:  #f44336;
+  --c-hole:       #9c27b0;
+  --c-failed:     #ff9800;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-serif: Georgia, "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
+
+  --bg:         #ffffff;
+  --bg-subtle:  #f7f7f5;
+  --bg-hover:   #f1f1ef;
+  --bg-code:    #f6f6f4;
+  --border:     #e8e8e4;
+  --border-mid: #d5d5d0;
+  --text:       #1a1a1a;
+  --text-muted: #6b6b65;
+  --text-dim:   #9a9a94;
+
+  --accent:     #2563eb;
+  --accent-bg:  #eff6ff;
+  --accent-border: #bfdbfe;
+
+  --c-defined-bg:   #f0faf0;
+  --c-postulate-bg: #fff5f5;
+  --c-hole-bg:      #faf5ff;
+  --c-failed-bg:    #fff8f0;
+
+  --sidebar-w: 260px;
+  --content-max: 900px;
+  --toolbar-h: 52px;
+  --radius: 8px;
+  --radius-sm: 4px;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,.08), 0 2px 4px rgba(0,0,0,.04);
+}
+
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.65;
+  font-size: 15px;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────── */
+#nd-toolbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+  height: var(--toolbar-h);
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 20px;
+  box-shadow: var(--shadow-sm);
+}
+#nd-toolbar .nd-brand {
+  font-family: var(--font-mono);
+  font-size: 13px; font-weight: 600;
+  color: var(--text); white-space: nowrap;
+  letter-spacing: -.3px; flex-shrink: 0;
+}
+#nd-toolbar .nd-brand span { color: var(--accent); }
+
+#nd-search-wrap {
+  flex: 1; max-width: 340px; position: relative;
+}
+#nd-search-wrap .nd-search-icon {
+  position: absolute; left: 10px; top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-dim); pointer-events: none;
+}
+#nd-search {
+  width: 100%; padding: 7px 12px 7px 34px;
+  border: 1px solid var(--border-mid);
+  border-radius: 6px; font-size: 13px;
+  background: var(--bg-subtle);
+  color: var(--text); outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+#nd-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+  background: var(--bg);
+}
+#nd-search::placeholder { color: var(--text-dim); }
+
+.nd-tb-btn {
+  padding: 6px 12px; font-size: 12.5px; font-weight: 500;
+  border: 1px solid var(--border-mid); border-radius: 6px;
+  background: var(--bg); color: var(--text-muted);
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  transition: background .12s, color .12s, border-color .12s;
+  font-family: var(--font-sans);
+}
+.nd-tb-btn:hover { background: var(--bg-hover); color: var(--text); }
+.nd-tb-btn.nd-active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-border); }
+select.nd-tb-btn {
+  appearance: none; padding-right: 24px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239a9a94' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center;
+}
+
+/* ── Layout ──────────────────────────────────────────────────────────── */
+#nd-layout {
+  display: flex;
+  margin-top: var(--toolbar-h);
+  min-height: calc(100vh - var(--toolbar-h));
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────── */
+#nd-sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  position: sticky;
+  top: var(--toolbar-h);
+  height: calc(100vh - var(--toolbar-h));
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-subtle);
+  padding: 16px 0 60px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-mid) transparent;
+}
+#nd-sidebar::-webkit-scrollbar { width: 5px; }
+#nd-sidebar::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 3px; }
+
+.nd-toc-heading {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--text-dim);
+  padding: 0 16px 8px; margin-bottom: 2px;
+}
+
+/* tree nodes */
+.nd-toc-node { }
+.nd-toc-folder { }
+.nd-toc-folder-label {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 16px; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--text-muted);
+  user-select: none; border-radius: var(--radius-sm);
+  margin: 0 6px;
+  transition: background .1s;
+}
+.nd-toc-folder-label:hover { background: var(--bg-hover); }
+.nd-toc-chevron {
+  display: inline-block; font-size: 9px;
+  color: var(--text-dim); transition: transform .18s;
+  flex-shrink: 0;
+}
+.nd-toc-folder.nd-open > .nd-toc-folder-label .nd-toc-chevron { transform: rotate(90deg); }
+.nd-toc-folder-children { display: none; }
+.nd-toc-folder.nd-open > .nd-toc-folder-children { display: block; }
+
+.nd-toc-link {
+  display: block;
+  padding: 3.5px 14px 3.5px 28px;
+  font-size: 12.5px; color: var(--text-muted);
+  text-decoration: none; border-radius: var(--radius-sm);
+  margin: 0 6px; cursor: pointer;
+  transition: background .1s, color .1s;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nd-toc-link.nd-top-link { padding-left: 16px; }
+.nd-toc-link:hover { background: var(--bg-hover); color: var(--text); }
+.nd-toc-link.nd-active { background: var(--accent-bg); color: var(--accent); font-weight: 500; }
+.nd-toc-link.nd-external { color: var(--text-dim); font-style: italic; }
+
+/* hide during search */
+.nd-toc-link.nd-hidden { display: none; }
+.nd-toc-folder.nd-hidden { display: none; }
+
+.nd-toc-count {
+  font-size: 11px; color: var(--text-dim);
+  font-weight: 400; margin-left: 3px;
+}
+
+.nd-ext-label {
+  margin: 12px 16px 4px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+
+/* ── Main ────────────────────────────────────────────────────────────── */
+#nd-main {
+  flex: 1; min-width: 0;
+  padding: 48px 48px 120px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-mid) transparent;
+}
+.nd-content-inner {
+  max-width: var(--content-max);
+  margin: 0 auto;
+}
+
+/* ── Page header ─────────────────────────────────────────────────────── */
+.nd-page-header {
+  margin-bottom: 52px;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--border);
+}
+.nd-entry-tag {
+  display: inline-block;
+  font-size: 11px; font-weight: 600; letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--accent); background: var(--accent-bg);
+  border: 1px solid var(--accent-border); border-radius: 4px;
+  padding: 2px 8px; margin-bottom: 16px;
+}
+.nd-page-title {
+  font-family: var(--font-serif);
+  font-size: 32px; font-weight: 700;
+  color: var(--text); line-height: 1.25;
+  margin-bottom: 8px;
+}
+.nd-page-subtitle {
+  color: var(--text-muted); font-size: 14px; margin-bottom: 20px;
+}
+.nd-page-stats {
+  display: flex; gap: 20px; flex-wrap: wrap; margin-top: 16px;
+}
+.nd-stat-chip {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 13px; color: var(--text-muted);
+}
+.nd-stat-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+
+/* loading banner */
+#nd-loading {
+  text-align: center; padding: 80px 20px;
+  color: var(--text-muted); font-size: 15px;
+}
+#nd-loading .nd-spinner {
+  display: inline-block; width: 20px; height: 20px;
+  border: 2px solid var(--border-mid);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: nd-spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+@keyframes nd-spin { to { transform: rotate(360deg); } }
+
+/* ── Module section ──────────────────────────────────────────────────── */
+.nd-module-section {
+  margin-bottom: 52px;
+  scroll-margin-top: calc(var(--toolbar-h) + 16px);
+}
+.nd-module-section.nd-hidden { display: none; }
+
+.nd-module-header { margin-bottom: 18px; }
+
+.nd-module-name-row {
+  display: flex; align-items: baseline; gap: 10px;
+  flex-wrap: wrap; margin-bottom: 8px;
+}
+.nd-module-name {
+  font-family: var(--font-mono);
+  font-size: 19px; font-weight: 700;
+  color: var(--text); line-height: 1.3;
+}
+.nd-module-name.nd-ext-name { color: var(--text-muted); }
+
+.nd-badges { display: flex; gap: 5px; flex-wrap: wrap; }
+.nd-badge {
+  font-size: 10.5px; font-weight: 600; letter-spacing: .03em;
+  padding: 2px 8px; border-radius: 12px; white-space: nowrap;
+}
+.nd-badge-entry    { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-border); }
+.nd-badge-external { background: #f5f5f5; color: var(--text-dim); border: 1px solid var(--border); }
+.nd-badge-defined  { background: var(--c-defined-bg); color: #2e7d32; border: 1px solid #a5d6a7; }
+.nd-badge-postulate{ background: var(--c-postulate-bg); color: #c62828; border: 1px solid #ffcdd2; }
+.nd-badge-hole     { background: var(--c-hole-bg); color: #6a1b9a; border: 1px solid #e1bee7; }
+.nd-badge-failed   { background: var(--c-failed-bg); color: #e65100; border: 1px solid #ffcc80; }
+
+.nd-mix-bar {
+  height: 5px; border-radius: 3px; overflow: hidden;
+  background: var(--border); display: flex;
+  margin-bottom: 12px; max-width: 280px;
+}
+.nd-mix-seg { height: 100%; }
+
+.nd-module-links {
+  font-size: 12.5px; color: var(--text-muted);
+  display: flex; flex-direction: column; gap: 5px;
+  flex-wrap: wrap;
+}
+.nd-module-links-row {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.nd-links-label {
+  color: var(--text-dim); font-weight: 600;
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  flex-shrink: 0;
+}
+.nd-mod-link {
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--accent); text-decoration: none;
+  transition: opacity .12s; cursor: pointer;
+}
+.nd-mod-link:hover { text-decoration: underline; opacity: .8; }
+.nd-mod-link.nd-ext { color: var(--text-dim); cursor: default; }
+
+.nd-ext-banner {
+  font-size: 12px; color: var(--text-dim);
+  background: #f9f9f8;
+  border: 1px dashed var(--border-mid);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px; margin-top: 10px;
+  max-width: 420px;
+}
+
+/* ── Def list ────────────────────────────────────────────────────────── */
+.nd-defs-heading {
+  font-size: 11px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-dim);
+  margin: 20px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.nd-def-list { display: flex; flex-direction: column; gap: 3px; }
+
+/* ── Def block ───────────────────────────────────────────────────────── */
+.nd-def-block {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg);
+  transition: box-shadow .15s;
+  scroll-margin-top: calc(var(--toolbar-h) + 16px);
+}
+.nd-def-block:hover { box-shadow: var(--shadow-sm); }
+.nd-def-block.nd-flash {
+  animation: nd-flash .8s ease;
+}
+@keyframes nd-flash {
+  0%,100% { box-shadow: none; }
+  20%      { box-shadow: 0 0 0 3px rgba(37,99,235,.35); }
+  70%      { box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+}
+
+.nd-def-summary {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; cursor: pointer;
+  user-select: none; background: transparent;
+  transition: background .1s;
+}
+.nd-def-summary:hover { background: var(--bg-subtle); }
+
+.nd-def-chevron {
+  flex-shrink: 0; width: 14px; height: 14px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim); transition: transform .18s;
+}
+.nd-def-block.nd-open .nd-def-chevron { transform: rotate(90deg); }
+
+.nd-def-state-bar {
+  width: 3px; height: 18px; border-radius: 2px; flex-shrink: 0;
+}
+.nd-state-0 { background: var(--c-defined); }
+.nd-state-1 { background: var(--c-postulate); }
+.nd-state-2 { background: var(--c-hole); }
+.nd-state-3 { background: var(--c-failed); }
+
+.nd-def-name {
+  font-family: var(--font-mono); font-size: 13.5px; font-weight: 600;
+  color: var(--text); flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.nd-def-pills { display: flex; gap: 5px; flex-shrink: 0; }
+.nd-pill {
+  font-size: 11px; font-weight: 500;
+  color: var(--text-dim); background: var(--bg-subtle);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 1px 8px; white-space: nowrap;
+}
+.nd-pill.nd-zero { opacity: .38; }
+.nd-pill-badge {
+  font-size: 10px; font-weight: 600; letter-spacing: .03em;
+  padding: 1px 6px; border-radius: 10px; white-space: nowrap;
+}
+
+/* def expanded body */
+.nd-def-body {
+  display: none;
+  border-top: 1px solid var(--border);
+}
+.nd-def-block.nd-open .nd-def-body { display: block; }
+
+.nd-def-source {
+  border-left: 3px solid var(--border-mid);
+  margin: 14px 14px 0;
+  background: var(--bg-code);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.nd-def-block.nd-sb-0 .nd-def-source { border-left-color: var(--c-defined); }
+.nd-def-block.nd-sb-1 .nd-def-source { border-left-color: var(--c-postulate); }
+.nd-def-block.nd-sb-2 .nd-def-source { border-left-color: var(--c-hole); }
+.nd-def-block.nd-sb-3 .nd-def-source { border-left-color: var(--c-failed); }
+
+.nd-def-source pre {
+  font-family: var(--font-mono); font-size: 12.5px;
+  line-height: 1.75; color: var(--text);
+  padding: 12px 14px; overflow-x: auto;
+  white-space: pre;
+}
+.nd-def-source .nd-no-source {
+  padding: 12px 14px;
+  font-size: 12px; color: var(--text-dim);
+  font-style: italic;
+}
+/* Agda highlighted HTML source */
+.nd-def-source .Agda { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.75; }
+.nd-def-source .Agda a { text-decoration: none; }
+
+.nd-def-deps-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 14px; padding: 14px;
+}
+@media (max-width: 680px) { .nd-def-deps-grid { grid-template-columns: 1fr; } }
+
+.nd-dep-col-label {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-dim);
+  margin-bottom: 7px;
+}
+.nd-dep-list { display: flex; flex-direction: column; gap: 4px; }
+.nd-dep-item {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px;
+}
+.nd-dep-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+}
+.nd-dep-link {
+  font-family: var(--font-mono); color: var(--accent);
+  text-decoration: none; font-size: 12px;
+  transition: opacity .1s; cursor: pointer;
+}
+.nd-dep-link:hover { text-decoration: underline; opacity: .8; }
+.nd-dep-link.nd-ext-ref { color: var(--text-dim); cursor: default; }
+.nd-dep-empty { font-size: 12px; color: var(--text-dim); font-style: italic; }
+
+/* ── Module divider ──────────────────────────────────────────────────── */
+.nd-module-divider {
+  border: none; border-top: 1px solid var(--border);
+  margin-bottom: 44px;
+}
+
+/* ── Externals section ───────────────────────────────────────────────── */
+.nd-ext-section-header {
+  margin: 56px 0 24px;
+  padding-top: 24px;
+  border-top: 2px dashed var(--border-mid);
+}
+.nd-ext-section-header h2 {
+  font-family: var(--font-serif);
+  font-size: 20px; color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.nd-ext-section-header p {
+  font-size: 13px; color: var(--text-dim);
+}
+
+/* search highlight */
+mark {
+  background: #fef08a; color: inherit;
+  border-radius: 2px; padding: 0 1px;
+}
+</style>
+</head>
+<body>
+
+<!-- ── Toolbar ────────────────────────────────────────────────────────── -->
+<div id="nd-toolbar">
+  <div class="nd-brand">agda&#8209;<span>deps</span></div>
+
+  <div id="nd-search-wrap">
+    <svg class="nd-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input id="nd-search" type="search" placeholder="Search modules and definitions…" autocomplete="off"/>
+  </div>
+
+  <select id="nd-sort-select" class="nd-tb-btn" title="Sort modules">
+    <option value="alpha">Alphabetical</option>
+    <option value="topo">Topological depth</option>
+    <option value="count">Definition count</option>
+  </select>
+
+  <button id="nd-btn-expand"   class="nd-tb-btn">Expand all</button>
+  <button id="nd-btn-collapse" class="nd-tb-btn">Collapse all</button>
+  <button id="nd-btn-externals" class="nd-tb-btn nd-active" data-show="true">Externals ✓</button>
+</div>
+
+<!-- ── Layout ─────────────────────────────────────────────────────────── -->
+<div id="nd-layout">
+  <nav id="nd-sidebar">
+    <div class="nd-toc-heading">Contents</div>
+    <div id="nd-toc"></div>
+  </nav>
+
+  <main id="nd-main">
+    <div class="nd-content-inner" id="nd-content">
+      <div id="nd-loading">
+        <div class="nd-spinner"></div><br/>
+        Loading dependency graph…
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+var LAZY = false;
+var WITH_SOURCE = false;
+var GZIP_ENABLED = false;
+var GRAPH = {"v":2,"modules":["Agda.Primitive","Agda.Primitive.Cubical","Bool","Bool.Bool","Coinductive","Coinductive.Stream","Holes","List","List.List","Nat","Nat.Nat","Records","Records.Box","Records.Point","Test","Test.Exp","Where","Where._","_"],"files":["/home/mceresa/Repositories/Projects/AgdaDependencies/test/Bool.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Coinductive.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Holes.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/List.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Nat.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Records.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Test.agda","/home/mceresa/Repositories/Projects/AgdaDependencies/test/Where.agda"],"moduleToFile":"//////////8AAAAAAAAAAAEAAAABAAAAAgAAAAMAAAADAAAABAAAAAQAAAAFAAAABQAAAAUAAAAGAAAABgAAAAcAAAAHAAAA/////w==","fileToModules":[[2,3],[4,5],[6],[7,8],[9,10],[11,12,13],[14,15],[16,17]],"defs":{"names":["Holes.magic","Where._.go","List.List.[]","Test.map","Test._++_","Holes.unsolved#meta.3","Nat._-_","Records.Point.x","Holes.incomplete","Coinductive.mapSuc","List.List._∷_","Test.Exp.Var","Records.Box","Test.sum","Where._.sq","Records.mkPoint","Records.Box.contents","Bool.Bool.false","Coinductive.Stream.constructor","Nat.Nat.suc","Holes.useMagic","Test.Exp.Int","Test.eval","Records.sumCoords","Coinductive.zeros","Coinductive.Stream.head","Test.Plus-1","Nat._*_","List._∷_-1","Records.Point","Nat.suc-0","Bool.Bool","Coinductive.Stream","Where._.bump","List._∷_-0","Records.Box.count","Records.double","Where.sumSquares","Records.origin","List.List","Where.weirdSum","Nat.Nat","Bool.Bool.true","Test.Plus-0","Records.Box.constructor","Coinductive.Stream.tail","Test.Exp","Nat._\u003c_","Nat._==_","Nat._+_","Records.Point.constructor","Test.Exp.Plus","Nat.Nat.zero","Test.Int-0","Test.eval\u0027","Test.Var-0","Records.Point.y"],"modules":"BgAAABEAAAAIAAAADgAAAA4AAAAGAAAACQAAAA0AAAAGAAAABAAAAAgAAAAPAAAACwAAAA4AAAARAAAACwAAAAwAAAADAAAABQAAAAoAAAAGAAAADwAAAA4AAAALAAAABAAAAAUAAAAOAAAACQAAAAcAAAALAAAACQAAAAIAAAAEAAAAEQAAAAcAAAAMAAAACwAAABAAAAALAAAABwAAABAAAAAJAAAAAwAAAA4AAAAMAAAABQAAAA4AAAAJAAAACQAAAAkAAAANAAAADwAAAAoAAAAOAAAADgAAAA4AAAANAAAA","states":"AQAAAAACAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","x":"uY3uP0sfej+2LSo/tYkDP95UxD5euuE/3bW0P67Ytz9vgew/qvG6P0Pn9T50tSVA2bF5P3h/bD9btm4/9+SpP/CFiT9Uxj8/BaPKP6VOoD/V59o/eqUAQNIABkDHS8c/kQ+6P5Vl0D9B8UtAZRmSP2EyFT7qlbI/Io6NPwhaKT/xY8Q/9pfVP83MzDySdFU/ImxwP/OOgz8QWKk/OBAyP2Wq0D/sUbA/4XpMP4j0S0AZ/2Y/INK3P7prFUBvEoM/4uR2PyL9tj/WVsw/S8gvQBx8oT86khNAaW/oP9NNPkBEab8/","y":"IbC6PxDp7z+2hAxAsp0bQH0/FUDjx5A/0NWWP9lf/j80gJ8/DkpAP11tDUCdEQFAVn2uP3Zx6z89m90/okUCQE+vnD+IEUI/DHnEPYxKij9Yyso/eqX0P42X3j9n1ec/1SFXP04o1D5+jNk/zF27P2EyJUC8BfI/L90UPxtkSj+QiMk+Pui5P5XUGUDxY7Q/46XDP+0N/j/VeOE/PugFQEymqj9LyL8/YmcqP5ZD8z9VwaA/5WHBPp/N6j+I9Hs/mN2DP9/gyz+bVf8/5BTlPybksz9KexNAeJzSP0dyEUDvOPU/"},"edges":{"outOffsets":"AAAAAAEAAAAJAAAACwAAAA8AAAATAAAAFAAAABgAAAAbAAAAHQAAACMAAAAnAAAAKgAAAC4AAAA1AAAAOAAAADwAAAA/AAAAQQAAAEMAAABGAAAASQAAAE0AAABUAAAAWQAAAF8AAABhAAAAYQAAAGYAAABmAAAAagAAAGoAAABsAAAAcAAAAHIAAAByAAAAdQAAAHkAAAB8AAAAgQAAAIMAAACGAAAAiAAAAIoAAACKAAAAjQAAAI8AAACSAAAAmQAAAKAAAACkAAAApwAAAKsAAACtAAAArQAAALAAAACwAAAAswAAAA==","outTargets":"KQAAAAEAAAACAAAACgAAAA4AAAAnAAAAKQAAADEAAAA0AAAAAgAAACcAAAACAAAAAwAAAAoAAAAnAAAAAgAAAAQAAAAKAAAAJwAAACkAAAAGAAAAEwAAACkAAAA0AAAAHQAAACkAAAAyAAAABQAAACkAAAAJAAAAEwAAABkAAAAgAAAAKQAAAC0AAAAKAAAAHAAAACIAAAAnAAAACwAAAC4AAAA3AAAAEAAAACMAAAApAAAALAAAAAIAAAAKAAAADQAAACcAAAApAAAAMQAAADQAAAAbAAAAJwAAACkAAAAHAAAAHQAAACkAAAA4AAAADAAAACkAAAAsAAAAEQAAAB8AAAASAAAAIAAAABMAAAAeAAAAKQAAAAAAAAApAAAAMQAAABUAAAApAAAALgAAADUAAAALAAAAFQAAABYAAAApAAAALgAAADEAAAAzAAAABwAAAB0AAAApAAAAMQAAADgAAAAYAAAAGQAAACAAAAApAAAALQAAADQAAAASAAAAIAAAABMAAAAbAAAAKQAAADEAAAA0AAAABwAAACkAAAAyAAAAOAAAABEAAAAqAAAAEgAAABkAAAAgAAAALQAAACkAAAAxAAAADAAAACkAAAAsAAAADAAAABsAAAAjAAAAKQAAAAEAAAAnAAAAKQAAAAcAAAAdAAAAKQAAADQAAAA4AAAAAgAAAAoAAAAhAAAAKQAAADEAAAATAAAANAAAAB8AAAAqAAAADAAAACkAAAAsAAAAEgAAACAAAAALAAAAFQAAADMAAAARAAAAEwAAAB8AAAApAAAAKgAAAC8AAAA0AAAAEQAAABMAAAAfAAAAKQAAACoAAAAwAAAANAAAABMAAAApAAAAMQAAADQAAAAdAAAAKQAAADIAAAAaAAAAKwAAAC4AAAAzAAAAKQAAADQAAAApAAAALgAAADQAAAAdAAAAKQAAADIAAAA=","inOffsets":"AAAAAAEAAAADAAAACQAAAAoAAAALAAAADAAAAA0AAAARAAAAEQAAABIAAAAYAAAAGwAAAB8AAAAgAAAAIQAAACEAAAAiAAAAJgAAACoAAAAyAAAAMgAAADUAAAA2AAAANgAAADcAAAA6AAAAOwAAAD4AAAA/AAAARQAAAEYAAABKAAAAUAAAAFEAAABSAAAAVAAAAFQAAABUAAAAVAAAAFwAAABcAAAAfgAAAIIAAACDAAAAhwAAAIoAAACPAAAAkAAAAJEAAACaAAAAngAAAKEAAACtAAAArgAAAK4AAACvAAAAswAAAA==","inTargets":"FAAAAAEAAAAlAAAAAQAAAAIAAAADAAAABAAAAA0AAAAnAAAAAwAAAAQAAAAIAAAABgAAAA8AAAAXAAAAHQAAACYAAAAJAAAAAQAAAAMAAAAEAAAACgAAAA0AAAAnAAAACwAAABYAAAAuAAAAEAAAACMAAAAkAAAALAAAAA0AAAABAAAADAAAABEAAAAfAAAALwAAADAAAAASAAAAGQAAACAAAAAtAAAABgAAAAkAAAATAAAAGwAAACkAAAAvAAAAMAAAADEAAAAVAAAAFgAAAC4AAAAWAAAAGAAAAAkAAAAYAAAAIAAAADMAAAAOAAAAGwAAACQAAAAKAAAABwAAAA8AAAAXAAAAJgAAADIAAAA4AAAAEwAAABEAAAAqAAAALwAAADAAAAAJAAAAEgAAABgAAAAZAAAAIAAAAC0AAAAoAAAACgAAAAwAAAAkAAAAAQAAAAIAAAADAAAABAAAAAoAAAANAAAADgAAACUAAAAAAAAAAQAAAAUAAAAGAAAABwAAAAgAAAAJAAAADAAAAA0AAAAOAAAADwAAABAAAAATAAAAFAAAABUAAAAWAAAAFwAAABgAAAAbAAAAHQAAACEAAAAjAAAAJAAAACUAAAAmAAAAKAAAACwAAAAvAAAAMAAAADEAAAAyAAAANAAAADYAAAA4AAAAHwAAACoAAAAvAAAAMAAAADMAAAAMAAAAEAAAACMAAAAsAAAACQAAABgAAAAgAAAACwAAABUAAAAWAAAAMwAAADYAAAAvAAAAMAAAAAEAAAANAAAAFAAAABYAAAAXAAAAGwAAACEAAAAoAAAAMQAAAAcAAAAdAAAAMgAAADgAAAAWAAAALgAAADMAAAABAAAABgAAAA0AAAAYAAAAGwAAACYAAAApAAAALwAAADAAAAAxAAAANAAAADYAAAAVAAAACwAAAA8AAAAXAAAAHQAAACYAAAA="},"transitiveEdges":"QAcAADkHAABNBwAAMgcAALEFAACjBQAAJQoAABcKAAAiBAAAFAQAAIEFAACMBQAAeAUAAHEFAACFBQAAKgIAACECAAAUAgAAGgIAAC4CAABxCgAAUwoAAEkKAACJCwAAjgsAAIYLAAB1CwAA1gQAANsEAADCBAAA4gQAAKECAAB+AgAAqgIAAA8FAAAUBQAAFwUAABkFAAD7BAAA8QQAAC8MAAA6DAAADgMAABkDAAAMAwAAFgMAAOcCAADvAgAACwEAAOYAAADuAAAA0gAAAK0AAAC1AAAAngYAAHwGAACtBgAApwYAAKwBAAC4AQAAwQEAAJUMAAChDAAAqgwAAD8LAABLCwAAVAsAAHQDAACAAwAAXgMAAI8DAAA8BQAASAUAACYFAABXBQAAkwgAAJ8IAACqCAAAfQgAAK4IAADVAgAAvAIAAM8CAADYAgAAuQMAAJwDAAC8AwAA9AcAANcHAAD3BwAA9QkAANgJAAD4CQAALQgAABAIAAAnCAAA8QEAAJ0EAAD4BgAAEQcAAOgDAADaAwAAeQkAAIQJAACxCAAAuQgAAJkAAAB0AAAAYQIAAEQCAABcAgAAVgIAAFUJAAA0CQAAvQsAAMgLAABkBAAATgQAAFkEAAASCwAAHQsAAPwKAAB/AQAAigEAAGkBAAAsBgAANwYAABYGAAA0BgAAzwoAANkKAADBCgAA5AoAANoKAADDCgAAlgoAAKAKAACICgAAqwoAAKEKAACKCgAAZggAAGQIAABHAwAAYgAAAG0AAABgAAAAagAAAEcAAAA7AAAAQwAAABEJAAAZCQAAggcAAA==","moduleEdges":[[1,0],[2,0],[2,3],[3,2],[4,0],[4,5],[4,9],[4,10],[5,4],[6,0],[6,9],[7,0],[7,8],[8,7],[9,0],[9,2],[9,3],[9,10],[10,9],[11,0],[11,9],[11,10],[11,12],[11,13],[12,9],[12,11],[13,9],[13,11],[14,0],[14,4],[14,6],[14,7],[14,8],[14,9],[14,10],[14,11],[14,15],[14,16],[15,9],[15,14],[16,0],[16,7],[16,9],[16,17],[17,7],[17,8],[17,9],[17,10],[18,4],[18,6],[18,7],[18,9],[18,11],[18,16]],"transitiveModuleEdges":[[2,0],[4,0],[4,9],[4,10],[6,0],[7,0],[9,0],[9,2],[9,3],[11,0],[11,9],[11,10],[11,12],[11,13],[12,9],[13,9],[14,0],[14,4],[14,6],[14,7],[14,8],[14,9],[14,10],[14,11],[14,16],[15,9],[16,0],[16,7],[16,9],[17,7],[17,8],[17,9],[17,10],[18,7],[18,9]],"moduleStates":"AAAAAAAAAAAAAAAAAAAAAAAAAA==","moduleStateCounts":[[0,0,0,0],[0,0,0,0],[1,0,0,0],[2,0,0,0],[3,0,0,0],[3,0,0,0],[1,1,2,0],[3,0,0,0],[2,0,0,0],[7,0,0,0],[2,0,0,0],[6,0,0,0],[3,0,0,0],[3,0,0,0],[10,0,0,0],[3,0,0,0],[2,0,0,0],[3,0,0,0],[0,0,0,0]],"moduleDepth":"AQAAAP////8CAAAAAgAAAAEAAAACAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAgAAAAIAAAAAAAAAAQAAAAEAAAACAAAA/////w==","fileTree":[{"name":"home","parent":-1,"fileIndex":null},{"name":"mceresa","parent":0,"fileIndex":null},{"name":"Repositories","parent":1,"fileIndex":null},{"name":"Projects","parent":2,"fileIndex":null},{"name":"AgdaDependencies","parent":3,"fileIndex":null},{"name":"test","parent":4,"fileIndex":null},{"name":"Bool.agda","parent":5,"fileIndex":0},{"name":"Coinductive.agda","parent":5,"fileIndex":1},{"name":"Holes.agda","parent":5,"fileIndex":2},{"name":"List.agda","parent":5,"fileIndex":3},{"name":"Nat.agda","parent":5,"fileIndex":4},{"name":"Records.agda","parent":5,"fileIndex":5},{"name":"Test.agda","parent":5,"fileIndex":6},{"name":"Where.agda","parent":5,"fileIndex":7}],"moduleTree":[{"name":"Agda","parent":-1,"moduleIndex":null},{"name":"Primitive","parent":0,"moduleIndex":0},{"name":"Cubical","parent":1,"moduleIndex":1},{"name":"Bool","parent":-1,"moduleIndex":2},{"name":"Bool","parent":3,"moduleIndex":3},{"name":"Coinductive","parent":-1,"moduleIndex":4},{"name":"Stream","parent":5,"moduleIndex":5},{"name":"Holes","parent":-1,"moduleIndex":6},{"name":"List","parent":-1,"moduleIndex":7},{"name":"List","parent":8,"moduleIndex":8},{"name":"Nat","parent":-1,"moduleIndex":9},{"name":"Nat","parent":10,"moduleIndex":10},{"name":"Records","parent":-1,"moduleIndex":11},{"name":"Box","parent":12,"moduleIndex":12},{"name":"Point","parent":12,"moduleIndex":13},{"name":"Test","parent":-1,"moduleIndex":14},{"name":"Exp","parent":15,"moduleIndex":15},{"name":"Where","parent":-1,"moduleIndex":16},{"name":"_","parent":17,"moduleIndex":17},{"name":"_","parent":-1,"moduleIndex":18}],"entryModule":"Test","externalModules":"","searchIndex":{"names":["agda.primitive","agda.primitive.cubical","bool","bool.bool","coinductive","coinductive.stream","holes","list","list.list","nat","nat.nat","records","records.box","records.point","test","test.exp","where","where._","_","holes.magic","where._.go","list.list.[]","test.map","test._++_","holes.unsolved#meta.3","nat._-_","records.point.x","holes.incomplete","coinductive.mapsuc","list.list._∷_","test.exp.var","records.box","test.sum","where._.sq","records.mkpoint","records.box.contents","bool.bool.false","coinductive.stream.constructor","nat.nat.suc","holes.usemagic","test.exp.int","test.eval","records.sumcoords","coinductive.zeros","coinductive.stream.head","test.plus-1","nat._*_","list._∷_-1","records.point","nat.suc-0","bool.bool","coinductive.stream","where._.bump","list._∷_-0","records.box.count","records.double","where.sumsquares","records.origin","list.list","where.weirdsum","nat.nat","bool.bool.true","test.plus-0","records.box.constructor","coinductive.stream.tail","test.exp","nat._\u003c_","nat._==_","nat._+_","records.point.constructor","test.exp.plus","nat.nat.zero","test.int-0","test.eval\u0027","test.var-0","records.point.y"],"kinds":"AAAAAAAAAAAAAAAAAAAAAAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ==","bigrams":{"#m":[24],"*_":[46],"++":[23],"+_":[23,68],"-0":[49,53,62,72,74],"-1":[45,47],"-_":[25],".3":[24],".[":[21],"._":[17,20,23,25,29,33,46,47,52,53,66,67,68],".b":[3,12,31,35,36,50,52,54,61,63],".c":[1,35,37,54,63,69],".d":[55],".e":[15,30,40,41,65,70,73],".f":[36],".g":[20],".h":[44],".i":[27,40,72],".l":[8,21,29,58],".m":[19,22,28,34],".n":[10,38,60,71],".o":[57],".p":[0,1,13,26,45,48,62,69,70,75],".s":[5,32,33,37,38,42,44,49,51,56,64],".t":[61,64],".u":[24,39],".v":[30,74],".w":[59],".x":[26],".y":[75],".z":[43,71],"\u003c_":[66],"==":[67],"=_":[67],"[]":[21],"_*":[46],"_+":[23,68],"_-":[25,47,53],"_.":[20,33,52],"_\u003c":[66],"_=":[67],"_∷":[29,47,53],"a.":[0,1,24],"ad":[44],"ag":[0,1,19,39],"ai":[64],"al":[1,36,41,73],"am":[5,37,44,51,64],"ap":[22,28],"ar":[30,56,74],"at":[9,10,25,38,46,49,60,66,67,68,71],"bi":[1],"bl":[55],"bo":[2,3,12,31,35,36,50,54,61,63],"bu":[52],"c-":[49],"ca":[1],"co":[4,5,11,12,13,26,27,28,31,34,35,37,42,43,44,48,51,54,55,57,63,64,69,75],"ct":[4,5,28,37,43,44,51,63,64,69],"cu":[1],"d#":[24],"da":[0,1],"do":[55],"ds":[11,12,13,26,31,34,35,42,48,54,55,57,59,63,69,75],"du":[4,5,28,37,43,44,51,64],"e.":[1,5,17,20,28,33,37,43,44,51,52,56,59,64],"ea":[5,37,44,51,64],"ec":[11,12,13,26,31,34,35,42,48,54,55,57,63,69,75],"ed":[24],"ei":[59],"em":[39],"en":[35],"er":[16,17,20,33,43,52,56,59,71],"es":[6,14,15,19,22,23,24,27,30,32,39,40,41,45,56,62,65,70,72,73,74],"et":[24,27],"ev":[41,73],"ex":[15,30,40,65,70],"fa":[36],"gd":[0,1],"gi":[19,39,57],"go":[20],"he":[16,17,20,33,44,52,56,59],"ho":[6,19,24,27,39],"ic":[1,19,39],"ig":[57],"il":[64],"im":[0,1],"in":[4,5,13,26,27,28,34,37,40,43,44,48,51,57,64,69,72,75],"ir":[59],"is":[7,8,21,29,47,53,58],"it":[0,1],"iv":[0,1,4,5,28,37,43,44,51,64],"kp":[34],"l\u0027":[73],"l.":[3,36,50,61],"le":[6,19,24,27,39,55],"li":[7,8,21,29,47,53,58],"ls":[36],"lu":[45,62,70],"lv":[24],"m.":[37,44,64],"ma":[19,22,28,39],"mc":[42],"me":[24],"mi":[0,1],"mk":[34],"mp":[27,52],"ms":[56],"na":[9,10,25,38,46,49,60,66,67,68,71],"nc":[27],"nd":[4,5,28,37,43,44,51,64],"ns":[24,37,63,69],"nt":[13,26,34,35,40,48,54,69,72,75],"oi":[4,5,13,26,28,34,37,43,44,48,51,64,69,75],"ol":[2,3,6,19,24,27,36,39,50,61],"om":[27],"on":[35,37,63,69],"oo":[2,3,36,42,50,61],"or":[11,12,13,26,31,34,35,37,42,48,54,55,57,63,69,75],"os":[43],"ou":[54,55],"ox":[12,31,35,54,63],"p.":[30,40,70],"pl":[27,45,62,70],"po":[13,26,34,48,69,75],"pr":[0,1],"ps":[28],"qu":[56],"r-":[74],"rd":[11,12,13,26,31,34,35,42,48,54,55,57,59,63,69,75],"re":[5,11,12,13,16,17,20,26,31,33,34,35,37,42,44,48,51,52,54,55,56,57,59,63,64,69,75],"ri":[0,1,57],"ro":[43,71],"ru":[37,61,63,69],"s-":[45,62],"s.":[12,13,19,24,26,27,31,34,35,39,42,48,54,55,57,63,69,75],"se":[36,39],"so":[24],"sq":[33,56],"st":[5,7,8,14,15,21,22,23,29,30,32,37,40,41,44,45,47,51,53,58,62,63,64,65,69,70,72,73,74],"su":[28,32,38,42,49,56,59],"t-":[72],"t.":[8,10,15,21,22,23,25,26,29,30,32,38,40,41,45,46,47,49,53,58,60,62,65,66,67,68,69,70,71,72,73,74,75],"ta":[24,64],"te":[14,15,22,23,27,30,32,35,40,41,45,62,65,70,72,73,74],"ti":[0,1,4,5,28,37,43,44,51,64],"to":[37,63,69],"tr":[5,37,44,51,61,63,64,69],"ts":[35],"ua":[56],"ub":[1,55],"uc":[4,5,28,37,38,43,44,49,51,63,64,69],"ue":[61],"um":[32,42,52,56,59],"un":[24,54],"us":[39,45,62,70],"va":[30,41,73,74],"ve":[0,1,4,5,24,28,37,43,44,51,64],"we":[59],"wh":[16,17,20,33,52,56,59],"x.":[35,54,63],"xp":[15,30,40,65,70],"ze":[43,71],"∷_":[29,47,53]}}};
+var GRAPH_URL = null;
+var SNIPPETS_BASE = null;
+var MODULES_BASE = null;
+
+/* ── Decoder helpers ─────────────────────────────────────────────────── */
+function b64ToBytes(b64) {
+  var bin = atob(b64), out = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64ToInt32(b64)   { return new Int32Array(b64ToBytes(b64).buffer); }
+function b64ToInt8(b64)    { return new Int8Array (b64ToBytes(b64).buffer); }
+function b64ToFloat32(b64) { return new Float32Array(b64ToBytes(b64).buffer); }
+
+/* ── Graph loading ───────────────────────────────────────────────────── */
+async function loadGraph() {
+  if (LAZY) {
+    var r = await fetch(GRAPH_URL);
+    return await r.json();
+  }
+  return GRAPH;
+}
+
+async function loadAllModuleDetails(g) {
+  if (!g.moduleFiles) return {};
+  var entries = Object.keys(g.moduleFiles);
+  var results = {};
+  await Promise.all(entries.map(async function(modName) {
+    try {
+      var r = await fetch(g.moduleFiles[modName]);
+      results[modName] = await r.json();
+    } catch(e) { results[modName] = null; }
+  }));
+  return results;
+}
+
+/* ── Snippet loading ─────────────────────────────────────────────────── */
+var snippetCache = Object.create(null);
+
+async function loadSnippetBundle(g, modName) {
+  if (snippetCache[modName] !== undefined) return snippetCache[modName];
+  if (!g.bundleFiles || !g.bundleFiles[modName]) { snippetCache[modName] = null; return null; }
+  try {
+    var r = await fetch(g.bundleFiles[modName]);
+    var b = await r.json();
+    snippetCache[modName] = b;
+    return b;
+  } catch(e) { snippetCache[modName] = null; return null; }
+}
+
+/* ── Escape HTML ─────────────────────────────────────────────────────── */
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ── State helpers ───────────────────────────────────────────────────── */
+var STATE_NAMES  = ['Defined','Postulate','Hole','Failed'];
+var STATE_COLORS = ['var(--c-defined)','var(--c-postulate)','var(--c-hole)','var(--c-failed)'];
+var STATE_BADGE_CLASSES = ['nd-badge-defined','nd-badge-postulate','nd-badge-hole','nd-badge-failed'];
+
+function stateName(s)  { return STATE_NAMES[s] || 'Unknown'; }
+function stateColor(s) { return STATE_COLORS[s] || 'var(--text-dim)'; }
+
+/* ── Main app state ──────────────────────────────────────────────────── */
+var appG        = null;   // raw graph JSON
+var appDetails  = null;   // module name → detail JSON (lazy mode)
+var appDefs     = null;   // decoded: {names, modules, states, outOffsets, outTargets, inOffsets, inTargets}
+var appModules  = null;   // string[]
+var appExternal = null;   // Set<string>
+
+var showExternals = true;
+var currentSort   = 'alpha';
+
+/* ── Decode inline defs ──────────────────────────────────────────────── */
+function decodeInlineDefs(g) {
+  var d = g.defs;
+  var e = g.edges;
+  if (!d) return null;
+  return {
+    names:      d.names,
+    mods:       b64ToInt32(d.modules),
+    states:     b64ToInt8(d.states),
+    outOffsets: b64ToInt32(e.outOffsets),
+    outTargets: b64ToInt32(e.outTargets),
+    inOffsets:  b64ToInt32(e.inOffsets),
+    inTargets:  b64ToInt32(e.inTargets)
+  };
+}
+
+/* Merge detail defs into a flat structure mirroring inline format */
+function buildDefsFromDetails(g, details) {
+  /* Collect all defs: {name, modIdx, state, outGlobal, inGlobal (computed later)} */
+  var allNames  = [];
+  var allMods   = [];
+  var allStates = [];
+  /* We'll build CSR-like adjacency per-def. For detail mode,
+     outEdges are [localIdx, tgtGlobalIdx, tgtModIdx] — but tgtGlobalIdx is
+     index into *that module's* defs array plus a module offset.
+     Since we're laying all defs flat, compute globalIdx as moduleOffset + local. */
+  var moduleOffset = {}; // modName → start index in allNames
+  var modList = g.modules;
+
+  /* Pass 1: lay out all defs per module (in order of g.modules) */
+  modList.forEach(function(modName) {
+    moduleOffset[modName] = allNames.length;
+    var det = details[modName];
+    if (!det || !det.defs) return;
+    var detDefs = det.defs;
+    var names  = detDefs.names  || [];
+    var states = b64ToInt8(detDefs.states || '');
+    for (var i = 0; i < names.length; i++) {
+      allNames.push(names[i]);
+      allMods.push(modList.indexOf(modName));
+      allStates.push(states[i] || 0);
+    }
+  });
+
+  var N = allNames.length;
+  var outLists = new Array(N).fill(null).map(function(){ return []; });
+  var inLists  = new Array(N).fill(null).map(function(){ return []; });
+
+  /* Pass 2: wire edges */
+  modList.forEach(function(modName) {
+    var offset = moduleOffset[modName];
+    var det = details[modName];
+    if (!det || !det.outEdges) return;
+    det.outEdges.forEach(function(e) {
+      /* e = [localSrc, tgtGlobalIdx, tgtModIdx] */
+      var srcGlobal = offset + e[0];
+      var tgtModName = modList[e[2]];
+      var tgtGlobal  = (moduleOffset[tgtModName] || 0) + e[1];
+      if (srcGlobal < N && tgtGlobal < N) {
+        outLists[srcGlobal].push(tgtGlobal);
+        inLists[tgtGlobal].push(srcGlobal);
+      }
+    });
+  });
+
+  return {
+    names:  allNames,
+    mods:   new Int32Array(allMods),
+    states: new Int8Array(allStates),
+    outLists: outLists,
+    inLists:  inLists,
+    useLists: true
+  };
+}
+
+function defOutNeighbors(defs, i) {
+  if (defs.useLists) return defs.outLists[i] || [];
+  var start = defs.outOffsets[i], end = defs.outOffsets[i+1];
+  var out = [];
+  for (var j = start; j < end; j++) out.push(defs.outTargets[j]);
+  return out;
+}
+function defInNeighbors(defs, i) {
+  if (defs.useLists) return defs.inLists[i] || [];
+  var start = defs.inOffsets[i], end = defs.inOffsets[i+1];
+  var out = [];
+  for (var j = start; j < end; j++) out.push(defs.inTargets[j]);
+  return out;
+}
+
+/* ── Build per-module def index (modName → [defIdx]) ─────────────────── */
+function buildModuleDefIndex(g, defs) {
+  var index = {};
+  g.modules.forEach(function(m){ index[m] = []; });
+  var N = defs.names.length;
+  for (var i = 0; i < N; i++) {
+    var modName = g.modules[defs.mods[i]];
+    if (modName !== undefined) {
+      if (!index[modName]) index[modName] = [];
+      index[modName].push(i);
+    }
+  }
+  return index;
+}
+
+/* ── Module import maps (from moduleEdges) ────────────────────────────── */
+function buildModImportMaps(g) {
+  var imports   = {}; // modName → Set<modName>
+  var importedBy = {};
+  g.modules.forEach(function(m){ imports[m] = new Set(); importedBy[m] = new Set(); });
+  (g.moduleEdges || []).forEach(function(e) {
+    var src = g.modules[e[0]], tgt = g.modules[e[1]];
+    if (src && tgt) { imports[src].add(tgt); importedBy[tgt].add(src); }
+  });
+  return { imports: imports, importedBy: importedBy };
+}
+
+/* ── Topo-sort modules by depth (uses g.moduleDepth) ─────────────────── */
+function sortedModuleIndices(g, sortMode) {
+  var depths = g.moduleDepth ? b64ToInt32(g.moduleDepth) : null;
+  var indices = g.modules.map(function(_, i){ return i; });
+
+  if (sortMode === 'alpha') {
+    indices.sort(function(a,b){ return g.modules[a].localeCompare(g.modules[b]); });
+  } else if (sortMode === 'topo' && depths) {
+    indices.sort(function(a,b){
+      var da = depths[a] < 0 ? 9999 : depths[a];
+      var db = depths[b] < 0 ? 9999 : depths[b];
+      if (da !== db) return da - db;
+      return g.modules[a].localeCompare(g.modules[b]);
+    });
+  } else if (sortMode === 'count') {
+    /* will be refined after modDefIndex is built; fall back to alpha */
+    indices.sort(function(a,b){ return g.modules[a].localeCompare(g.modules[b]); });
+  }
+  return indices;
+}
+
+/* ── External set ────────────────────────────────────────────────────── */
+function buildExternalSet(g) {
+  var s = new Set();
+  if (g.externalModules) {
+    var arr = b64ToInt32(g.externalModules);
+    for (var i = 0; i < arr.length; i++) {
+      if (arr[i] !== 0) s.add(g.modules[i]);
+    }
+  }
+  return s;
+}
+
+/* ── moduleStateCounts helper ────────────────────────────────────────── */
+function getModuleStateCounts(g, modIdx) {
+  var sc = g.moduleStateCounts;
+  if (!sc || !sc[modIdx]) return [0,0,0,0];
+  return sc[modIdx];
+}
+
+/* ── Render mix bar ───────────────────────────────────────────────────── */
+function renderMixBar(counts) {
+  var total = counts[0] + counts[1] + counts[2] + counts[3];
+  if (total === 0) return '';
+  var segs = '';
+  var labels = ['defined','postulate','hole','failed'];
+  for (var i = 0; i < 4; i++) {
+    if (counts[i] > 0) {
+      var pct = (counts[i]/total*100).toFixed(1);
+      segs += '<div class="nd-mix-seg" style="flex:' + pct + ';background:var(--c-' + labels[i] + ')"></div>';
+    }
+  }
+  return '<div class="nd-mix-bar">' + segs + '</div>';
+}
+
+/* ── Render module section ────────────────────────────────────────────── */
+function renderModuleSection(g, modIdx, modDefIndex, modImports, snippetBundles) {
+  var modName  = g.modules[modIdx];
+  var isExt    = appExternal.has(modName);
+  var isEntry  = (g.entryModule === modName);
+  var counts   = getModuleStateCounts(g, modIdx);
+  var defsIdxs = modDefIndex[modName] || [];
+  var imports  = modImports.imports[modName]   || new Set();
+  var iby      = modImports.importedBy[modName] || new Set();
+
+  /* badges */
+  var badges = '';
+  if (isEntry)  badges += '<span class="nd-badge nd-badge-entry">Entry</span>';
+  if (isExt)    badges += '<span class="nd-badge nd-badge-external">External</span>';
+  if (counts[0]) badges += '<span class="nd-badge nd-badge-defined">' + counts[0] + ' Defined</span>';
+  if (counts[1]) badges += '<span class="nd-badge nd-badge-postulate">' + counts[1] + ' Postulate</span>';
+  if (counts[2]) badges += '<span class="nd-badge nd-badge-hole">' + counts[2] + ' Hole</span>';
+  if (counts[3]) badges += '<span class="nd-badge nd-badge-failed">' + counts[3] + ' Failed</span>';
+
+  /* import links */
+  function modLink(mn) {
+    var ext = appExternal.has(mn);
+    return '<span class="nd-mod-link' + (ext ? ' nd-ext' : '') + '" data-scrollmod="' + esc(mn) + '">' + esc(mn) + '</span>';
+  }
+
+  var linksHtml = '';
+  if (imports.size) {
+    var impArr = Array.from(imports).sort();
+    linksHtml += '<div class="nd-module-links-row"><span class="nd-links-label">Imports</span> ' + impArr.map(modLink).join('<span style="color:var(--border-mid);margin:0 2px">·</span>') + '</div>';
+  }
+  if (iby.size) {
+    var ibyArr = Array.from(iby).sort();
+    linksHtml += '<div class="nd-module-links-row"><span class="nd-links-label">Imported by</span> ' + ibyArr.map(modLink).join('<span style="color:var(--border-mid);margin:0 2px">·</span>') + '</div>';
+  }
+
+  var extBanner = isExt ? '<div class="nd-ext-banner">Standard library / external package — definition bodies may not be available.</div>' : '';
+
+  /* defs */
+  var defsHtml = '';
+  if (defsIdxs.length) {
+    var defItems = defsIdxs.map(function(di) {
+      return renderDef(g, di, modName, isExt, snippetBundles);
+    }).join('');
+    defsHtml = '<div class="nd-defs-heading">Definitions (' + defsIdxs.length + ')</div>'
+             + '<div class="nd-def-list">' + defItems + '</div>';
+  }
+
+  return '<div class="nd-module-section" id="nd-mod-' + esc(modName) + '" data-module="' + esc(modName) + '">'
+    + '<div class="nd-module-header">'
+    + '<div class="nd-module-name-row">'
+    + '<div class="nd-module-name' + (isExt ? ' nd-ext-name' : '') + '">' + esc(modName) + '</div>'
+    + '<div class="nd-badges">' + badges + '</div>'
+    + '</div>'
+    + renderMixBar(counts)
+    + '<div class="nd-module-links">' + linksHtml + '</div>'
+    + extBanner
+    + '</div>'
+    + defsHtml
+    + '</div>';
+}
+
+/* ── Render a single def block ────────────────────────────────────────── */
+function renderDef(g, defIdx, modName, modIsExt, snippetBundles) {
+  var defs    = appDefs;
+  var name    = defs.names[defIdx];
+  var state   = defs.states[defIdx];
+  var outs    = defOutNeighbors(defs, defIdx);
+  var ins     = defInNeighbors(defs, defIdx);
+  var defId   = 'nd-def-' + modName + '.' + name;
+
+  /* source snippet */
+  var sourceHtml = '';
+  if (WITH_SOURCE) {
+    var bundle = snippetBundles ? snippetBundles[modName] : null;
+    var snippet = null;
+    if (bundle) {
+      snippet = bundle[String(defIdx)] || null;
+      /* also try by name */
+      if (!snippet) snippet = bundle[name] || null;
+    }
+    if (snippet && snippet.source) {
+      /* source is either plain text or HTML fragment with Agda highlighting */
+      var src = snippet.source;
+      var isHtml = src.indexOf('<') !== -1;
+      sourceHtml = '<div class="nd-def-source">' + (isHtml
+        ? '<div class="Agda" style="padding:12px 14px;overflow-x:auto;font-size:12.5px;line-height:1.75">' + src + '</div>'
+        : '<pre>' + esc(src) + '</pre>')
+        + '</div>';
+    } else {
+      sourceHtml = '<div class="nd-def-source"><div class="nd-no-source">Source not available for this definition.</div></div>';
+    }
+  } else {
+    sourceHtml = '<div class="nd-def-source"><div class="nd-no-source">Build with <code>--with-source</code> to see highlighted source.</div></div>';
+  }
+
+  /* dep lists */
+  function depItem(di, direction) {
+    var dn    = defs.names[di];
+    var dm    = g.modules[defs.mods[di]];
+    var ds    = defs.states[di];
+    var isExt = dm ? appExternal.has(dm) : false;
+    var fullName = (dm || '') + '.' + dn;
+    return '<div class="nd-dep-item">'
+      + '<div class="nd-dep-dot" style="background:' + stateColor(ds) + '"></div>'
+      + '<span class="nd-dep-link' + (isExt ? ' nd-ext-ref' : '') + '"'
+      + (isExt ? '' : ' data-navdef="' + esc(fullName) + '"')
+      + '>' + esc(fullName) + '</span>'
+      + '</div>';
+  }
+
+  var outsHtml = outs.length === 0
+    ? '<div class="nd-dep-empty">None</div>'
+    : outs.map(function(di){ return depItem(di, 'out'); }).join('');
+  var insHtml  = ins.length  === 0
+    ? '<div class="nd-dep-empty">None</div>'
+    : ins.map(function(di){ return depItem(di, 'in'); }).join('');
+
+  /* pill badge label */
+  var stateLabels = ['Def','Post','Hole','Fail'];
+  var stateLabel = stateLabels[state] || '';
+
+  return '<div class="nd-def-block nd-sb-' + state + '" id="' + esc(defId) + '" data-defname="' + esc(modName + '.' + name) + '">'
+    + '<div class="nd-def-summary">'
+    + '<div class="nd-def-chevron"><svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M3 2l4 3-4 3V2z"/></svg></div>'
+    + '<div class="nd-def-state-bar nd-state-' + state + '"></div>'
+    + '<div class="nd-def-name">' + esc(name) + '</div>'
+    + '<div class="nd-def-pills">'
+    + '<span class="nd-pill-badge ' + STATE_BADGE_CLASSES[state] + '" style="font-size:10px;padding:1px 6px">' + esc(stateLabel) + '</span>'
+    + '<span class="nd-pill' + (outs.length===0?' nd-zero':'') + '">&#8599; ' + outs.length + '</span>'
+    + '<span class="nd-pill' + (ins.length===0?' nd-zero':'') + '">&#8600; ' + ins.length + '</span>'
+    + '</div>'
+    + '</div>'
+    + '<div class="nd-def-body">'
+    + sourceHtml
+    + '<div class="nd-def-deps-grid">'
+    + '<div><div class="nd-dep-col-label">Depends on (' + outs.length + ')</div><div class="nd-dep-list">' + outsHtml + '</div></div>'
+    + '<div><div class="nd-dep-col-label">Used by (' + ins.length + ')</div><div class="nd-dep-list">' + insHtml + '</div></div>'
+    + '</div>'
+    + '</div>'
+    + '</div>';
+}
+
+/* ── Build page header ───────────────────────────────────────────────── */
+function buildPageHeader(g) {
+  var mods = g.modules;
+  var extSet = appExternal;
+  var internalCount = mods.filter(function(m){ return !extSet.has(m); }).length;
+  var defs = appDefs;
+  var N = defs ? defs.names.length : 0;
+
+  var nDef = 0, nPost = 0, nHole = 0, nFail = 0;
+  if (defs) {
+    for (var i = 0; i < N; i++) {
+      var s = defs.states[i];
+      if (s===0) nDef++; else if (s===1) nPost++; else if (s===2) nHole++; else if (s===3) nFail++;
+    }
+  }
+
+  var entryName = g.entryModule || 'agda-deps';
+
+  return '<div class="nd-page-header">'
+    + (g.entryModule ? '<div class="nd-entry-tag">Entry module</div>' : '')
+    + '<h1 class="nd-page-title">' + esc(entryName) + '</h1>'
+    + '<p class="nd-page-subtitle">Dependency document — all modules, definitions, and cross-references</p>'
+    + '<div class="nd-page-stats">'
+    + '<div class="nd-stat-chip"><div class="nd-stat-dot" style="background:#6366f1"></div>' + internalCount + ' modules</div>'
+    + '<div class="nd-stat-chip"><div class="nd-stat-dot" style="background:var(--c-defined)"></div>' + nDef + ' defined</div>'
+    + (nPost ? '<div class="nd-stat-chip"><div class="nd-stat-dot" style="background:var(--c-postulate)"></div>' + nPost + ' postulate' + (nPost!==1?'s':'') + '</div>' : '')
+    + (nHole ? '<div class="nd-stat-chip"><div class="nd-stat-dot" style="background:var(--c-hole)"></div>' + nHole + ' hole' + (nHole!==1?'s':'') + '</div>' : '')
+    + (nFail ? '<div class="nd-stat-chip"><div class="nd-stat-dot" style="background:var(--c-failed)"></div>' + nFail + ' failed</div>' : '')
+    + '<div class="nd-stat-chip"><div class="nd-stat-dot" style="background:var(--text-dim)"></div>' + N + ' total defs</div>'
+    + '</div>'
+    + '</div>'
+    + '<div id="nd-module-list"></div>';
+}
+
+/* ── Build content area ───────────────────────────────────────────────── */
+function buildContent(g, modDefIndex, modImports, snippetBundles) {
+  var mods   = g.modules;
+  var modIdxs = sortedModuleIndices(g, currentSort);
+
+  /* refine count sort */
+  if (currentSort === 'count') {
+    modIdxs.sort(function(a,b){
+      var ca = (modDefIndex[mods[a]] || []).length;
+      var cb = (modDefIndex[mods[b]] || []).length;
+      if (ca !== cb) return cb - ca;
+      return mods[a].localeCompare(mods[b]);
+    });
+  }
+
+  var internalIdx = modIdxs.filter(function(i){ return !appExternal.has(mods[i]); });
+  var externalIdx = modIdxs.filter(function(i){ return  appExternal.has(mods[i]); });
+
+  var html = '';
+  internalIdx.forEach(function(i, pos) {
+    html += renderModuleSection(g, i, modDefIndex, modImports, snippetBundles);
+    if (pos < internalIdx.length - 1) html += '<hr class="nd-module-divider"/>';
+  });
+
+  if (showExternals && externalIdx.length) {
+    html += '<div class="nd-ext-section-header">'
+      + '<h2>External Dependencies</h2>'
+      + '<p>These modules come from the Agda standard library or other installed packages.</p>'
+      + '</div>';
+    externalIdx.forEach(function(i, pos) {
+      html += renderModuleSection(g, i, modDefIndex, modImports, snippetBundles);
+      if (pos < externalIdx.length - 1) html += '<hr class="nd-module-divider"/>';
+    });
+  }
+
+  return html;
+}
+
+/* ── TOC builder ─────────────────────────────────────────────────────── */
+function buildToc(g, modDefIndex) {
+  var mods    = g.modules;
+  var modIdxs = sortedModuleIndices(g, currentSort);
+  if (currentSort === 'count') {
+    modIdxs.sort(function(a,b){
+      var ca = (modDefIndex[mods[a]] || []).length;
+      var cb = (modDefIndex[mods[b]] || []).length;
+      if (ca !== cb) return cb - ca;
+      return mods[a].localeCompare(mods[b]);
+    });
+  }
+
+  var internalIdx = modIdxs.filter(function(i){ return !appExternal.has(mods[i]); });
+  var externalIdx = modIdxs.filter(function(i){ return  appExternal.has(mods[i]); });
+
+  /* Use moduleTree if available for grouping, otherwise derive from names */
+  var html = '';
+
+  if (g.moduleTree && g.moduleTree.length > 0) {
+    html += buildTocFromTree(g, internalIdx);
+  } else {
+    html += buildTocFlatGrouped(g, internalIdx);
+  }
+
+  /* external section */
+  if (showExternals && externalIdx.length) {
+    html += '<div class="nd-ext-label">External</div>';
+    externalIdx.forEach(function(i) {
+      var m = mods[i];
+      html += '<span class="nd-toc-link nd-top-link nd-external" data-tocmod="' + esc(m) + '" title="' + esc(m) + '">' + esc(m) + '</span>';
+    });
+  }
+
+  document.getElementById('nd-toc').innerHTML = html;
+
+  /* group toggle */
+  document.querySelectorAll('.nd-toc-folder-label').forEach(function(label) {
+    label.addEventListener('click', function() {
+      label.closest('.nd-toc-folder').classList.toggle('nd-open');
+    });
+  });
+
+  /* click → scroll */
+  document.querySelectorAll('[data-tocmod]').forEach(function(el) {
+    el.addEventListener('click', function() {
+      scrollToModule(el.dataset.tocmod);
+    });
+  });
+
+  /* auto-open entry parent chain */
+  if (g.entryModule) {
+    var entryLink = document.querySelector('[data-tocmod="' + CSS.escape(g.entryModule) + '"]');
+    if (entryLink) {
+      var folder = entryLink.closest('.nd-toc-folder');
+      while (folder) { folder.classList.add('nd-open'); folder = folder.parentElement && folder.parentElement.closest('.nd-toc-folder'); }
+      setTimeout(function(){ entryLink.scrollIntoView({ block: 'nearest' }); }, 100);
+    }
+  }
+
+  setupScrollSpy();
+}
+
+function buildTocFromTree(g, internalIdx) {
+  /* moduleTree: [{name, parent: idx|-1, moduleIndex: idx|null}] */
+  var tree = g.moduleTree;
+  var internalSet = new Set(internalIdx.map(function(i){ return g.modules[i]; }));
+  /* We only render tree nodes whose module is internal, or folders that have internal descendants */
+  /* Build children map */
+  var children = {};
+  tree.forEach(function(node, ni) {
+    var pidx = node.parent;
+    if (pidx === -1 || pidx === null) { if (!children[-1]) children[-1] = []; children[-1].push(ni); }
+    else { if (!children[pidx]) children[pidx] = []; children[pidx].push(ni); }
+  });
+
+  function hasInternalDesc(ni) {
+    var node = tree[ni];
+    if (node.moduleIndex !== null && internalSet.has(g.modules[node.moduleIndex])) return true;
+    var ch = children[ni] || [];
+    return ch.some(function(c){ return hasInternalDesc(c); });
+  }
+
+  function renderNode(ni, depth) {
+    var node = tree[ni];
+    var ch   = (children[ni] || []).filter(hasInternalDesc);
+    var lastSeg = node.name.split('.').pop();
+
+    if (node.moduleIndex !== null) {
+      /* real module */
+      var modName = g.modules[node.moduleIndex];
+      if (!internalSet.has(modName)) return '';
+      var isEntry = (g.entryModule === modName);
+      var indent = depth > 0 ? 'padding-left:' + (16 + depth * 12) + 'px' : '';
+      var entryStyle = isEntry ? 'font-weight:600;' : '';
+
+      if (ch.length === 0) {
+        /* leaf module */
+        return '<span class="nd-toc-link" data-tocmod="' + esc(modName) + '" title="' + esc(modName) + '" style="' + indent + entryStyle + '">' + esc(lastSeg) + '</span>';
+      } else {
+        /* module that also has children: folder + own entry */
+        var childrenHtml = ch.map(function(c){ return renderNode(c, depth+1); }).join('');
+        var countHtml = '<span class="nd-toc-count">(' + countInternalDesc(ni) + ')</span>';
+        return '<div class="nd-toc-folder">'
+          + '<div class="nd-toc-folder-label" style="' + (depth>0?'padding-left:'+(16+depth*12)+'px':'') + '">'
+          + '<span class="nd-toc-chevron">▶</span>' + esc(lastSeg) + countHtml
+          + '</div>'
+          + '<div class="nd-toc-folder-children">'
+          + '<span class="nd-toc-link" data-tocmod="' + esc(modName) + '" title="' + esc(modName) + '" style="' + (depth>0?'padding-left:'+(16+(depth+1)*12)+'px':'') + entryStyle + '">' + esc(lastSeg) + ' (self)</span>'
+          + childrenHtml
+          + '</div>'
+          + '</div>';
+      }
+    } else {
+      /* pure folder */
+      if (ch.length === 0) return '';
+      var childrenHtml = ch.map(function(c){ return renderNode(c, depth+1); }).join('');
+      var countHtml = '<span class="nd-toc-count">(' + countInternalDesc(ni) + ')</span>';
+      return '<div class="nd-toc-folder nd-open">'
+        + '<div class="nd-toc-folder-label" style="' + (depth>0?'padding-left:'+(16+depth*12)+'px':'') + '">'
+        + '<span class="nd-toc-chevron">▶</span>' + esc(lastSeg) + countHtml
+        + '</div>'
+        + '<div class="nd-toc-folder-children">' + childrenHtml + '</div>'
+        + '</div>';
+    }
+  }
+
+  function countInternalDesc(ni) {
+    var node = tree[ni];
+    var cnt = (node.moduleIndex !== null && internalSet.has(g.modules[node.moduleIndex])) ? 1 : 0;
+    (children[ni]||[]).forEach(function(c){ cnt += countInternalDesc(c); });
+    return cnt;
+  }
+
+  var roots = (children[-1] || []).filter(hasInternalDesc);
+  return roots.map(function(ni){ return renderNode(ni, 0); }).join('');
+}
+
+function buildTocFlatGrouped(g, internalIdx) {
+  var mods = g.modules;
+  /* group by top-level prefix */
+  var topLevel = [];
+  var groups   = {};
+
+  internalIdx.forEach(function(i) {
+    var m = mods[i];
+    var parts = m.split('.');
+    if (parts.length === 1) {
+      topLevel.push(i);
+    } else {
+      var prefix = parts[0];
+      if (!groups[prefix]) groups[prefix] = [];
+      groups[prefix].push(i);
+    }
+  });
+
+  var html = '';
+  topLevel.forEach(function(i) {
+    var m = mods[i];
+    var isEntry = g.entryModule === m;
+    html += '<span class="nd-toc-link nd-top-link" data-tocmod="' + esc(m) + '" style="' + (isEntry?'font-weight:600':'') + '">' + esc(m) + '</span>';
+  });
+
+  Object.keys(groups).sort().forEach(function(prefix) {
+    var grpMods = groups[prefix];
+    html += '<div class="nd-toc-folder nd-open">'
+      + '<div class="nd-toc-folder-label"><span class="nd-toc-chevron">▶</span>' + esc(prefix) + '<span class="nd-toc-count">(' + grpMods.length + ')</span></div>'
+      + '<div class="nd-toc-folder-children">';
+    grpMods.forEach(function(i) {
+      var m = mods[i];
+      var short = m.slice(prefix.length + 1);
+      var isEntry = g.entryModule === m;
+      html += '<span class="nd-toc-link" data-tocmod="' + esc(m) + '" title="' + esc(m) + '" style="' + (isEntry?'font-weight:600':'') + '">' + esc(short) + '</span>';
+    });
+    html += '</div></div>';
+  });
+  return html;
+}
+
+/* ── Scroll utilities ────────────────────────────────────────────────── */
+function scrollToModule(modName) {
+  var el = document.getElementById('nd-mod-' + modName);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  /* brief highlight */
+  el.style.transition = 'background .3s';
+  el.style.background = 'var(--accent-bg)';
+  setTimeout(function(){ el.style.background = ''; }, 600);
+}
+
+function navigateToDef(fullName) {
+  /* fullName = modName.defName, stored as data-defname */
+  var el = document.querySelector('[data-defname="' + CSS.escape(fullName) + '"]');
+  if (!el) return;
+  el.classList.add('nd-open');
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('nd-flash');
+  void el.offsetWidth;
+  el.classList.add('nd-flash');
+  el.addEventListener('animationend', function(){ el.classList.remove('nd-flash'); }, { once: true });
+}
+
+/* ── Scroll spy ──────────────────────────────────────────────────────── */
+function setupScrollSpy() {
+  var sections = document.querySelectorAll('.nd-module-section');
+  if (!sections.length) return;
+  var toolbarH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-h')) || 52;
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        var name = entry.target.dataset.module;
+        document.querySelectorAll('#nd-toc [data-tocmod]').forEach(function(a){
+          a.classList.toggle('nd-active', a.dataset.tocmod === name);
+        });
+        var active = document.querySelector('#nd-toc [data-tocmod="' + CSS.escape(name) + '"]');
+        if (active) {
+          var folder = active.closest('.nd-toc-folder');
+          if (folder) folder.classList.add('nd-open');
+          active.scrollIntoView({ block: 'nearest' });
+        }
+      }
+    });
+  }, { rootMargin: '-' + toolbarH + 'px 0px -60% 0px' });
+  sections.forEach(function(s){ observer.observe(s); });
+}
+
+/* ── Attach interactive listeners ────────────────────────────────────── */
+function attachListeners() {
+  /* def expand/collapse */
+  document.querySelectorAll('.nd-def-summary').forEach(function(el) {
+    el.addEventListener('click', function() {
+      el.closest('.nd-def-block').classList.toggle('nd-open');
+    });
+  });
+
+  /* def cross-references */
+  document.querySelectorAll('.nd-dep-link[data-navdef]').forEach(function(el) {
+    el.addEventListener('click', function() { navigateToDef(el.dataset.navdef); });
+  });
+
+  /* module links */
+  document.querySelectorAll('.nd-mod-link[data-scrollmod]').forEach(function(el) {
+    el.addEventListener('click', function() { scrollToModule(el.dataset.scrollmod); });
+  });
+}
+
+/* ── Search ──────────────────────────────────────────────────────────── */
+var searchTimer = null;
+document.getElementById('nd-search').addEventListener('input', function(e) {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(function(){ runSearch(e.target.value.trim().toLowerCase()); }, 80);
+});
+
+function runSearch(q) {
+  if (!q) { clearSearch(); return; }
+
+  /* filter module sections */
+  document.querySelectorAll('.nd-module-section').forEach(function(sec) {
+    var modName = sec.dataset.module.toLowerCase();
+    var defNames = Array.from(sec.querySelectorAll('.nd-def-name')).map(function(n){ return n.textContent.toLowerCase(); });
+    var match = modName.includes(q) || defNames.some(function(n){ return n.includes(q); });
+    sec.classList.toggle('nd-hidden', !match);
+
+    sec.querySelectorAll('.nd-module-name, .nd-def-name').forEach(function(el){ highlightText(el, q); });
+  });
+
+  /* filter TOC */
+  document.querySelectorAll('#nd-toc [data-tocmod]').forEach(function(a) {
+    var name = (a.dataset.tocmod || '').toLowerCase();
+    a.classList.toggle('nd-hidden', !name.includes(q));
+  });
+  document.querySelectorAll('#nd-toc .nd-toc-folder').forEach(function(g) {
+    var visible = g.querySelectorAll('[data-tocmod]:not(.nd-hidden)').length > 0;
+    g.classList.toggle('nd-hidden', !visible);
+  });
+}
+
+function clearSearch() {
+  document.querySelectorAll('.nd-module-section').forEach(function(sec) {
+    sec.classList.remove('nd-hidden');
+    sec.querySelectorAll('.nd-module-name, .nd-def-name').forEach(clearHighlight);
+  });
+  document.querySelectorAll('#nd-toc [data-tocmod], #nd-toc .nd-toc-folder').forEach(function(el){
+    el.classList.remove('nd-hidden');
+  });
+}
+
+function highlightText(el, q) {
+  var orig = el.dataset.orig || el.textContent;
+  el.dataset.orig = orig;
+  var lo = orig.toLowerCase();
+  var idx = lo.indexOf(q);
+  if (idx === -1) { el.innerHTML = esc(orig); return; }
+  el.innerHTML = esc(orig.slice(0, idx))
+    + '<mark>' + esc(orig.slice(idx, idx+q.length)) + '</mark>'
+    + esc(orig.slice(idx+q.length));
+}
+function clearHighlight(el) {
+  if (el.dataset.orig) { el.textContent = el.dataset.orig; delete el.dataset.orig; }
+}
+
+/* ── Toolbar events ──────────────────────────────────────────────────── */
+document.getElementById('nd-btn-expand').addEventListener('click', function() {
+  document.querySelectorAll('.nd-def-block').forEach(function(b){ b.classList.add('nd-open'); });
+});
+document.getElementById('nd-btn-collapse').addEventListener('click', function() {
+  document.querySelectorAll('.nd-def-block').forEach(function(b){ b.classList.remove('nd-open'); });
+});
+document.getElementById('nd-btn-externals').addEventListener('click', function() {
+  showExternals = !showExternals;
+  var btn = document.getElementById('nd-btn-externals');
+  btn.textContent = showExternals ? 'Externals ✓' : 'Externals';
+  btn.classList.toggle('nd-active', showExternals);
+  rebuildPage();
+});
+document.getElementById('nd-sort-select').addEventListener('change', function(e) {
+  currentSort = e.target.value;
+  rebuildPage();
+});
+
+/* ── Rebuild page (after sort/externals change) ───────────────────────── */
+function rebuildPage() {
+  var g   = appG;
+  var modImports = buildModImportMaps(g);
+  var modDefIndex = buildModuleDefIndex(g, appDefs);
+  var container = document.getElementById('nd-module-list');
+  if (container) {
+    container.innerHTML = buildContent(g, modDefIndex, modImports, window.__snippetBundles || null);
+    attachListeners();
+  }
+  buildToc(g, modDefIndex);
+}
+
+/* ── Main entry ──────────────────────────────────────────────────────── */
+async function main() {
+  var g = await loadGraph();
+  appG = g;
+
+  appExternal = buildExternalSet(g);
+
+  /* decode defs */
+  var details = null;
+  if (LAZY && g.moduleFiles) {
+    details = await loadAllModuleDetails(g);
+    appDetails = details;
+    appDefs = buildDefsFromDetails(g, details);
+  } else if (g.defs) {
+    appDefs = decodeInlineDefs(g);
+  } else {
+    appDefs = { names: [], mods: new Int32Array(0), states: new Int8Array(0),
+                outLists: [], inLists: [], useLists: true };
+  }
+
+  /* load snippets if WITH_SOURCE */
+  var snippetBundles = null;
+  if (WITH_SOURCE && g.bundleFiles) {
+    var modNames = Object.keys(g.bundleFiles);
+    snippetBundles = Object.create(null);
+    await Promise.all(modNames.map(async function(mn) {
+      try {
+        var r = await fetch(g.bundleFiles[mn]);
+        snippetBundles[mn] = await r.json();
+      } catch(e) { snippetBundles[mn] = null; }
+    }));
+  }
+  window.__snippetBundles = snippetBundles;
+
+  var modImports  = buildModImportMaps(g);
+  var modDefIndex = buildModuleDefIndex(g, appDefs);
+
+  /* render */
+  var content = document.getElementById('nd-content');
+  content.innerHTML = buildPageHeader(g) + '';
+  /* fill module-list */
+  var modList = document.getElementById('nd-module-list');
+  modList.innerHTML = buildContent(g, modDefIndex, modImports, snippetBundles);
+
+  buildToc(g, modDefIndex);
+  attachListeners();
+}
+
+main().catch(function(e) {
+  console.error('agda-deps notion-doc error:', e);
+  document.getElementById('nd-loading').innerHTML =
+    '<p style="color:#c62828">Failed to load graph: ' + esc(String(e)) + '</p>';
+});
+</script>
+</body>
+</html>
