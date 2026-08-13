@@ -54,7 +54,9 @@ Two side-channels skip parts of the pipeline:
 
 ```
 src/Main.hs               argv pre-processing, .agda-lib discovery, dispatch to
-                          runSkipAgda / runAgdaArgsKeepGoing / runAgdaArgs.
+                          runSkipAgda / runAgdaArgsKeepGoing / runAgdaArgs, and
+                          the `doctor` subcommand intercept (first, so
+                          `doctor --help` is the subcommand's own usage).
 src/BuildInfo.hs          Compile-time build identity (version + git rev + date +
                           GHC); surfaced in --version and graph.json "producer".
 src/BuildInfoTH.hs        TH helper behind BuildInfo (split out for the stage
@@ -85,8 +87,12 @@ src/AgdaDeps/
   Help.hs                 --help / --version intercepts.
   Logging.hs              quietRef + info.
   Options.hs              Options record, defaultOptions, parsers, View, JsonMode.
-  Config.hs               YAML config loader (.agda-deps.yml) + discovery +
+  Config.hs               YAML config loader (.agda-deps.yml) + discovery
+                          (findConfigPath carries the ConfigOrigin) +
                           applyConfig + theme presets.
+  Doctor.hs               `agda-deps doctor`: validates the resolved config —
+                          unknown keys, value type/enum/domain, and coherence
+                          between keys. Exit 1 on error (--strict: on warning).
   Deps.hs                 ADDef, compileDefAD, classifyDef, ignoreDef,
                           ignoredEdgesRef, contractIgnoredEdges.
   Layout.hs               (x, y) positions per definition.
@@ -210,10 +216,18 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges expands hidden refs int
 
 - **Adding a flag.** Extend `Options` + `commandLineFlags` **and** `Config.hs`'s
   `applyConfig` + `FromJSON Config` (kebab-case YAML mirror) **and** `NFData
-  Options` **and** `Config.showDefaultsYaml` (the `--show-defaults` sample —
-  its key set is diff-checked against `FromJSON Config` in CI by
-  `schema/show_defaults_check.py`). Merge order: defaults →
-  config → CLI. Don't add a second config mechanism.
+  Options` **and** `Config.showDefaultsYaml` (the `--show-defaults` sample)
+  **and** `Doctor.knownFields` (the `agda-deps doctor` key table — plus a
+  coherence rule in `checkCoherence` if the flag needs another one to do
+  anything). `FromJSON Config` is the source of truth; both mirrors are
+  diff-checked against it in CI by `schema/show_defaults_check.py`. Merge
+  order: defaults → config → CLI. Don't add a second config mechanism.
+
+- **Enum settings have one slug table.** `allViews` / `allFormats` /
+  `allJsonModes` (`Options.hs`) and `allThemes` (`Config.hs`), read through
+  `parseSlug`, are what the CLI parser, the `FromJSON` instance, the
+  "Expected one of: …" message, and `doctor` all resolve against. Adding a
+  value means extending the table, not four case arms.
 
 - **Adding a view.** Extend `View`; add `viewSlug` + `viewOpt` cases; add the
   template to `extra-source-files` in `agda-deps.cabal`; add the `templateRawFor`
@@ -294,16 +308,37 @@ Every definition carries one of four states:
   `Record`, `Constructor`.
 - **`P` Postulate.** Body is `Axiom{}` — user `postulate` or an Agda primitive.
 - **`H` Hole.** Contains an unsolved meta. Signals: the QName starts with
-  `unsolved#meta.` (Agda's `openMetasToPostulates` rewrites `?` under
-  `--allow-unsolved-metas`), the def references such a name, or a walk of
-  `defType`/`theDef` finds an open `MetaV`. The synthetic-name path is the one that
-  fires in practice — by backend time Agda has rewritten user `?`s.
+  `unsolved#meta.` (Agda's `openMetasToPostulates` rewrites open metas under
+  `--allow-unsolved-metas` — but only for *imported* modules; the main module's
+  metas stay live in the meta store), the def references such a name, or a walk
+  of `defType`/`theDef` finds an open `MetaV`.
 - **`F` Failed.** **Module-level**, not def-level. Synthesised by `--keep-going`
   when a module's type-check raised `TCErr`: a marker node carrying the module
   name. Read as "we tried; contents not available".
 
 Wire encoding: packed → `Int8` byte (0/1/2/3); expanded + the HTML-consumed
 `graph.json` → letter `"D"` / `"P"` / `"H"` / `"F"`.
+
+**Silent unsolved metas are split from honest `?`s — additively, not via a new
+state.** Under `--allow-unsolved-metas` both an interaction `?` and a
+silently-inserted unsolved meta (missing record field, failed instance search,
+unsolved `_`) classify `H`, and `failedModules` stays empty — but plain `agda`
+rejects only the silent kind (`UnsolvedMetaVariables` vs
+`UnsolvedInteractionMetas`). The split survives to backend time through
+`iHighlighting`: Agda's `warningHighlighting` marks each silent meta's range
+with the `UnsolvedMeta` aspect (constraints: `UnsolvedConstraint`) *before*
+`openMetasToPostulates` runs, and interaction metas get no aspect. Two signals,
+one per module kind: imported modules → `unsolved#meta.*` markers whose
+binding-site offset is tested against those spans (`Deps.markerIsSilent`, spans
+memoised per process in `silentSpansCacheRef`); the main module (never
+postulated) → live open metas minus `getInteractionMetas`. Emitted as a per-def
+`unsolvedMetas` count (`_unsolvedMetas`; expanded omits 0, packed-analytical
+`Int32` array) and a top-level `unsolvedModules :: Map module {metas, constraints
+:: [line]}` rollup computed in `postCompileAD` (`unsolvedInterfaceLines` +
+`liveSilentMetaLines`, the latter attributed to the entry module). No new flag,
+no `v`/`nodeKeyVersion` bump. Identical Agda API on 2.8/2.9 — no CPP. Fixture:
+`test-unsolved/` (locked by CI; kept outside `test/` so the main corpus needs no
+flag).
 
 **Soundness escapes are orthogonal to `state`.** Escapes beyond postulates/holes —
 a `{-# NON_TERMINATING #-}` function or a `primTrustMe` body — go in a separate

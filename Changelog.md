@@ -7,6 +7,92 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-08-13 — `agda-deps` — silent unsolved metas are first-class
+
+Under `--allow-unsolved-metas` / `--lenient-imports`, a module with unsolved
+metavariables *succeeds* (Agda postulates them as `unsolved#meta.*`), so
+`failedModules: []` never meant "everything compiles" — and the graph
+conflated an honest interaction `?` with a silently-inserted unsolved meta
+(missing record field, failed instance search, unsolved `_`), the exact error
+class plain `agda` rejects with `[UnsolvedMetaVariables]`. Both now surface,
+additively (no `v` bump, no `nodeKeyVersion` bump, no new flag):
+
+- **Per-def `unsolvedMetas`** (expanded; packed-analytical `Int32` array) —
+  count of silent unsolved metas the def mentions directly. Honest `?`s are
+  *not* counted: `H` with no count = open goal(s) only; `H` with a count =
+  silently-missing evidence. Omitted when 0.
+- **Top-level `unsolvedModules`** (packed / expanded / lazy) — module →
+  `{metas: [lines], constraints: [lines]}`. One `metas` entry per silent meta
+  (exact — from the markers / live meta store, not highlighting spans);
+  `constraints` lines are best-effort from `UnsolvedConstraint` spans.
+  Omitted when empty, so unsolved-free corpora stay byte-identical.
+
+The split is Agda's own: `warningHighlighting` stamps `UnsolvedMetaVariables`
+ranges with the `UnsolvedMeta` aspect into `iHighlighting` *before*
+`openMetasToPostulates`, and `UnsolvedInteractionMetas` get nothing — so an
+imported module's marker is silent iff its binding site lands in such a span,
+and the main module (whose metas are never postulated) reads live open metas
+minus interaction points. Identical API on Agda 2.8/2.9; no CPP.
+
+Also: fragment cache format v6 → v7 (`ADDef` gained `_unsolvedMetas`), the
+JSON Schema + oracle gained `unsolvedMetas` / `unsolvedModules` /
+`$defs/unsolvedModule`, `schema/packed_analytical_check.py` now checks the
+new array, and a `test-unsolved/` fixture corpus (the `record { go }`
+missing-field repro plus an honest `?`) locks the split in CI.
+
+## 2026-08-11 — `agda-deps` — `agda-deps doctor` checks the config file
+
+New subcommand — the first one; everything else is a flag:
+
+```
+agda-deps doctor [--config=PATH] [--strict]
+```
+
+It resolves the config the way a real run does (`--config=PATH`,
+`$AGDA_DEPS_CONFIG`, `./.agda-deps.yml`, then the dotfile beside the nearest
+`*.agda-lib`), reports the file and how it was found, and checks it — with no
+Agda run and no input module. The three classes of finding are exactly the ones
+a config gets wrong *silently*:
+
+- **unknown keys** — `FromJSON Config` reads with `.:?`, so a misspelled key is
+  ignored and the setting simply never applies. Reported with a did-you-mean
+  (Levenshtein over the real key set).
+- **bad values** — type (`exclude: Data` where a list is required, a quoted
+  `"true"`), enum (an unrecognised `view:` slug, with a did-you-mean), and
+  domain (a colour that isn't `#RRGGBB`, a negative `max-snippet-bytes`, a
+  `min-term-depth` below 1 — both of which the YAML path otherwise drops
+  without a word). Includes the YAML trap of an unquoted
+  `color-hole: #9c27b0`, where `#` opens a comment and the key lands as null.
+- **incoherent combinations** — `with-source` without `lazy`, `cache-dir`
+  without `incremental`, `min-term-depth` without `with-term-hashes`,
+  `normalise-signatures` / `signature-implicits` without `with-signatures`,
+  `incremental` with `keep-going`, per-definition flags under `skip-agda`, a
+  `view:` / `json-mode:` / `gzip:` that the chosen `format` never consults, and
+  an `out-dir` whose `.json` / `.html` extension will *not* select the format
+  (that inference only fires for `-o` on the command line).
+
+Exit status is 1 on any error, 0 otherwise; `--strict` fails on warnings too,
+so it can gate CI. Warnings judge the config alone — a CLI flag layered on top
+can rescue any of them.
+
+Supporting changes:
+
+- **`Options.allViews` / `allFormats` / `allJsonModes` / `parseSlug`** and
+  **`Config.allThemes` / `themeSlug`**: the accepted slugs of each enum setting
+  now live in one table per type, and the CLI parser, the YAML parser, and
+  `doctor` all read it. Previously `--view`'s accepted set was spelled out
+  three times (parser, `FromJSON View`, error message); `doctor` telling the
+  user a value is invalid that the parser accepts (or vice versa) is now
+  unrepresentable.
+- **`Config.findConfigPath`** exposes discovery with provenance
+  (`ConfigOrigin`); `discoverConfigPath` is a thin wrapper that keeps the
+  old `die`-on-missing-file behaviour. One search order, not two.
+- `schema/show_defaults_check.py` takes an optional third argument and now
+  guards *both* mirrors of the config key set (the `--show-defaults` sample and
+  `Doctor.knownFields`) against `FromJSON Config`. CI passes `Doctor.hs` and
+  additionally runs `doctor` over the seeded sample, over a fully uncommented
+  copy of it, and over a file with a misspelled key (which must exit 1).
+
 ## 2026-07-22 — `agda-deps` — `--show-defaults` seeds a config file
 
 New intercept flag, alongside `--help` / `--version` / `--emit-schema`:

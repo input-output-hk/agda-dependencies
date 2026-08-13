@@ -3,9 +3,9 @@
 
 The site is built from the project's own Markdown (README, Examples, Changelog,
 …), staged into ``content/`` by ``stage.py``, and rendered with the ``paper``
-theme under ``themes/paper``. All the page-level content that used to be baked
-into ``docs/build.py`` now lives here as plain data (``STATES`` / ``FORMATS`` /
-``MODES`` / ``VIEW_HIGHLIGHTS`` / ``DOC_PAGES``); the templates iterate over it.
+theme under ``themes/paper``. The page-level content lives here as plain data
+(``STATES`` / ``FORMATS`` / ``MODES`` / ``VIEW_HIGHLIGHTS`` / ``DOC_PAGES``);
+the templates iterate over it.
 
 Every ALL-CAPS name in this file is copied into the Jinja template context by
 Pelican, so the theme reads these tables directly.
@@ -87,9 +87,9 @@ PLUGIN_PATHS = [os.path.join(_HERE, "plugins")]
 PLUGINS = ["toc_sidebar"]
 
 # ===========================================================================
-# Site content — the data the templates render (ported from docs/build.py).
-# stage.py imports DOC_PAGES / INTERNAL_PAGES from here, so this stays the one
-# source of truth for "which Markdown file maps to which page".
+# Site content — the data the templates render. stage.py imports DOC_PAGES /
+# INTERNAL_PAGES from here, so this stays the one source of truth for "which
+# Markdown file maps to which page".
 # ===========================================================================
 
 # Top-bar navigation (kept short; the rest live in the footer).
@@ -105,7 +105,7 @@ TOP_NAV = [
 # (code, name, description) — the four node states. Colour comes from the
 # .m-<code> CSS class, so it is not repeated here.
 STATES = [
-    ("D", "Defined", "Function, datatype, record — elaborated normally."),
+    ("D", "Defined", "Function, datatype, record, constructor — elaborated normally."),
     ("P", "Postulate", "An axiom / postulate. A type-level promise, no body."),
     ("H", "Hole", "Contains an unsolved meta (a <code>?</code> in source)."),
     ("F", "Failed", "Module whose type-check failed under <code>--keep-going</code>."),
@@ -127,7 +127,7 @@ FORMATS = [
 MODES = [
     ("--keep-going", "Survive type-check errors; the failing module is tagged <code>F</code>."),
     ("--skip-agda", "Module-level graph straight from a source scan — no elaboration, milliseconds at any scale."),
-    ("--with-source", "Attach the source snippet to every definition; powers the reading / IDE views."),
+    ("--with-source", "Attach the source snippet to every definition (with <code>--lazy</code>); powers the reading / IDE views."),
     ("--lazy", "Split HTML across files so 100k-node projects stay responsive (needs an HTTP server)."),
     ("--no-externals", "Drop everything outside the project root — stdlib and all — from the graph."),
     ("--resolve-deps", "Pin Agda's search path to the <code>.agda-lib</code> <code>depend:</code> closure."),
@@ -139,7 +139,7 @@ MODES = [
 VIEW_HIGHLIGHTS = [
     ("module-dag-pods", "Module DAG pods", "Default. Expandable module pods, dagre layout."),
     ("cytoscape", "Cytoscape compound", "Force-directed modules-as-boxes with a rich sidebar."),
-    ("sigma", "Sigma (WebGL)", "WebGL renderer that scales to ~1M nodes."),
+    ("sigma", "Sigma (WebGL)", "WebGL renderer — the largest-scale option."),
     ("progress-dashboard", "Progress dashboard", "KPI board: completeness %, hole debt, hot modules."),
     ("critical-path-holes", "Critical-path holes", "Kanban of proof obligations upstream of the goal."),
     ("sunburst-hierarchy", "Sunburst hierarchy", "D3 sunburst over the dotted-module tree."),
@@ -155,7 +155,7 @@ DOC_PAGES = [
          blurb="Install, flags, views, YAML config, and the v2 JSON schema."),
     dict(src="Examples.md", out="examples.html", slug="examples", nav="Examples",
          title="Examples",
-         blurb="One runnable command per feature, with empirical defaults."),
+         blurb="One runnable command per feature."),
     dict(src="TODO.md", out="roadmap.html", slug="roadmap", nav="Roadmap",
          title="Roadmap",
          blurb="Forward-looking work that's actively planned."),

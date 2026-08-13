@@ -20,13 +20,13 @@
 <main><div class="layout">
 <aside class="toc"><div class="toc-inner">
 <div class="toc-title">On this page</div>
-<nav><a class="lvl2" href="#setup">Setup</a><a class="lvl2" href="#dot-output-default">DOT output (default)</a><a class="lvl2" href="#html-output-interactive-viewer">HTML output — interactive viewer</a><a class="lvl2" href="#json-output-for-downstream-tooling">JSON output — for downstream tooling</a><a class="lvl2" href="#-no-externals-drop-stdlib-from-the-graph">--no-externals — drop stdlib from the graph</a><a class="lvl2" href="#-keep-going-survive-type-check-errors">--keep-going — survive type-check errors</a><a class="lvl2" href="#-skip-agda-module-level-graph-no-type-checking">--skip-agda — module-level graph, no type-checking</a><a class="lvl2" href="#-with-source-lazy-full-html-viewer-at-scale">--with-source + --lazy — full HTML viewer at scale</a><a class="lvl2" href="#-with-term-hashes-subterm-fingerprints">--with-term-hashes — subterm fingerprints</a><a class="lvl2" href="#-incremental-cache-per-module-work-across-rebuilds">--incremental — cache per-module work across rebuilds</a><a class="lvl2" href="#-packed-analytical-compact-json-without-losing-fidelity">--packed-analytical — compact JSON without losing fidelity</a></nav>
+<nav><a class="lvl2" href="#setup">Setup</a><a class="lvl2" href="#dot-output-default">DOT output (default)</a><a class="lvl2" href="#html-output-interactive-viewer">HTML output — interactive viewer</a><a class="lvl2" href="#json-output-for-downstream-tooling">JSON output — for downstream tooling</a><a class="lvl2" href="#-no-externals-drop-stdlib-from-the-graph">--no-externals — drop stdlib from the graph</a><a class="lvl2" href="#-keep-going-survive-type-check-errors">--keep-going — survive type-check errors</a><a class="lvl2" href="#-skip-agda-module-level-graph-no-type-checking">--skip-agda — module-level graph, no type-checking</a><a class="lvl2" href="#-with-source-lazy-full-html-viewer-at-scale">--with-source + --lazy — full HTML viewer at scale</a><a class="lvl2" href="#-with-term-hashes-subterm-fingerprints">--with-term-hashes — subterm fingerprints</a><a class="lvl2" href="#-incremental-cache-per-module-work-across-rebuilds">--incremental — cache per-module work across rebuilds</a><a class="lvl2" href="#-packed-analytical-compact-json-without-losing-fidelity">--packed-analytical — compact JSON without losing fidelity</a><a class="lvl2" href="#a-yaml-config-checked-before-use">A YAML config, checked before use</a></nav>
 </div></aside>
 <div class="prose"><h1 id="examples">Examples</h1>
 <p>Runnable recipes for <code>agda-deps</code>. Full flag reference: <a href="guide.html">README.md</a>.</p>
-<p><code>test/Test.agda</code> is the bundled fixture (one defined function, one postulate, one
-hole). Larger examples use a generic <code>path/to/your-project/…</code> — substitute your
-own include path and entry module.</p>
+<p><code>test/Test.agda</code> is the bundled fixture: a small multi-module corpus covering
+every node state and edge shape. Larger examples use a generic
+<code>path/to/your-project/…</code> — substitute your own include path and entry module.</p>
 <h2 id="setup">Setup</h2>
 <pre><code class="language-bash">cabal build
 mkdir -p out
@@ -49,8 +49,8 @@ xdg-open out/deps.html
 right start for projects under ~5k modules. Switch views:</p>
 <ul>
 <li><code>--view=cytoscape</code> — force-directed compound graph; one canvas with everything.</li>
-<li><code>--view=sigma</code> / <code>--view=big-module-dag-pods</code> — WebGL, scales to 100k+ modules.</li>
-<li><code>--view=ide-three-pane</code> / <code>--view=source-centric</code> — definition-level; want <code>--with-source</code>.</li>
+<li><code>--view=sigma</code> / <code>--view=big-module-dag-pods</code> — the large-corpus options.</li>
+<li><code>--view=ide-three-pane</code> / <code>--view=source-centric</code> — definition-level; want <code>--with-source --lazy</code>.</li>
 <li><code>--view=critical-path-holes</code> / <code>--view=progress-dashboard</code> — for in-progress proofs.</li>
 </ul>
 <h2 id="json-output-for-downstream-tooling">JSON output — for downstream tooling</h2>
@@ -60,7 +60,7 @@ cabal run agda-deps -- --format=json --json-mode=packed -i test/ -o out/ test/Te
 # Expanded: arrays of records, no decoder needed.
 cabal run agda-deps -- --format=json --json-mode=expanded -i test/ -o out/ test/Test.agda
 </code></pre>
-<p><code>packed</code> (default) is ~5× smaller on large projects but needs a base64 + Int32-LE
+<p><code>packed</code> (default) is the smaller of the two but needs a base64 + Int32-LE
 decoder; use <code>expanded</code> to consume from Python / TypeScript / shell.</p>
 <h2 id="-no-externals-drop-stdlib-from-the-graph"><code>--no-externals</code> — drop stdlib from the graph</h2>
 <pre><code class="language-bash">cabal run agda-deps -- --format=json --json-mode=expanded --no-externals \
@@ -90,8 +90,8 @@ cd out/ &amp;&amp; python3 -m http.server 8000
 </code></pre>
 <p><code>--with-source</code> embeds each definition's highlighted source (clicking a leaf
 opens it in a drawer); <code>--lazy</code> splits output into <code>graph.json</code> + per-module files
-so the initial load stays small. Lazy mode <strong>requires HTTP serving</strong>. Combine for
-anything bigger than ~5k defs; below that, inline HTML loads instantly.</p>
+so the initial load stays small. Lazy mode <strong>requires HTTP serving</strong>, and
+<code>--with-source</code> only takes effect under it.</p>
 <h2 id="-with-term-hashes-subterm-fingerprints"><code>--with-term-hashes</code> — subterm fingerprints</h2>
 <pre><code class="language-bash">cabal run agda-deps -- --format=json --json-mode=expanded \
   --with-term-hashes --min-term-depth=3 \
@@ -109,18 +109,26 @@ cabal run agda-deps -- --incremental --format=json --json-mode=expanded \
 <p>Two cache layers keyed on the interface hash: a <strong>fragment cache</strong> skips the
 per-definition walk, and an <strong>incremental-serialise</strong> layer skips rewriting
 unchanged output (whole file on a no-op; in <code>--lazy</code> mode, only changed
-<code>modules/&lt;M&gt;.json</code>). Output is byte-identical. Requires Agda ≥ 2.8; disabled
-under <code>--keep-going</code>; <code>--cache-dir=DIR</code> relocates the cache. The dominant warm
-rebuild cost is Agda's own interface load, which a backend can't avoid.</p>
+<code>modules/&lt;M&gt;.json</code>). Output is byte-identical. Disabled under <code>--keep-going</code>;
+<code>--cache-dir=DIR</code> relocates the cache. The dominant warm rebuild cost is Agda's
+own interface load, which a backend can't avoid.</p>
 <h2 id="-packed-analytical-compact-json-without-losing-fidelity"><code>--packed-analytical</code> — compact JSON without losing fidelity</h2>
 <pre><code class="language-bash">cabal run agda-deps -- --format=json --json-mode=packed --packed-analytical \
   --with-signatures --with-term-hashes \
   -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md
 </code></pre>
-<p>Adds the per-def analytical fields (kind, line, access, type, subterm hashes)
-back to packed's <code>defs</code> as base64 typed arrays, so a downstream tool keeps
-packed's size win <em>and</em> expanded's fidelity — a decoded graph is node-for-node
-identical to expanded. Off by default; only affects <code>--json-mode=packed</code>.</p></div>
+<p>Adds the per-def analytical fields (kind, line, access, unsafe, unsolved-meta
+count, type, subterm hashes) to packed's <code>defs</code> as base64 typed arrays, so a
+downstream tool keeps packed's size win <em>and</em> expanded's fidelity — a decoded
+graph is node-for-node identical to expanded. Off by default; only affects
+<code>--json-mode=packed</code>.</p>
+<h2 id="a-yaml-config-checked-before-use">A YAML config, checked before use</h2>
+<pre><code class="language-bash">agda-deps --show-defaults &gt; .agda-deps.yml   # seed (fully commented out)
+agda-deps doctor                             # unknown keys, bad values, no-op combinations
+agda-deps doctor --strict                    # as a CI gate: warnings fail too
+</code></pre>
+<p>Keys mirror the CLI flags in kebab-case; CLI flags still win. <code>doctor</code> runs no
+Agda and needs no input module.</p></div>
 </div>
 </main>
 <footer class="site-footer"><div class="wrap">

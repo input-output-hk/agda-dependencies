@@ -162,6 +162,8 @@ emit opts moduleFileMap entryModule externals imports sourceFiles allModules = d
         -- @{-# OPTIONS #-}@ tokens ('Precompute.stripBlockComments'
         -- strips them as block comments).
         , giModuleOptionEscapes = []
+        -- Empty: without Agda there is no elaboration, hence no metas.
+        , giUnsolvedModules = []
         }
       gjo = buildGraphJson gi
 

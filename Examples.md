@@ -2,9 +2,9 @@
 
 Runnable recipes for `agda-deps`. Full flag reference: [README.md](README.md).
 
-`test/Test.agda` is the bundled fixture (one defined function, one postulate, one
-hole). Larger examples use a generic `path/to/your-project/…` — substitute your
-own include path and entry module.
+`test/Test.agda` is the bundled fixture: a small multi-module corpus covering
+every node state and edge shape. Larger examples use a generic
+`path/to/your-project/…` — substitute your own include path and entry module.
 
 ## Setup
 
@@ -39,8 +39,8 @@ xdg-open out/deps.html
 right start for projects under ~5k modules. Switch views:
 
 - `--view=cytoscape` — force-directed compound graph; one canvas with everything.
-- `--view=sigma` / `--view=big-module-dag-pods` — WebGL, scales to 100k+ modules.
-- `--view=ide-three-pane` / `--view=source-centric` — definition-level; want `--with-source`.
+- `--view=sigma` / `--view=big-module-dag-pods` — the large-corpus options.
+- `--view=ide-three-pane` / `--view=source-centric` — definition-level; want `--with-source --lazy`.
 - `--view=critical-path-holes` / `--view=progress-dashboard` — for in-progress proofs.
 
 ## JSON output — for downstream tooling
@@ -53,7 +53,7 @@ cabal run agda-deps -- --format=json --json-mode=packed -i test/ -o out/ test/Te
 cabal run agda-deps -- --format=json --json-mode=expanded -i test/ -o out/ test/Test.agda
 ```
 
-`packed` (default) is ~5× smaller on large projects but needs a base64 + Int32-LE
+`packed` (default) is the smaller of the two but needs a base64 + Int32-LE
 decoder; use `expanded` to consume from Python / TypeScript / shell.
 
 ## `--no-externals` — drop stdlib from the graph
@@ -99,8 +99,8 @@ cd out/ && python3 -m http.server 8000
 
 `--with-source` embeds each definition's highlighted source (clicking a leaf
 opens it in a drawer); `--lazy` splits output into `graph.json` + per-module files
-so the initial load stays small. Lazy mode **requires HTTP serving**. Combine for
-anything bigger than ~5k defs; below that, inline HTML loads instantly.
+so the initial load stays small. Lazy mode **requires HTTP serving**, and
+`--with-source` only takes effect under it.
 
 ## `--with-term-hashes` — subterm fingerprints
 
@@ -126,9 +126,9 @@ cabal run agda-deps -- --incremental --format=json --json-mode=expanded \
 Two cache layers keyed on the interface hash: a **fragment cache** skips the
 per-definition walk, and an **incremental-serialise** layer skips rewriting
 unchanged output (whole file on a no-op; in `--lazy` mode, only changed
-`modules/<M>.json`). Output is byte-identical. Requires Agda ≥ 2.8; disabled
-under `--keep-going`; `--cache-dir=DIR` relocates the cache. The dominant warm
-rebuild cost is Agda's own interface load, which a backend can't avoid.
+`modules/<M>.json`). Output is byte-identical. Disabled under `--keep-going`;
+`--cache-dir=DIR` relocates the cache. The dominant warm rebuild cost is Agda's
+own interface load, which a backend can't avoid.
 
 ## `--packed-analytical` — compact JSON without losing fidelity
 
@@ -138,7 +138,19 @@ cabal run agda-deps -- --format=json --json-mode=packed --packed-analytical \
   -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md
 ```
 
-Adds the per-def analytical fields (kind, line, access, type, subterm hashes)
-back to packed's `defs` as base64 typed arrays, so a downstream tool keeps
-packed's size win *and* expanded's fidelity — a decoded graph is node-for-node
-identical to expanded. Off by default; only affects `--json-mode=packed`.
+Adds the per-def analytical fields (kind, line, access, unsafe, unsolved-meta
+count, type, subterm hashes) to packed's `defs` as base64 typed arrays, so a
+downstream tool keeps packed's size win *and* expanded's fidelity — a decoded
+graph is node-for-node identical to expanded. Off by default; only affects
+`--json-mode=packed`.
+
+## A YAML config, checked before use
+
+```bash
+agda-deps --show-defaults > .agda-deps.yml   # seed (fully commented out)
+agda-deps doctor                             # unknown keys, bad values, no-op combinations
+agda-deps doctor --strict                    # as a CI gate: warnings fail too
+```
+
+Keys mirror the CLI flags in kebab-case; CLI flags still win. `doctor` runs no
+Agda and needs no input module.

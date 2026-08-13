@@ -92,7 +92,7 @@ def main(argv: list[str]) -> int:
     stage_pages(pages)
     if not args.no_views:
         stage_views()
-    print("Done. Now run: pelican content -o output -s pelicanconf.py")
+    print("Done. Now run: pelican -s pelicanconf.py")
     return 0
 
 

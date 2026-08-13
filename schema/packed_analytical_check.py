@@ -3,7 +3,8 @@
 
 Decodes a packed-analytical ``graph.json`` and asserts that, node-for-node,
 it carries the *same* per-definition analytical fields the expanded form
-of the same corpus does: kind, line, access, type (``--with-signatures``),
+of the same corpus does: kind, line, access, unsafe, unsolvedMetas,
+type (``--with-signatures``),
 and subterm hashes/depths (``--with-term-hashes``). This is the
 definition of done for the packed-complete work — packed must lose no
 fidelity vs. expanded.
@@ -45,6 +46,9 @@ def decode_packed(g):
     # `unsafe` is always present in fresh packed-analytical output; guard
     # for absence so this stays runnable against older output.
     unsafe = dec(d["unsafe"], "<b", 1) if "unsafe" in d else [0] * n
+    # `unsolvedMetas` is always present in fresh packed-analytical output;
+    # same older-output guard as `unsafe`. 0 = none (expanded omits the key).
+    unsolved = dec(d["unsolvedMetas"], "<i", 4) if "unsolvedMetas" in d else [0] * n
     types = d.get("types")  # [str|null] or absent
     # subterm CSR (absent unless --with-term-hashes)
     if "subtermOffsets" in d:
@@ -62,6 +66,7 @@ def decode_packed(g):
             "access": ACCESS[access[i]],
             "type": (types[i] if types is not None else None),
             "unsafe": unsafe_from_byte(unsafe[i]),
+            "unsolvedMetas": unsolved[i],
         }
         if offs is not None:
             a, b = offs[i], offs[i + 1]
@@ -83,6 +88,7 @@ def decode_expanded(g):
             "access": d.get("access"),
             "type": d.get("type"),
             "unsafe": sorted(d.get("unsafe", [])),
+            "unsolvedMetas": d.get("unsolvedMetas", 0),
         }
         if sh is not None:
             rec["hashes"] = sh[i]
@@ -105,7 +111,7 @@ def main():
     mismatches = []
     for name in pdefs:
         p, e = pdefs[name], edefs[name]
-        for f in ("kind", "line", "access", "type", "unsafe"):
+        for f in ("kind", "line", "access", "type", "unsafe", "unsolvedMetas"):
             if p[f] != e[f]:
                 mismatches.append(f"{name}.{f}: packed={p[f]!r} expanded={e[f]!r}")
         if p_has_sub and e_has_sub:

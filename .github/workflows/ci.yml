@@ -97,15 +97,34 @@ jobs:
         python3 schema/check_schema.py ci-out/generated.schema.json \
           schema/graph-v2-expanded.schema.json
 
-    - name: --show-defaults documents every config key
-      # The commented sample .agda-deps.yml emitted by --show-defaults must
-      # list exactly the keys the FromJSON Config instance reads. Guards
-      # against a flag added to the parser (Config.hs) but not to the sample
-      # (Config.showDefaultsYaml), or a stale/misspelled key in the sample.
+    - name: --show-defaults and doctor document every config key
+      # Both hand-maintained mirrors of the config key set must list exactly
+      # the keys the FromJSON Config instance reads: the commented sample
+      # .agda-deps.yml emitted by --show-defaults (Config.showDefaultsYaml)
+      # and the `agda-deps doctor` key table (Doctor.knownFields, which would
+      # otherwise report a good key as unknown).
       run: |
         cabal run -v0 agda-deps -- --show-defaults > ci-out/show-defaults.yml
         python3 schema/show_defaults_check.py ci-out/show-defaults.yml \
-          src/AgdaDeps/Config.hs
+          src/AgdaDeps/Config.hs src/AgdaDeps/Doctor.hs
+
+    - name: doctor accepts the seeded config and rejects a broken one
+      # The sample --show-defaults writes must pass its own checker, both as
+      # seeded (all commented) and fully uncommented (every key at its
+      # default, so every key must be known and well-typed). A config with a
+      # misspelled key must exit non-zero.
+      run: |
+        mkdir -p ci-out/doctor
+        cp ci-out/show-defaults.yml ci-out/doctor/.agda-deps.yml
+        cabal run -v0 agda-deps -- doctor --config=ci-out/doctor/.agda-deps.yml
+        sed 's/^#\([a-z][a-z-]*\):/\1:/' ci-out/show-defaults.yml \
+          > ci-out/doctor/all.yml
+        cabal run -v0 agda-deps -- doctor --config=ci-out/doctor/all.yml
+        printf 'out_dir: out\n' > ci-out/doctor/typo.yml
+        if cabal run -v0 agda-deps -- doctor --config=ci-out/doctor/typo.yml; then
+          echo "doctor accepted an unknown key" >&2
+          exit 1
+        fi
 
     - name: Check expanded output against the golden snapshot
       # Content regression guard (beyond shape/schema): node states, kinds,
@@ -162,6 +181,39 @@ jobs:
         assert ["Good.quadruple", "Good.double"] in g["definitionEdges"]
         assert "type" in defs["Good.quadruple"], "signatures missing in partial pass"
         print("keep-going fixture OK")
+        EOF
+
+    - name: silent unsolved metas are first-class under --allow-unsolved-metas
+      # Locks the honest-?/silent-meta split: under --allow-unsolved-metas
+      # a missing record field elaborates to a meta nothing can solve, the
+      # module "succeeds", and failedModules stays [] — so the graph must
+      # carry the evidence gap itself: a per-def `unsolvedMetas` count on
+      # every def mentioning a silent meta, and a module→lines
+      # `unsolvedModules` rollup. An honest interaction `?` must stay a
+      # bare state-H def (no count, no rollup row). Corpus: test-unsolved/
+      # (kept outside test/ so the main corpus needs no flag).
+      run: |
+        rm -rf test-unsolved/*.agdai test-unsolved/_build
+        cabal run -v0 agda-deps -- --allow-unsolved-metas --format=json \
+          --json-mode=expanded -i test-unsolved -o ci-out/unsolved \
+          test-unsolved/Entry.agda
+        python3 - <<'EOF'
+        import json
+        g = json.load(open("ci-out/unsolved/deps.json"))
+        assert g.get("failedModules") == [], g.get("failedModules")
+        assert g.get("unsolvedModules") == \
+            {"MetaProbe": {"metas": [24], "constraints": []}}, \
+            g.get("unsolvedModules")
+        defs = {d["name"]: d for d in g["definitions"]}
+        assert defs["MetaProbe.t"]["state"] == "H"
+        assert defs["MetaProbe.t"].get("unsolvedMetas") == 1, defs["MetaProbe.t"]
+        # the honest ? — hole, but NOT a silent meta
+        assert defs["Entry.honest"]["state"] == "H"
+        assert "unsolvedMetas" not in defs["Entry.honest"], defs["Entry.honest"]
+        # the marker node itself carries the count too
+        markers = [d for n, d in defs.items() if "unsolved#meta." in n]
+        assert len(markers) == 1 and markers[0].get("unsolvedMetas") == 1, markers
+        print("unsolved-metas fixture OK")
         EOF
 
     - name: incremental cache reproduces the golden byte-for-byte

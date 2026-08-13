@@ -5,14 +5,20 @@ module AgdaDeps.Options
   ( -- * Output format
     OutputFormat(..)
   , formatSlug
+  , allFormats
 
     -- * JSON emission mode
   , JsonMode(..)
   , jsonModeSlug
+  , allJsonModes
 
     -- * HTML view
   , View(..)
   , viewSlug
+  , allViews
+
+    -- * Slug tables
+  , parseSlug
 
     -- * Definition state
   , DefState(..)
@@ -61,7 +67,7 @@ import Control.DeepSeq ( NFData(..) )
 import Control.Monad.Except ( MonadError(throwError) )
 import Data.Binary ( Binary(..) )
 import qualified Data.Binary as B
-import Data.List ( isPrefixOf )
+import Data.List ( intercalate, isPrefixOf )
 
 import AgdaDeps.Util ( isValidHexColor )
 
@@ -84,16 +90,37 @@ instance NFData OutputFormat where
   rnf FmtHtml = ()
   rnf FmtJson = ()
 
--- | Canonical CLI slug for an 'OutputFormat'. Kept in sync with 'formatOpt'.
+-- | Canonical CLI slug for an 'OutputFormat'.
 formatSlug :: OutputFormat -> String
 formatSlug FmtDot  = "dot"
 formatSlug FmtHtml = "html"
 formatSlug FmtJson = "json"
 
--- | Canonical CLI slug for a 'JsonMode'. Kept in sync with 'jsonModeOpt'.
+-- | Every 'OutputFormat', in the order accepted values are listed to the
+-- user. Together with 'formatSlug' this is the single source of truth for
+-- @--format@ \/ @format:@ — CLI parser, YAML parser, and @doctor@ all
+-- derive their accepted set from it.
+allFormats :: [OutputFormat]
+allFormats = [FmtDot, FmtHtml, FmtJson]
+
+-- | Canonical CLI slug for a 'JsonMode'.
 jsonModeSlug :: JsonMode -> String
 jsonModeSlug JsonPacked   = "packed"
 jsonModeSlug JsonExpanded = "expanded"
+
+-- | Every 'JsonMode'. See 'allFormats'.
+allJsonModes :: [JsonMode]
+allJsonModes = [JsonPacked, JsonExpanded]
+
+-- | Resolve a user-supplied slug against a canonical table, or produce the
+-- standard \"Unknown …\" diagnostic naming every accepted value. @what@ is
+-- how the setting is spelled in the message (@\"--view\"@ for a CLI flag,
+-- @\"view\"@ for the YAML key).
+parseSlug :: String -> (a -> String) -> [a] -> String -> Either String a
+parseSlug what slug vals s = case [ v | v <- vals, slug v == s ] of
+  (v:_) -> Right v
+  []    -> Left $ "Unknown " ++ what ++ " value: " ++ show s
+               ++ ". Expected one of: " ++ intercalate ", " (map slug vals) ++ "."
 
 -- | HTML view variant. Selects which JS app the @--format=html@ output
 -- ships. All views consume the same v2 @graph.json@ payload built by
@@ -134,7 +161,17 @@ instance NFData View where
   rnf ViewReadingOrderNarrative  = ()
   rnf ViewPixelGridOverview      = ()
 
--- | Canonical CLI slug for a 'View'. Kept in sync with 'viewOpt'.
+-- | Every 'View', in the order accepted values are listed to the user.
+-- See 'allFormats'.
+allViews :: [View]
+allViews =
+  [ ViewCytoscape, ViewIdeThreePane, ViewModuleDagPods, ViewSourceCentric
+  , ViewNotionDoc, ViewWikiBacklinks, ViewSigma, ViewBigModuleDagPods
+  , ViewCriticalPathHoles, ViewProgressDashboard, ViewCartographicAtlas
+  , ViewSunburstHierarchy, ViewReadingOrderNarrative, ViewPixelGridOverview
+  ]
+
+-- | Canonical CLI slug for a 'View'.
 viewSlug :: View -> String
 viewSlug ViewCytoscape        = "cytoscape"
 viewSlug ViewIdeThreePane     = "ide-three-pane"
@@ -367,11 +404,10 @@ noExternalsOpt :: Monad m => Options -> m Options
 noExternalsOpt opts = return opts{ optNoExternals = True }
 
 jsonModeOpt :: MonadError String m => String -> Options -> m Options
-jsonModeOpt s opts = case s of
-  "packed"   -> return opts{ optJsonMode = JsonPacked }
-  "expanded" -> return opts{ optJsonMode = JsonExpanded }
-  _ -> throwError $ "Unknown --json-mode value: " ++ show s
-                ++ ". Expected one of: packed, expanded."
+jsonModeOpt s opts =
+  case parseSlug "--json-mode" jsonModeSlug allJsonModes s of
+    Right m -> return opts{ optJsonMode = m }
+    Left e  -> throwError e
 
 -- | Parser for @--lenient-imports@. The flag is rewritten to
 -- @--allow-unsolved-metas@ in 'Main.hs' before Agda's option parser
@@ -417,35 +453,14 @@ minTermDepthOpt s opts = case reads s :: [(Int, String)] of
       ++ ". Expected a positive integer (1 disables the filter)."
 
 formatOpt :: MonadError String m => String -> Options -> m Options
-formatOpt s opts = case s of
-  "dot"  -> return opts{ optFormat = FmtDot }
-  "html" -> return opts{ optFormat = FmtHtml }
-  "json" -> return opts{ optFormat = FmtJson }
-  _      -> throwError $ "Unknown --format value: " ++ show s
-                ++ ". Expected one of: dot, html, json."
+formatOpt s opts = case parseSlug "--format" formatSlug allFormats s of
+  Right f -> return opts{ optFormat = f }
+  Left e  -> throwError e
 
 viewOpt :: MonadError String m => String -> Options -> m Options
-viewOpt s opts = case s of
-  "cytoscape"       -> return opts{ optView = ViewCytoscape }
-  "ide-three-pane"  -> return opts{ optView = ViewIdeThreePane }
-  "module-dag-pods" -> return opts{ optView = ViewModuleDagPods }
-  "source-centric"  -> return opts{ optView = ViewSourceCentric }
-  "notion-doc"      -> return opts{ optView = ViewNotionDoc }
-  "wiki-backlinks"  -> return opts{ optView = ViewWikiBacklinks }
-  "sigma"           -> return opts{ optView = ViewSigma }
-  "big-module-dag-pods" -> return opts{ optView = ViewBigModuleDagPods }
-  "critical-path-holes"     -> return opts{ optView = ViewCriticalPathHoles }
-  "progress-dashboard"      -> return opts{ optView = ViewProgressDashboard }
-  "cartographic-atlas"      -> return opts{ optView = ViewCartographicAtlas }
-  "sunburst-hierarchy"      -> return opts{ optView = ViewSunburstHierarchy }
-  "reading-order-narrative" -> return opts{ optView = ViewReadingOrderNarrative }
-  "pixel-grid-overview"     -> return opts{ optView = ViewPixelGridOverview }
-  _ -> throwError $ "Unknown --view value: " ++ show s
-       ++ ". Expected one of: cytoscape, ide-three-pane, module-dag-pods, "
-       ++ "source-centric, notion-doc, wiki-backlinks, sigma, "
-       ++ "big-module-dag-pods, critical-path-holes, progress-dashboard, "
-       ++ "cartographic-atlas, sunburst-hierarchy, reading-order-narrative, "
-       ++ "pixel-grid-overview."
+viewOpt s opts = case parseSlug "--view" viewSlug allViews s of
+  Right v -> return opts{ optView = v }
+  Left e  -> throwError e
 
 -- | Build a CLI option parser that updates a single slot of 'optColors',
 -- validating the hex syntax.

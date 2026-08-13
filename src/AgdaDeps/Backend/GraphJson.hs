@@ -62,7 +62,7 @@ import AgdaDeps.Options ( DefState(..) )
 import AgdaDeps.Util    ( jsString, jsB64Raw, jStrArray, jStrMap, jStrArrMap )
 import AgdaDeps.Backend.Wire
   ( ExpandedGraph(..), WireDef(..), WireEdge(..), WireExternals(..)
-  , encodeExpanded, validateExpanded )
+  , encodeExpanded, validateExpanded, unsolvedModulesJson )
 
 -- | Where graph data goes in the lazy split.
 data EmitMode
@@ -171,6 +171,13 @@ data GraphInput = GraphInput
     -- with an escape appear. Emitted as the optional top-level
     -- @moduleOptionEscapes@ object (packed / expanded / lazy); omitted
     -- when empty so escape-free corpora stay byte-identical.
+  , giUnsolvedModules :: ![(String, ([Int], [Int]))]
+    -- ^ Per top-level module, @(silent unsolved-meta lines,
+    -- unsolved-constraint lines)@ under @--allow-unsolved-metas@
+    -- ('AgdaDeps.Deps.unsolvedInterfaceLines'), ascending by module; only
+    -- modules with at least one entry appear. Emitted as the optional
+    -- top-level @unsolvedModules@ object (packed / expanded / lazy);
+    -- omitted when empty so unsolved-free corpora stay byte-identical.
   }
 
 -- | Output of the v2 emitter, ready for the backend to write to disk.
@@ -566,6 +573,13 @@ buildGraphJson GraphInput{..} =
         | otherwise = ",\"moduleOptionEscapes\":"
                    ++ jStrArrMap giModuleOptionEscapes
 
+      -- Optional module-level silent-unsolved-meta / unsolved-constraint
+      -- rollup; omitted when empty (same encoder as the expanded form).
+      unsolvedModulesField
+        | null giUnsolvedModules = ""
+        | otherwise = ",\"unsolvedModules\":"
+                   ++ unsolvedModulesJson giUnsolvedModules
+
       graphJson = "{\"v\":2"
         ++ ",\"nodeKeyVersion\":" ++ show nodeKeyVersion
         ++ ",\"producer\":"     ++ jsString buildFingerprint
@@ -594,6 +608,7 @@ buildGraphJson GraphInput{..} =
         ++ ",\"searchIndex\":" ++ searchIndexJson searchNames searchKinds searchBigrams
         ++ externalsSummaryField
         ++ moduleOptionEscapesField
+        ++ unsolvedModulesField
         ++ "}"
 
   in GraphJsonOutput
@@ -791,6 +806,7 @@ packedAnalyticalJson defsList defs =
   ++ ",\"lines\":"  ++ jsB64Int32 lns
   ++ ",\"access\":" ++ jsB64Int8  accs
   ++ ",\"unsafe\":" ++ jsB64Int8  unsafes
+  ++ ",\"unsolvedMetas\":" ++ jsB64Int32 unsolveds
   ++ typesField
   ++ subtermFields
   where
@@ -799,6 +815,7 @@ packedAnalyticalJson defsList defs =
     defAccess = mkDefAccess defs
     defSig    = mkDefSig    defs
     defUnsafe = mkDefUnsafe defs
+    defUnsolved = mkDefUnsolvedMetas defs
     hashesByQ = mkDefHashes defs
     depthsByQ = mkDefDepths defs
 
@@ -808,6 +825,9 @@ packedAnalyticalJson defsList defs =
     -- One Int8 bitmask per def, always present; 0 = no escapes. Bit
     -- layout in 'encodeUnsafeByte' (MUST match packed_analytical_check.py).
     unsafes = [ encodeUnsafeByte (defUnsafe qn) | qn <- defsList ] :: [Int8]
+    -- Silent unsolved-meta count per def; 0 round-trips to expanded's
+    -- omission of the per-def @unsolvedMetas@ field.
+    unsolveds = [ fromIntegral (defUnsolved qn) | qn <- defsList ] :: [Int32]
     sigs  = [ defSig qn | qn <- defsList ]
 
     typesField
@@ -970,6 +990,14 @@ mkDefUnsafe :: [ADDef] -> (NodeRef -> [UnsafeTag])
 mkDefUnsafe defs =
   let !m = M.fromList [ (_name d, _unsafe d) | d <- defs ]
   in \qn -> M.findWithDefault [] qn m
+
+-- | Silent unsolved-meta count by NodeRef; @0@ for QNames with no 'ADDef'.
+-- Shared by packed-analytical and expanded so the two agree
+-- node-for-node.
+mkDefUnsolvedMetas :: [ADDef] -> (NodeRef -> Int)
+mkDefUnsolvedMetas defs =
+  let !m = M.fromList [ (_name d, n) | d <- defs, let n = _unsolvedMetas d, n > 0 ]
+  in \qn -> M.findWithDefault 0 qn m
 
 -- | Wire encoding for 'EdgeProv' in the packed JSON form.
 encodeEdgeProv :: EdgeProv -> Int8
@@ -1363,6 +1391,7 @@ toExpandedGraph GraphInput{..} =
       defAccess = mkDefAccess giDefs
       defSig    = mkDefSig    giDefs
       defUnsafe = mkDefUnsafe giDefs
+      defUnsolved = mkDefUnsolvedMetas giDefs
 
       defModuleOf  = map moduleKey defsList
 
@@ -1435,6 +1464,7 @@ toExpandedGraph GraphInput{..} =
         , wdAccess = defAccess qn
         , wdType   = defSig qn
         , wdUnsafe = defUnsafe qn
+        , wdUnsolvedMetas = defUnsolved qn
         , wdX      = fmap posX (M.lookup qn giPositions)
         , wdY      = fmap posY (M.lookup qn giPositions)
         }
@@ -1470,6 +1500,7 @@ toExpandedGraph GraphInput{..} =
        , egSourceFiles    = giSourceFiles
        , egReExports      = giReExports
        , egModuleOptionEscapes = giModuleOptionEscapes
+       , egUnsolvedModules = giUnsolvedModules
        , egSubtermHashes  =
            if M.null defHashesByQ then Nothing
            else Just [ M.findWithDefault [] qn defHashesByQ | qn <- defsList ]

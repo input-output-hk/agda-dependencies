@@ -20,7 +20,7 @@
 <main><div class="layout">
 <aside class="toc"><div class="toc-inner">
 <div class="toc-title">On this page</div>
-<nav><a class="lvl2" href="#prerequisites">Prerequisites</a><a class="lvl2" href="#build">Build</a><a class="lvl2" href="#quick-start">Quick start</a><a class="lvl2" href="#backend-flags">Backend flags</a><a class="lvl2" href="#views">Views</a><a class="lvl2" href="#yaml-config">YAML config</a><a class="lvl2" href="#linking-to-source">Linking to source</a><a class="lvl2" href="#large-projects-lazy-output">Large projects: lazy output</a><a class="lvl2" href="#consuming-the-json-output">Consuming the JSON output</a><a class="lvl2" href="#what-gets-filtered-out">What gets filtered out</a><a class="lvl2" href="#ai-disclaimer">AI disclaimer</a></nav>
+<nav><a class="lvl2" href="#prerequisites">Prerequisites</a><a class="lvl2" href="#build">Build</a><a class="lvl2" href="#quick-start">Quick start</a><a class="lvl2" href="#backend-flags">Backend flags</a><a class="lvl2" href="#views">Views</a><a class="lvl2" href="#yaml-config">YAML config</a><a class="lvl3" href="#checking-a-config-agda-deps-doctor">Checking a config: agda-deps doctor</a><a class="lvl2" href="#linking-to-source">Linking to source</a><a class="lvl2" href="#large-projects-lazy-output">Large projects: lazy output</a><a class="lvl2" href="#consuming-the-json-output">Consuming the JSON output</a><a class="lvl3" href="#expanded-top-level-fields">Expanded top-level fields</a><a class="lvl2" href="#what-gets-filtered-out">What gets filtered out</a><a class="lvl2" href="#ai-disclaimer">AI disclaimer</a></nav>
 </div></aside>
 <div class="prose"><h1 id="agda-deps-an-agda-dependency-graph-generator-plus-visualisations">agda-deps: an Agda dependency graph generator plus visualisations</h1>
 <p><code>agda-deps</code> is an Agda compiler backend that emits a dependency graph relating
@@ -68,7 +68,7 @@ overview of the state of a library.</p>
 <h2 id="prerequisites">Prerequisites</h2>
 <ul>
 <li>GHC, <code>base &gt;= 4.10 &amp;&amp; &lt; 4.23</code>.</li>
-<li><code>Agda &gt;= 2.8 &amp;&amp; &lt; 3</code>. </li>
+<li><code>Agda &gt;= 2.8 &amp;&amp; &lt; 3</code>.</li>
 </ul>
 <h2 id="build">Build</h2>
 <p>Two builds, against Agda 2.8 (default) or 2.9:</p>
@@ -84,12 +84,14 @@ dot -Tsvg test/deps.dot -o deps.svg
 <pre><code>cabal run agda-deps -- --format=html -i test/ -o test/ test/Test.agda
 xdg-open test/deps.html
 </code></pre>
-<p>HTML pages are interactive: pan &amp; zoom, collapsible module clusters,
-click-to-focus, a module-tree sidebar, layout/spacing controls, and a
-transitive-edge filter.</p>
-<p>Externals (stdlib, <code>Agda.Builtin.*</code>, <code>depend:</code> libraries) start hidden. Under
-<code>--lazy</code> only the entry module shows at first; click a module to reveal its
-imports.</p>
+<p>The default view is interactive: pan &amp; zoom, expand/collapse module pods,
+click a definition for a detail drawer, search modules and definitions,
+re-layout, and an <strong>Externals: on/off</strong> toggle that hides everything outside
+the project root (stdlib, <code>Agda.Builtin.*</code>, <code>depend:</code> libraries). Other views
+add their own controls — a file/module tree in <code>ide-three-pane</code> and
+<code>notion-doc</code>, a transitive-edge filter in <code>sigma</code>.</p>
+<p>Module pods start collapsed either way; under <code>--lazy</code> expanding one <em>fetches</em>
+that module's definitions instead of reading them from the inlined graph.</p>
 <p>Run on your own code by pointing <code>-i</code> at the include path that resolves your
 imports (repeat <code>-i</code> for the standard library) and passing the top module:</p>
 <pre><code>cabal run agda-deps -- --format=html -i src/ -i /path/to/agda-stdlib/src -o out/ src/MyMain.agda
@@ -99,6 +101,8 @@ imports (repeat <code>-i</code> for the standard library) and passing the top mo
 Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</code>,
 <code>--library-file=FILE</code>, <code>--no-libraries</code>, and the trailing positional module.
 <code>--help</code> lists the backend's options; <code>--agda-help</code> shows Agda's.</p>
+<p>There is one subcommand, <code>agda-deps doctor</code>, which checks the YAML config file
+and exits — see <a href="#checking-a-config-agda-deps-doctor">Checking a config</a>.</p>
 <ul>
 <li><code>-o DIR</code> / <code>--out-dir=DIR</code> — output directory (<code>deps.dot|html|json</code>). Without
   it, DOT and JSON go to stdout; HTML requires it. A value ending in
@@ -114,21 +118,28 @@ Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</co
   (defaults <code>#4caf50</code> / <code>#f44336</code> / <code>#9c27b0</code> / <code>#ff9800</code>).</li>
 <li><code>--keep-going</code> — don't abort on a type-check error: tag the failing module
   <code>failed</code> and emit whatever loaded, with def-level data for every module that
-  elaborated. </li>
+  elaborated.</li>
 <li><code>--skip-agda</code> — don't invoke Agda; render a module-level graph from a source
   scan (<code>module</code> / <code>import</code> lines). No definition graph, no
   D/P/H states, no snippets — module-DAG views only.</li>
 <li><code>--lenient-imports</code> — forward <code>--allow-unsolved-metas</code> to Agda, for projects
-  that deliberately commit <code>?</code> holes; combine with <code>--keep-going</code>. </li>
+  that deliberately commit <code>?</code> holes; combine with <code>--keep-going</code>. Under this
+  flag a module with unsolved metas <em>succeeds</em> (they become <code>unsolved#meta.*</code>
+  postulates), so <code>failedModules: []</code> alone does <strong>not</strong> mean "everything
+  compiles" — check <code>unsolvedModules</code> and the per-def <code>unsolvedMetas</code> counts,
+  which single out the <em>silent</em> metas (missing record fields, failed instance
+  search, unsolved <code>_</code>) that plain <code>agda</code> would reject, while honest <code>?</code> holes
+  stay plain state-<code>H</code> defs.</li>
 <li><code>--resolve-deps</code> — constrain Agda's search path to the project's <code>.agda-lib</code>
-  <code>depend:</code> closure. </li>
+  <code>depend:</code> closure.</li>
 <li><code>--no-externals</code> — drop everything outside the project root (nodes and edges).
   JSON keeps a top-level <code>externals_summary</code> of what was dropped.</li>
 <li><code>--json-mode=packed|expanded</code> — the <code>--format=json</code> shape (default <code>packed</code>).
   See <a href="#consuming-the-json-output">Consuming the JSON output</a>.</li>
 <li><code>--packed-analytical</code> — add the per-def analytical arrays (<code>kinds</code>/<code>lines</code>/
-  <code>access</code>/<code>unsafe</code>, plus <code>types</code> and subterm arrays when those are enabled) to
-  packed, so a decoded packed graph is node-for-node identical to expanded.</li>
+  <code>access</code>/<code>unsafe</code>/<code>unsolvedMetas</code>, plus <code>types</code> and subterm arrays when those
+  are enabled) to packed, so a decoded packed graph is node-for-node identical
+  to expanded.</li>
 <li><code>--with-term-hashes</code> — emit a <code>Word64</code> fingerprint per definition subterm
   (<code>definitionSubtermHashes</code> + <code>definitionSubtermDepths</code>) in expanded JSON. Off
   by default (adds a Term walk, ~50–100% wire growth).</li>
@@ -138,8 +149,9 @@ Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</co
   <code>type</code> field in expanded JSON (as written, one line). Off by default.</li>
 <li><code>--normalise-signatures</code> — normalise types before rendering.</li>
 <li><code>--signature-implicits</code> — show implicit/irrelevant args.</li>
-<li><code>--incremental</code> — per-module caching under <code>&lt;out-dir&gt;/.agda-deps-cache/</code>,
-  keyed on the interface hash.</li>
+<li><code>--incremental</code> — per-module caching under <code>&lt;out-dir&gt;/.agda-deps-cache/</code>
+  (<code>./.agda-deps-cache/</code> with no <code>-o</code>), keyed on the interface hash. Disabled
+  under <code>--keep-going</code>.</li>
 <li><code>--cache-dir=DIR</code> — override the cache location.</li>
 <li><code>--quiet</code> — suppress the progress lines on stderr; warnings and errors still
   print.</li>
@@ -153,7 +165,7 @@ Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</co
 <p>HTML / source flags:</p>
 <ul>
 <li><code>--with-source</code> — embed each definition's source snippet; clicking a leaf
-  opens it in a side drawer. </li>
+  opens it in a side drawer. Requires <code>--lazy</code>.</li>
 <li><code>--agda-html-dir=DIR</code> — link the views to existing <code>agda --html</code> pages at
   <code>DIR/&lt;Module.Name&gt;.html</code> (path relative to the generated HTML). Wired into the
   <code>sunburst-hierarchy</code> view.</li>
@@ -166,8 +178,8 @@ Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</co
   they still appear in the graph.</li>
 <li><code>--max-snippet-bytes=N</code> — per-module snippet cap (default <code>1000000</code>; <code>0</code>
   disables).</li>
-<li><code>--gzip</code> — also write a <code>.gz</code> next to every JSON file (the page still fetches
-  the plain <code>.json</code>).</li>
+<li><code>--gzip</code> — <code>--lazy</code> only: also write a <code>.gz</code> next to every emitted JSON file
+  (the page still fetches the plain <code>.json</code>).</li>
 </ul>
 <p>Every run also scans sources for <code>module</code> / <code>import</code> declarations and unions
 that module-level graph into the output, so modules that never type-checked
@@ -193,15 +205,15 @@ the JS app and styling differ.</p>
 </tr>
 <tr>
 <td><code>sigma</code></td>
-<td>WebGL module-level renderer (sigma.js + graphology + dagre). Scales to ~1M nodes.</td>
+<td>WebGL module-level renderer (sigma.js + graphology + dagre), with a transitive-edge filter. The largest-scale option.</td>
 </tr>
 <tr>
 <td><code>big-module-dag-pods</code></td>
-<td>Viewport-virtualised <code>module-dag-pods</code> for ~100k modules; layout precomputed Haskell-side, minimap.</td>
+<td>Viewport-virtualised <code>module-dag-pods</code>; layout precomputed Haskell-side, minimap. Targets ~100k modules.</td>
 </tr>
 <tr>
 <td><code>ide-three-pane</code></td>
-<td>File tree + focused subgraph + source pane. Definition-level.</td>
+<td>File/module tree + focused subgraph + source pane. Definition-level.</td>
 </tr>
 <tr>
 <td><code>source-centric</code></td>
@@ -263,37 +275,59 @@ option at its default with a one-line comment — and edit it:</p>
 </code></pre>
 <p>The generated file is entirely commented out, so it reproduces the defaults
 as-is; uncomment only the keys you want to change.</p>
-<pre><code class="language-yaml">format: html
+<pre><code class="language-yaml">out-dir: build/deps
+format: html
 view: module-dag-pods
 theme: dark
-no-externals: true
-keep-going: true
-incremental: true
-cache-dir: .agda-deps-cache
-with-source: true
+color-defined: &quot;#4caf50&quot;   # quote colours: bare #… is a YAML comment
 lazy: true
+with-source: true
+no-externals: true
+incremental: true
 exclude:
   - Agda.Builtin
   - Data
-no-source-for:
-  - Foreign
-color-defined: &quot;#4caf50&quot;
-max-snippet-bytes: 1000000
-json-mode: expanded
-gzip: false
-quiet: false
-out-dir: build/deps
-with-term-hashes: false       # per-def subterm fingerprints
-min-term-depth: 3             # filter; needs with-term-hashes
-with-signatures: false        # per-def rendered type signatures
-normalise-signatures: false   # normalise types; needs with-signatures
-signature-implicits: false    # show implicit args; needs with-signatures
 </code></pre>
 <p>Repeatable flags (<code>exclude</code>, <code>no-source-for</code>) take YAML lists. Explicit
-<code>--color-*</code> CLI flags still win over <code>theme:</code>.</p>
+<code>--color-*</code> CLI flags still win over <code>theme:</code>. Run <code>agda-deps doctor</code> to check
+a file before relying on it.</p>
+<h3 id="checking-a-config-agda-deps-doctor">Checking a config: <code>agda-deps doctor</code></h3>
+<pre><code>agda-deps doctor [--config=PATH] [--strict]
+</code></pre>
+<p>Resolves the config exactly as a run would, then reports what is wrong with it
+— no Agda run, no input module. It catches the failures a config fails
+<em>silently</em>:</p>
+<ul>
+<li><strong>Unknown keys.</strong> A misspelled key is ignored by the parser, so the setting
+  just never applies. <code>doctor</code> names it and suggests the closest real key.</li>
+<li><strong>Bad values.</strong> A colour that isn't <code>#RRGGBB</code>, an unrecognised <code>view:</code> slug
+  (with a did-you-mean), <code>exclude: Data</code> where a list was meant, a quoted
+  <code>"true"</code>, a negative <code>max-snippet-bytes</code>. Also the YAML trap of an unquoted
+  <code>color-hole: #9c27b0</code>, which YAML reads as a comment, leaving the key null.</li>
+<li><strong>Combinations that do nothing.</strong> <code>with-source</code> without <code>lazy</code>, <code>cache-dir</code>
+  without <code>incremental</code>, <code>min-term-depth</code> without <code>with-term-hashes</code>, a <code>view:</code>
+  under <code>format: dot</code>, <code>incremental</code> together with <code>keep-going</code>, and the rest.</li>
+</ul>
+<pre><code>$ agda-deps doctor
+agda-deps doctor
+
+  config     /home/me/proj/.agda-deps.yml
+  origin     found in the nearest ancestor with a *.agda-lib (/home/me/proj)
+  keys       6 set
+
+  error    view: &quot;sigmaa&quot; is not a recognised value
+           fix: did you mean `sigma`? one of: cytoscape, ide-three-pane, …
+  warning  cache-dir: only locates the incremental cache, which is off
+           fix: add incremental: true, or drop cache-dir
+
+Summary: 1 error, 1 warning
+</code></pre>
+<p>Exit status is 1 when there is any error, 0 otherwise; <code>--strict</code> fails on
+warnings too, for use as a CI gate. Warnings assume the config stands alone —
+a CLI flag layered on top can legitimately rescue any of them.</p>
 <h2 id="linking-to-source">Linking to source</h2>
 <p><code>--with-source</code> (with <code>--lazy</code>) runs Agda's HTML highlighter on every loaded
-module, slices each definition is highlighted span into a per-module
+module, slices each definition's highlighted span into a per-module
 <code>snippets/&lt;Module&gt;.json</code>, and fetches it on demand when a leaf is clicked. It
 requires <code>--lazy</code> because <code>fetch()</code> needs HTTP serving:</p>
 <pre><code>cabal run agda-deps -- --format=html --with-source --lazy -i test/ -o test/ test/Test.agda
@@ -330,14 +364,91 @@ splices in the leaves.</p>
   base64 <code>Int8</code>/<code>Int32</code> arrays (consumers decode base64 → typed array). <code>defs</code>
   carries <code>names</code>/<code>modules</code>/<code>states</code>/<code>x</code>/<code>y</code> unless
   <a href="#backend-flags"><code>--packed-analytical</code></a> adds the <code>kinds</code>/<code>lines</code>/<code>access</code>/
-  <code>unsafe</code> (and <code>types</code>/<code>subterm*</code>) arrays. Best for tens of thousands of nodes.</li>
-<li><strong>expanded</strong> — <code>definitions</code> as <code>{id, name, module, state, kind, x, y}</code>
-  records, <code>definitionEdges</code> / <code>moduleEdges</code> as qname / module-name pairs, plus
-  a <code>reexports</code> array. No base64. Carries <code>"schemaVersion": 2</code> and
-  <code>"mode": "expanded"</code>. Best for small fixtures and ad-hoc tooling.</li>
+  <code>unsafe</code>/<code>unsolvedMetas</code> (and <code>types</code>/<code>subterm*</code>) arrays. Best for tens of
+  thousands of nodes.</li>
+<li><strong>expanded</strong> — arrays of records keyed by qname / module name, no base64.
+  Carries <code>"schemaVersion": 2</code> and <code>"mode": "expanded"</code>. Best for small
+  fixtures and ad-hoc tooling.</li>
 </ul>
 <p>Both forms carry <code>"producer"</code> (build fingerprint) and <code>"nodeKeyVersion"</code> (node
 naming convention, for stale-cache detection; absent reads as <code>1</code>).</p>
+<h3 id="expanded-top-level-fields">Expanded top-level fields</h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>v</code>, <code>schemaVersion</code></td>
+<td>both <code>2</code>. Refuse an unrecognised <code>v</code>.</td>
+</tr>
+<tr>
+<td><code>mode</code></td>
+<td><code>"expanded"</code>.</td>
+</tr>
+<tr>
+<td><code>nodeKeyVersion</code>, <code>producer</code></td>
+<td>node-naming convention; build fingerprint.</td>
+</tr>
+<tr>
+<td><code>modules</code></td>
+<td>every module in the graph, ascending.</td>
+</tr>
+<tr>
+<td><code>entryModule</code></td>
+<td>the module passed on the command line, or <code>null</code>.</td>
+</tr>
+<tr>
+<td><code>externalModules</code></td>
+<td>subset of <code>modules</code> outside the project root.</td>
+</tr>
+<tr>
+<td><code>failedModules</code></td>
+<td>modules whose type-check failed (<code>--keep-going</code>).</td>
+</tr>
+<tr>
+<td><code>definitions</code></td>
+<td>one record per definition — see below.</td>
+</tr>
+<tr>
+<td><code>definitionEdges</code></td>
+<td><code>[source, target]</code> pairs of definition names.</td>
+</tr>
+<tr>
+<td><code>definitionEdgesProvenance</code></td>
+<td>parallel to <code>definitionEdges</code> — see below.</td>
+</tr>
+<tr>
+<td><code>moduleEdges</code></td>
+<td><code>[importer, imported]</code> pairs of module names.</td>
+</tr>
+<tr>
+<td><code>transitiveModuleEdges</code></td>
+<td>the module edges implied by a longer path.</td>
+</tr>
+<tr>
+<td><code>moduleFiles</code></td>
+<td>module name → source path.</td>
+</tr>
+<tr>
+<td><code>sourceFiles</code></td>
+<td>every scanned source path.</td>
+</tr>
+<tr>
+<td><code>reexports</code></td>
+<td>one row per <code>open import … public</code> — see below.</td>
+</tr>
+</tbody>
+</table>
+<p>Optional top-level fields (<code>moduleOptionEscapes</code>, <code>unsolvedModules</code>,
+<code>definitionSubtermHashes</code>, <code>definitionSubtermDepths</code>, <code>externals_summary</code>) are
+described below and omitted when they carry nothing.</p>
+<p>Each <code>definitions</code> record always carries <code>{id, name, module, state, kind, x, y}</code>,
+plus — when known for that definition — <code>line</code>, <code>access</code> (<code>private</code> / <code>public</code>),
+<code>type</code> (under <code>--with-signatures</code>), <code>unsafe</code>, and <code>unsolvedMetas</code>.</p>
 <ul>
 <li><strong>State letters</strong> — <code>D</code> defined, <code>P</code> postulate, <code>H</code> hole, <code>F</code> failed
   (module-level marker under <code>--keep-going</code>).</li>
@@ -348,6 +459,21 @@ naming convention, for stale-cache detection; absent reads as <code>1</code>).</
   <code>non-terminating</code> (<code>{-# NON_TERMINATING #-}</code>) and <code>trustme</code> (references
   <code>primTrustMe</code>). Orthogonal to <code>state</code>. Omitted when empty. <code>{-# TERMINATING #-}</code>
   is not surfaced (indistinguishable from an ordinary proven-terminating def).</li>
+<li><strong><code>unsolvedMetas</code></strong> (per-def, optional) — count of <em>silent</em> unsolved
+  metavariables the def mentions directly (missing record fields, failed
+  instance search, unsolved <code>_</code> — what plain <code>agda</code> reports as
+  <code>UnsolvedMetaVariables</code>). Honest interaction <code>?</code> holes are <em>not</em> counted, so
+  <code>H</code> with no <code>unsolvedMetas</code> = open goal(s) only; <code>H</code> with a count =
+  silently-missing evidence. Omitted when 0. Only meaningful under
+  <code>--lenient-imports</code> / <code>--allow-unsolved-metas</code> (without the flag such
+  modules simply fail).</li>
+<li><strong><code>unsolvedModules</code></strong> (top-level, optional) — module →
+  <code>{ "metas": [lines], "constraints": [lines] }</code> rollup of the same split:
+  the source lines of each silent unsolved meta (one entry per meta) and of
+  unsolved constraints. Modules whose only holes are honest <code>?</code>s don't
+  appear; omitted when empty. Under <code>--lenient-imports</code> read this <em>alongside</em>
+  <code>failedModules</code> — an empty <code>failedModules</code> with a non-empty
+  <code>unsolvedModules</code> means "loaded, but with un-produced evidence".</li>
 <li><strong><code>moduleOptionEscapes</code></strong> (top-level, optional) — module → the file-level
   <code>{-# OPTIONS #-}</code> flags that make <code>agda --safe</code> reject it (<code>--type-in-type</code>,
   <code>--no-positivity-check</code>, <code>--rewriting</code>, …). Read from each module's own
@@ -355,9 +481,15 @@ naming convention, for stale-cache detection; absent reads as <code>1</code>).</
 <li><strong><code>definitionEdgesProvenance</code></strong> (expanded, optional) — parallel to
   <code>definitionEdges</code>, tagging each edge <code>signature | body | module-local | with |
   unknown</code>. Absent falls back to <code>unknown</code>.</li>
-<li><strong><code>reexports</code></strong> rows — <code>{ "from", "to", "names": [...] }</code>, one per
-  <code>open import … public</code>; a row that used <code>renaming</code> also carries a <code>"renames"</code>
-  map (<code>alias → canonical name</code>).</li>
+<li><strong><code>reexports</code></strong> rows (expanded only) — <code>{ "from", "to", "names": [...] }</code>,
+  one per <code>open import … public</code>; a row that used <code>renaming</code> also carries a
+  <code>"renames"</code> map (<code>alias → canonical name</code>).</li>
+<li><strong><code>externals_summary</code></strong> (top-level, optional) — under <code>--no-externals</code>, the
+  modules that were dropped plus their postulates
+  (<code>{ "modules": [...], "postulates_by_module": {...} }</code>).</li>
+<li><strong><code>definitionSubtermHashes</code></strong> / <strong><code>definitionSubtermDepths</code></strong> (expanded,
+  optional) — under <code>--with-term-hashes</code>, one array per definition, parallel to
+  <code>definitions</code>.</li>
 </ul>
 <p>The expanded form has a JSON Schema at
 <a href="schema/graph-v2-expanded.schema.json"><code>schema/graph-v2-expanded.schema.json</code></a>.
@@ -367,11 +499,11 @@ The wire shape is described once in <code>AgdaDeps.Backend.Wire</code>; <code>ag
 --emit-schema</code> regenerates the schema from it. The <code>packed</code> form is not
 schematised.</p>
 <h2 id="what-gets-filtered-out">What gets filtered out</h2>
-<p>To keep the graph readable, the backend ignores compiler-generated names:
-pattern-lambdas, <code>with</code>-helpers, Kan operations, inlined functions from
-instantiated modules, clause-less primitives, <code>PrimitiveSort</code>, <code>DataOrRecSig</code>,
-<code>GeneralizableVar</code>, and the <code>Agda.Primitive.Level</code> axiom (<code>ignoreDef</code> in
-<code>src/AgdaDeps/Deps.hs</code>).</p>
+<p>To keep the graph readable, the backend ignores compiler-generated names
+(<code>ignoreDef</code> in <code>src/AgdaDeps/Deps.hs</code>): module-instantiation copies,
+<code>variable</code>-block names, pattern-lambdas, <code>with</code>-helpers, Kan operations,
+<code>{-# INLINE #-}</code> functions, clause-less primitives, <code>PrimitiveSort</code>,
+<code>DataOrRecSig</code>, <code>GeneralizableVar</code>, and the <code>Agda.Primitive.Level</code> axiom.</p>
 <p>Edges <em>through</em> ignored defs are preserved: when a kept def references a
 <code>with</code>-helper that references a real target, the edge <code>kept-def → real-target</code>
 is reconstructed by a closure pass (<code>contractIgnoredEdges</code>, same file).</p>

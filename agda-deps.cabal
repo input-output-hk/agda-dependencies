@@ -54,6 +54,7 @@ executable agda-deps
                        AgdaDeps.Backend.Html
                        AgdaDeps.Backend.Json
                        AgdaDeps.Backend
+                       AgdaDeps.Doctor
                        AgdaDeps.Help
                        AgdaDeps.ModuleExplorer
                        AgdaDeps.Driver

@@ -65,6 +65,7 @@ printHelp = putStr $ unlines
   [ "agda-deps " ++ showVersion version
   , ""
   , "Usage: agda-deps [OPTIONS...] FILE.agda"
+  , "       agda-deps doctor [--config=PATH] [--strict]"
   , ""
   , "An Agda compiler backend that emits a dependency graph (DOT/HTML/JSON)"
   , "of every definition reachable from FILE.agda."
@@ -77,6 +78,13 @@ printHelp = putStr $ unlines
 #endif
   ++ unlines
   [ ""
+  , "Commands (handled by agda-deps; no Agda run):"
+  , ""
+  , "  doctor     Check the YAML config file and exit: unknown keys, invalid"
+  , "             values, and settings that do nothing in combination."
+  , "             Takes --config=PATH to check a specific file, and --strict"
+  , "             to exit non-zero on warnings as well as errors."
+  , ""
   , "Other backend flags (handled by agda-deps before Agda starts):"
   , ""
   , "  --version, -V, --numeric-version"

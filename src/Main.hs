@@ -1,8 +1,9 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PatternGuards #-}
--- | Entry point for the @agda-deps@ executable: intercept @--help@ \/
--- @--version@ \/ @--emit-schema@, pre-process @argv@ (canonicalise
+-- | Entry point for the @agda-deps@ executable: intercept the @doctor@
+-- subcommand and @--help@ \/ @--version@ \/ @--emit-schema@, pre-process
+-- @argv@ (canonicalise
 -- path-bearing flags, @cd@ to the nearest @.agda-lib@ ancestor), then
 -- hand off to 'runAgdaArgs', 'runAgdaArgsKeepGoing', or 'runSkipAgda'.
 module Main where
@@ -33,6 +34,7 @@ import AgdaDeps.Config
   ( applyConfig, defaultConfig, discoverConfigPath, loadConfig
   , extractConfigArg, inferFormatFromOutput, cfgResolveDeps
   , showDefaultsYaml )
+import AgdaDeps.Doctor  ( isDoctorCommand, runDoctor )
 import AgdaDeps.Driver  ( runAgdaArgsKeepGoing, wantsKeepGoing )
 import AgdaDeps.Backend.Wire ( expandedSchemaJson )
 import AgdaDeps.Help
@@ -56,6 +58,9 @@ runAgdaArgs backends args = withArgs args (runAgda' backends)
 main :: IO ()
 main = do
   rawArgs <- getArgs
+  -- `agda-deps doctor` checks the YAML config and exits. First, so that
+  -- `doctor --help` gets the subcommand's own usage.
+  when (isDoctorCommand rawArgs) $ runDoctor rawArgs
   -- Plain --help / -h / -? short-circuit to backend-only help; forms
   -- like --help=warning pass through to Agda.
   when (any isHelpRequest rawArgs && not (any wantsAgdaHelp rawArgs)) $

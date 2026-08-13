@@ -18,10 +18,15 @@ module AgdaDeps.Config
 
     -- * Theme presets
   , Theme(..)
+  , themeSlug
+  , allThemes
   , parseTheme
   , applyTheme
 
     -- * Discovery + loading
+  , ConfigOrigin(..)
+  , describeOrigin
+  , findConfigPath
   , discoverConfigPath
   , loadConfig
 
@@ -56,6 +61,7 @@ import AgdaDeps.Options
   ( Options(..), OutputFormat(..), JsonMode(..), View(..)
   , ColorPalette(..), defaultPalette, defaultOptions
   , viewSlug, formatSlug, jsonModeSlug
+  , allViews, allFormats, allJsonModes, parseSlug
   )
 
 -- | YAML config payload. Every field is 'Maybe' so an empty file
@@ -148,15 +154,21 @@ defaultConfig = Config
 data Theme = ThemeDefault | ThemeLight | ThemeDark | ThemeColorblind
   deriving (Show, Eq)
 
+-- | Canonical slug for a 'Theme'.
+themeSlug :: Theme -> String
+themeSlug ThemeDefault    = "default"
+themeSlug ThemeLight      = "light"
+themeSlug ThemeDark       = "dark"
+themeSlug ThemeColorblind = "colorblind"
+
+-- | Every 'Theme', in the order accepted values are listed to the user.
+-- Single source of truth for @--theme@ \/ @theme:@ (see 'AgdaDeps.Options.allFormats').
+allThemes :: [Theme]
+allThemes = [ThemeDefault, ThemeLight, ThemeDark, ThemeColorblind]
+
 -- | Parse the @--theme@ / @theme:@ value.
 parseTheme :: String -> Either String Theme
-parseTheme s = case s of
-  "default"    -> Right ThemeDefault
-  "light"      -> Right ThemeLight
-  "dark"       -> Right ThemeDark
-  "colorblind" -> Right ThemeColorblind
-  _ -> Left $ "Unknown theme: " ++ show s
-           ++ ". Expected one of: default, light, dark, colorblind."
+parseTheme = parseSlug "theme" themeSlug allThemes
 
 -- | Apply a theme to the colour-palette slots of an 'Options'. The
 -- four colours are set; everything else is left alone.
@@ -193,37 +205,13 @@ parseEnum fieldName parse = withText fieldName $ \t ->
     Left e  -> fail e
 
 instance FromJSON OutputFormat where
-  parseJSON = parseEnum "format" $ \case
-    "dot"  -> Right FmtDot
-    "html" -> Right FmtHtml
-    "json" -> Right FmtJson
-    s -> Left $ "Unknown format: " ++ show s
-              ++ ". Expected one of: dot, html, json."
+  parseJSON = parseEnum "format" (parseSlug "format" formatSlug allFormats)
 
 instance FromJSON JsonMode where
-  parseJSON = parseEnum "json-mode" $ \case
-    "packed"   -> Right JsonPacked
-    "expanded" -> Right JsonExpanded
-    s -> Left $ "Unknown json-mode: " ++ show s
-              ++ ". Expected one of: packed, expanded."
+  parseJSON = parseEnum "json-mode" (parseSlug "json-mode" jsonModeSlug allJsonModes)
 
 instance FromJSON View where
-  parseJSON = parseEnum "view" $ \case
-    "cytoscape"               -> Right ViewCytoscape
-    "ide-three-pane"          -> Right ViewIdeThreePane
-    "module-dag-pods"         -> Right ViewModuleDagPods
-    "source-centric"          -> Right ViewSourceCentric
-    "notion-doc"              -> Right ViewNotionDoc
-    "wiki-backlinks"          -> Right ViewWikiBacklinks
-    "sigma"                   -> Right ViewSigma
-    "big-module-dag-pods"     -> Right ViewBigModuleDagPods
-    "critical-path-holes"     -> Right ViewCriticalPathHoles
-    "progress-dashboard"      -> Right ViewProgressDashboard
-    "cartographic-atlas"      -> Right ViewCartographicAtlas
-    "sunburst-hierarchy"      -> Right ViewSunburstHierarchy
-    "reading-order-narrative" -> Right ViewReadingOrderNarrative
-    "pixel-grid-overview"     -> Right ViewPixelGridOverview
-    s -> Left $ "Unknown view: " ++ show s
+  parseJSON = parseEnum "view" (parseSlug "view" viewSlug allViews)
 
 instance FromJSON Theme where
   parseJSON = parseEnum "theme" parseTheme
@@ -350,8 +338,10 @@ showDefaultsYaml = unlines $
   , ""
   , "# --- Output ----------------------------------------------------------------"
   , ""
-  , "# Output directory or file. Default: none (usually set with -o on the CLI)."
-  , "# A .html / .json / .dot extension here also selects the format."
+  , "# Output directory. Default: none (usually set with -o on the CLI)."
+  , "# Note: a .html / .json / .dot extension selects the format only when given"
+  , "# as -o on the command line; here it is just a directory name, so set"
+  , "# `format:` below as well."
   , "#out-dir: deps"
   , ""
   , "# Output format: dot | html | json."
@@ -483,7 +473,27 @@ showDefaultsYaml = unlines $
 -- Discovery
 -- ---------------------------------------------------------------------------
 
--- | Resolve which config file (if any) should be loaded.
+-- | Which step of the search order produced the config file. Carried for
+-- diagnostics (@agda-deps doctor@); the loader itself only needs the path.
+data ConfigOrigin
+  = OriginFlag                  -- ^ explicit @--config=PATH@.
+  | OriginEnv                   -- ^ @$AGDA_DEPS_CONFIG@.
+  | OriginCwd                   -- ^ dotfile in the current directory.
+  | OriginProjectRoot FilePath  -- ^ dotfile beside the @*.agda-lib@ in this dir.
+  deriving (Show, Eq)
+
+-- | One-line English rendering of a 'ConfigOrigin'.
+describeOrigin :: ConfigOrigin -> String
+describeOrigin OriginFlag            = "named by --config"
+describeOrigin OriginEnv             = "named by $AGDA_DEPS_CONFIG"
+describeOrigin OriginCwd             = "found in the current directory"
+describeOrigin (OriginProjectRoot d) =
+  "found in the nearest ancestor with a *.agda-lib (" ++ d ++ ")"
+
+-- | Resolve which config file (if any) should be loaded, keeping the
+-- provenance. 'Left' is a user error (a file was named but does not
+-- exist); @Right Nothing@ means no config file exists anywhere in the
+-- search order, which is not an error.
 --
 -- Precedence (highest first):
 --
@@ -493,31 +503,31 @@ showDefaultsYaml = unlines $
 --   4. Walk up from cwd to the nearest directory containing a
 --      @*.agda-lib@; look for the same two filenames there.
 --   5. Nothing — no config applied.
-discoverConfigPath :: Maybe FilePath -> IO (Maybe FilePath)
-discoverConfigPath (Just p) = do
+findConfigPath :: Maybe FilePath -> IO (Either String (Maybe (FilePath, ConfigOrigin)))
+findConfigPath (Just p) = do
   exists <- doesFileExist p
-  if exists
-    then pure (Just p)
-    else die ("agda-deps: --config: file not found: " ++ p)
-discoverConfigPath Nothing = do
+  pure $ if exists
+    then Right (Just (p, OriginFlag))
+    else Left ("agda-deps: --config: file not found: " ++ p)
+findConfigPath Nothing = do
   mEnv <- lookupEnv "AGDA_DEPS_CONFIG"
   case mEnv of
     Just p | not (null p) -> do
       exists <- doesFileExist p
-      if exists
-        then pure (Just p)
-        else die ("agda-deps: $AGDA_DEPS_CONFIG: file not found: " ++ p)
+      pure $ if exists
+        then Right (Just (p, OriginEnv))
+        else Left ("agda-deps: $AGDA_DEPS_CONFIG: file not found: " ++ p)
     _ -> do
       cwd <- getCurrentDirectory
       mCwd <- findConfigIn cwd
       case mCwd of
-        Just p  -> pure (Just p)
-        Nothing -> walkUp cwd
+        Just p  -> pure (Right (Just (p, OriginCwd)))
+        Nothing -> Right <$> walkUp cwd
   where
     walkUp d = do
       hit <- hasAgdaLib d
       if hit
-        then findConfigIn d
+        then fmap (\p -> (p, OriginProjectRoot d)) <$> findConfigIn d
         else do
           let up = takeDirectory d
           if up == d then pure Nothing else walkUp up
@@ -537,6 +547,13 @@ discoverConfigPath Nothing = do
     firstExisting (p:ps) = do
       e <- doesFileExist p
       if e then pure (Just p) else firstExisting ps
+
+-- | 'findConfigPath' for the normal run: a named-but-missing file is
+-- fatal, and the provenance is discarded.
+discoverConfigPath :: Maybe FilePath -> IO (Maybe FilePath)
+discoverConfigPath mp = findConfigPath mp >>= \case
+  Left err -> die err
+  Right r  -> pure (fmap fst r)
 
 -- | Parse a YAML config file. Errors with a diagnostic that names the
 -- file path on parse failure.

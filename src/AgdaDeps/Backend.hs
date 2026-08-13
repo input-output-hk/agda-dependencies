@@ -42,7 +42,7 @@ import qualified Data.Text.Lazy.IO as TL
 import Data.Version ( showVersion )
 import Paths_agda_deps ( version )
 
-import Data.List ( foldl', isPrefixOf, sortOn )
+import Data.List ( foldl', isPrefixOf, sort, sortOn )
 
 import qualified System.Directory
 import System.Directory ( createDirectoryIfMissing, getCurrentDirectory )
@@ -96,6 +96,7 @@ import AgdaDeps.Deps
   , compileDefAD, collectAllQNames, nodeKey, moduleKey, hashQName
   , mkRef, nodeKeyOfQ, moduleKeyOfQ, nrSrcLoc
   , optionEscapes
+  , unsolvedInterfaceLines, liveSilentMetaLines
   , resetIgnoredEdges, contractIgnoredEdges
   , resetMethodProviders, addInstanceMethodEdges
   , IgnoredEdgeMap, readIgnoredEdges, mergeIgnoredEdges
@@ -177,7 +178,7 @@ backendWithSeed seed = Backend'
   , options               = seed
   , commandLineFlags      =
       [ Option ['o'] ["out-dir"] (ReqArg outdirOpt "DIR")
-        "Write output files to DIR. (default: project root)"
+        "Write output files to DIR (deps.dot / deps.html / deps.json).\nWithout it, dot and json go to stdout; html requires it. A DIR\nending in .html / .json / .dot also selects the format unless\n--format is given."
       , Option []    ["format"]  (ReqArg formatOpt "FORMAT")
         "Output format: dot (default), html, or json."
       , Option []    ["view"]    (ReqArg viewOpt "VIEW")
@@ -196,7 +197,7 @@ backendWithSeed seed = Backend'
           (ReqArg (colorOpt "color-hole"      (\p s -> p{ colorHole      = s })) "#RRGGBB")
         "Color for definitions containing unsolved holes (default: #9c27b0)."
       , Option []    ["with-source"] (NoArg withSourceOpt)
-        "Embed each definition's source snippet (signature + body) into the\nHTML output, fetched on demand. Requires --lazy (the self-contained\ninline variant was removed); without it, has no effect. Clicking a leaf\nopens its definition in a side drawer. To link out to whole `agda --html`\npages instead, see --agda-html-dir."
+        "Embed each definition's source snippet (signature + body) into the\nHTML output, fetched on demand. Requires --lazy; without it, has no\neffect. Clicking a leaf opens its definition in a side drawer. To link\nout to whole `agda --html` pages instead, see --agda-html-dir."
       , Option []    ["agda-html-dir"] (ReqArg agdaHtmlDirOpt "DIR")
         "Path to the pages written by `agda --html`, RELATIVE to the\ngenerated HTML (e.g. --agda-html-dir=html). The sunburst-hierarchy view\nthen shows an \"Open source\" link opening DIR/<Module.Name>.html. Off by\ndefault; when unset the output is unchanged. Best served over HTTP."
       , Option []    ["lazy"] (NoArg lazyOpt)
@@ -208,7 +209,7 @@ backendWithSeed seed = Backend'
       , Option []    ["max-snippet-bytes"] (ReqArg maxSnippetBytesOpt "N")
         "Soft per-module size cap on snippet bundles (default: 1000000).\n--max-snippet-bytes=0 disables the cap."
       , Option []    ["gzip"] (NoArg gzipOpt)
-        "HTML/lazy output: also write a .gz sibling next to every JSON file."
+        "Lazy HTML output only: also write a .gz sibling next to every\nemitted JSON file."
       , Option []    ["color-failed"]
           (ReqArg (colorOpt "color-failed"    (\p s -> p{ colorFailed    = s })) "#RRGGBB")
         "Color for modules whose type-check failed under --keep-going\n(default: #ff9800)."
@@ -217,7 +218,7 @@ backendWithSeed seed = Backend'
       , Option []    ["skip-agda"] (NoArg skipAgdaOpt)
         "Don't invoke Agda at all. Render a module-level graph straight\nfrom the source-file scan (line-parses 'module' / 'import')."
       , Option []    ["incremental"] (NoArg incrementalOpt)
-        "Cache each module's compiled dependency fragment under\n<out-dir>/.agda-deps-cache, keyed on the module's interface hash,\nand skip the per-definition walk on later runs when the module is\nunchanged. Requires Agda >= 2.8; disabled under --keep-going."
+        "Cache each module's compiled dependency fragment under\n<out-dir>/.agda-deps-cache, keyed on the module's interface hash,\nand skip the per-definition walk on later runs when the module is\nunchanged. Disabled under --keep-going."
       , Option []    ["cache-dir"] (ReqArg cacheDirOpt "DIR")
         "Override the --incremental cache location (fragments +\nserialise manifest). Default: <out-dir>/.agda-deps-cache. No\neffect without --incremental."
       , Option []    ["packed-analytical"] (NoArg packedAnalyticalOpt)
@@ -229,7 +230,7 @@ backendWithSeed seed = Backend'
       , Option []    ["json-mode"] (ReqArg jsonModeOpt "MODE")
         "JSON shape: packed (default; base64-encoded typed arrays + CSR\nadjacency, compact for huge graphs) or expanded (arrays of\nrecords keyed by qname, no base64 — friendlier for downstream\ntooling)."
       , Option []    ["lenient-imports"] (NoArg lenientImportsOpt)
-        "Tolerate imports of modules with open holes; forwarded to Agda\nas --allow-unsolved-metas. Useful with --keep-going when commits\ndeliberately leave '?' holes.\nINCOMPATIBLE WITH --safe DEPENDENCIES: --allow-unsolved-metas is a\nglobal Agda flag and any --safe module in the dep closure (e.g. the\nstandard library) will reject it with [SafeFlagPragma]. For projects\nbuilt on a --safe stdlib, prefer --keep-going alone."
+        "Tolerate imports of modules with open holes; forwarded to Agda\nas --allow-unsolved-metas. Useful with --keep-going when commits\ndeliberately leave '?' holes.\nSilent unsolved metas (missing record fields, failed instance\nsearch, unsolved _) still surface: per-def 'unsolvedMetas' counts\nand a top-level 'unsolvedModules' rollup — failedModules: [] alone\ndoes not mean everything compiles.\nINCOMPATIBLE WITH --safe DEPENDENCIES: --allow-unsolved-metas is a\nglobal Agda flag and any --safe module in the dep closure (e.g. the\nstandard library) will reject it with [SafeFlagPragma]. For projects\nbuilt on a --safe stdlib, prefer --keep-going alone."
       , Option []    ["resolve-deps"] (NoArg resolveDepsOpt)
         "Constrain Agda's search path to the project's .agda-lib 'depend:'\nclosure. Expands into '--no-libraries -i <dir>...' before Agda's\nCLI parser runs. Useful when two libraries with the same module\nname are registered (e.g. multiple stdlib versions) and Agda's\nresolver picks the wrong one, producing [AmbiguousTopLevelModuleName].\nFalls back silently to default behaviour if the project has no\n.agda-lib or resolution fails."
       , Option []    ["with-term-hashes"] (NoArg withTermHashesOpt)
@@ -677,6 +678,37 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
     ++ show (length allQNames) ++ " unique QNames, "
     ++ show (length importEdges) ++ " module-import edges."
 
+  -- Per-module silent-unsolved-meta / unsolved-constraint rollup
+  -- (@--allow-unsolved-metas@ only; empty otherwise). Interface markers
+  -- cover imported modules; the main module's metas are never postulated,
+  -- so its live silent metas are read from TCM state and attributed to the
+  -- entry module (under @--keep-going@'s re-drive there is no entry module
+  -- and no live check state — the failed module is already in
+  -- @failedModules@). Rows where both lists are empty are dropped, so
+  -- unsolved-free corpora stay byte-identical.
+  ifaceUnsolved <- sequence
+    [ do (ms, cs) <- unsolvedInterfaceLines iface
+         pure (m, (ms, cs))
+    | mi <- M.elems visited
+    , let iface = miInterface mi
+          m     = prettyShow (iTopLevelModuleName iface)
+    , keep m
+    ]
+  liveMetaLines <- liveSilentMetaLines
+  let unsolvedModules =
+        sortOn fst
+          [ row | row@(_, (ms, cs)) <- withLive, not (null ms && null cs) ]
+        where
+          withLive = case entryModule of
+            Just em | not (null liveMetaLines), keep em ->
+              let bump (m, (ms, cs))
+                    | m == em   = (m, (sort (liveMetaLines ++ ms), cs))
+                    | otherwise = (m, (ms, cs))
+              in if any ((== em) . fst) ifaceUnsolved
+                   then map bump ifaceUnsolved
+                   else (em, (liveMetaLines, [])) : ifaceUnsolved
+            _ -> ifaceUnsolved
+
   positions <- liftIO $ computeQNamePositions allQNames defs
 
   -- Create the output dir before any file write.
@@ -704,6 +736,7 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
         , giExternalsSummary = externalsSummary
         , giPackedAnalytical = False
         , giModuleOptionEscapes = moduleOptionEscapes
+        , giUnsolvedModules  = unsolvedModules
         }
 
   info "agda-deps: writing output…"

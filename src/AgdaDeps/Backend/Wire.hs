@@ -21,6 +21,7 @@ module AgdaDeps.Backend.Wire
   , WireExternals(..)
   , encodeExpanded
   , validateExpanded
+  , unsolvedModulesJson
     -- * Field-table machinery (exposed for tests / introspection)
   , Field(..)
   , SchemaDoc(..)
@@ -69,6 +70,14 @@ data ExpandedGraph = ExpandedGraph
     -- ('AgdaDeps.Deps.optionEscapes'), ascending by module; only modules
     -- with an escape appear. Emitted as the optional @moduleOptionEscapes@
     -- object; omitted when empty so escape-free corpora stay byte-identical.
+  , egUnsolvedModules :: [(String, ([Int], [Int]))]
+    -- ^ Per top-level module, @(silent unsolved-meta lines, unsolved-
+    -- constraint lines)@ (see 'AgdaDeps.Deps.unsolvedInterfaceLines'),
+    -- ascending by module; only modules with at least one entry appear.
+    -- Under @--allow-unsolved-metas@ these modules \"succeeded\" with
+    -- un-produced evidence, so @failedModules: []@ alone must not be read
+    -- as \"compiles\". Emitted as the optional @unsolvedModules@ object;
+    -- omitted when empty.
   , egSubtermHashes  :: Maybe [[Word64]]      -- ^ present iff any def carries hashes; parallel to 'egDefs'
   , egSubtermDepths  :: Maybe [[Int]]
   , egExternalsSummary :: Maybe WireExternals
@@ -85,6 +94,7 @@ data WireDef = WireDef
   , wdAccess :: Maybe DefAccess
   , wdType   :: Maybe String
   , wdUnsafe :: [UnsafeTag]   -- ^ soundness escapes; omitted when empty
+  , wdUnsolvedMetas :: Int    -- ^ silent unsolved metas; omitted when 0
   , wdX      :: Maybe Float
   , wdY      :: Maybe Float
   }
@@ -206,6 +216,17 @@ encodeObject fs = \a -> "{" ++ intercalate "," (mapMaybe (emit a) prepared) ++ "
 encEdge :: WireEdge -> String
 encEdge (WireEdge (a, b)) = "[" ++ jsString a ++ "," ++ jsString b ++ "]"
 
+-- | The @unsolvedModules@ object: module → @{metas, constraints}@ line
+-- arrays. Shared with the packed emitter in "AgdaDeps.Backend.GraphJson"
+-- so both forms produce identical bytes for the field.
+unsolvedModulesJson :: [(String, ([Int], [Int]))] -> String
+unsolvedModulesJson rows =
+  "{" ++ intercalate "," [ jsString m ++ ":" ++ entry e | (m, e) <- rows ] ++ "}"
+  where
+    entry (ms, cs) =
+      "{\"metas\":" ++ jArray show ms
+      ++ ",\"constraints\":" ++ jArray show cs ++ "}"
+
 -- * The field tables
 
 -- | Top-level expanded object, in emission order.
@@ -231,6 +252,9 @@ expandedFields =
   , Optional "moduleOptionEscapes"       (SMap (arrOf (SString Nothing)))
       (\g -> let es = egModuleOptionEscapes g
              in if null es then Nothing else Just (jStrArrMap es))
+  , Optional "unsolvedModules"           (SMap (SRef "unsolvedModule"))
+      (\g -> let um = egUnsolvedModules g
+             in if null um then Nothing else Just (unsolvedModulesJson um))
   , Optional "definitionSubtermHashes"   (arrOf nats)             (fmap (jArray natArr) . egSubtermHashes)
   , Optional "definitionSubtermDepths"   (arrOf nats)             (fmap (jArray natArrI) . egSubtermDepths)
   , Optional "externals_summary"         (SRef "externalsSummary") (fmap (encodeObject externalsSummaryFields) . egExternalsSummary)
@@ -258,6 +282,9 @@ definitionFields =
   , Optional "unsafe" (arrOf (SRef "unsafeTag"))
       (\d -> if null (wdUnsafe d) then Nothing
              else Just (jArray (jsString . wireUnsafe) (wdUnsafe d)))
+  , Optional "unsolvedMetas" (SInteger (Just 1))
+      (\d -> if wdUnsolvedMetas d <= 0 then Nothing
+             else Just (show (wdUnsolvedMetas d)))
   , Required "x"      (SNullableType "number") (maybe "null" show . wdX)
   , Required "y"      (SNullableType "number") (maybe "null" show . wdY)
   ]
@@ -294,6 +321,11 @@ defsRegistry =
   , ("provenance", SString (Just [ "signature", "body", "module-local"
                                   , "with", "unknown" ]))
   , ("unsafeTag",  SString (Just [ "non-terminating", "trustme" ]))
+  , ("unsolvedModule",
+      SObject ["metas", "constraints"]
+              [ ("metas",       arrOf (SInteger (Just 1)))
+              , ("constraints", arrOf (SInteger (Just 1))) ]
+              True)
   , ("definition",       objectSchemaOf definitionFields)
   , ("reexport",         objectSchemaOf reexportFields)
   , ("externalsSummary", objectSchemaOf externalsSummaryFields)

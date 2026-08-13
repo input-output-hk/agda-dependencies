@@ -49,6 +49,12 @@ module AgdaDeps.Deps
   , classifyKind
   , isUnsolvedMetaName
 
+    -- * Silent (non-interaction) unsolved metas
+  , srcLocOfQ
+  , markerIsSilent
+  , unsolvedInterfaceLines
+  , liveSilentMetaLines
+
     -- * Filtering compiler-generated noise
   , ignoreDef
   , ignoreDependency
@@ -74,13 +80,13 @@ module AgdaDeps.Deps
   ) where
 
 import Control.DeepSeq ( NFData(..) )
-import Control.Monad ( when )
+import Control.Monad ( filterM, when )
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Data.Binary ( Binary )
 import qualified Data.Binary as B
 import Data.IORef ( IORef, modifyIORef', newIORef, readIORef, writeIORef )
-import Data.List ( foldl', isInfixOf, isPrefixOf )
-import Data.Maybe ( isJust, mapMaybe )
+import Data.List ( foldl', isInfixOf, isPrefixOf, sort, sortOn )
+import Data.Maybe ( fromMaybe, isJust, mapMaybe, maybeToList )
 import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as M
 import qualified Data.IntMap.Strict as IM
@@ -94,7 +100,6 @@ import System.IO.Unsafe ( unsafePerformIO )
 
 import Agda.Utils.Hash ( hashString )
 import Agda.Utils.Lens ( (^.) )
-import Agda.Utils.Monad ( anyM )
 
 import Agda.Syntax.Abstract.Name ( QName, nameBindingSite )
 import Agda.Syntax.Common ( unArg, namedThing )
@@ -105,9 +110,24 @@ import Agda.Syntax.Internal
   )
 import Agda.Syntax.Internal.Names ( namesIn )
 import Agda.Syntax.Internal.MetaVars ( allMetasList )
-import Agda.Syntax.Position ( rStart, posLine, rangeFile, rangeFilePath )
+import Agda.Syntax.Position ( rStart, posLine, posPos, rangeFile, rangeFilePath )
 import Agda.Utils.FileName ( filePath )
 import qualified Agda.Utils.Maybe.Strict as Strict
+
+-- Silent-unsolved-meta detection: the split between an honest interaction
+-- @?@ and a silently-inserted unsolved meta is read from each interface's
+-- stored highlighting ('iHighlighting'): Agda's @warningHighlighting@ marks
+-- 'UnsolvedMetaVariables' ranges with the 'UnsolvedMeta' aspect and
+-- 'UnsolvedConstraints' with 'UnsolvedConstraint', while
+-- 'UnsolvedInteractionMetas' produce no aspect. Identical modules/fields on
+-- Agda 2.8 and 2.9 — no CPP.
+import Agda.Interaction.Highlighting.Precise ( HighlightingInfo )
+import qualified Agda.Interaction.Highlighting.Range as HR
+import qualified Agda.Utils.RangeMap as RangeMap
+import Agda.Syntax.Common.Aspect
+  ( Aspects(otherAspects), OtherAspect(UnsolvedMeta, UnsolvedConstraint) )
+import qualified Data.HashMap.Strict as HMap
+import qualified Data.Text.Lazy as TL
 
 import Agda.Syntax.Common.Pretty ( Pretty(..), prettyShow, render, (<+>), vcat, pshow )
 
@@ -126,7 +146,12 @@ import Agda.TypeChecking.Monad
   , pattern Constructor
   )
 -- 'defInstance' comes in via 'Agda.TypeChecking.Monad' alongside 'Defn'.
-import Agda.TypeChecking.Monad.MetaVars ( lookupMetaInstantiation, isOpenMeta )
+import Agda.TypeChecking.Monad.Base
+  ( Interface, miInterface, iHighlighting, iSignature, iSource
+  , sigDefinitions )
+import Agda.TypeChecking.Monad.Imports ( getVisitedModules )
+import Agda.TypeChecking.Monad.MetaVars
+  ( lookupMetaInstantiation, isOpenMeta, getInteractionMetas, getUnsolvedMetas )
 import Agda.TypeChecking.Monad.Options ( withShowAllArguments )
 import Agda.TypeChecking.Monad.Signature ( getConstInfo )
 import Agda.TypeChecking.Pretty ( prettyTCM )
@@ -136,7 +161,7 @@ import Agda.Compiler.Backend ( IsMain )
 
 import AgdaDeps.Options ( Options(..), DefState(..), isExcludedModule )
 import AgdaDeps.TermCanon ( subtermHashes )
-import AgdaDeps.Util ( isWithFun, isWithFun', liftAnonSegments )
+import AgdaDeps.Util ( dedupOrd, isWithFun, isWithFun', liftAnonSegments )
 
 -- | Structural classification of a definition, derived from its
 -- 'Defn' shape (e.g. record-field projections vs. regular functions).
@@ -297,6 +322,15 @@ data ADDef = ADDef
                                 -- ^ Direct soundness escapes (see 'UnsafeTag').
                                 -- Always computed; emitted as the optional
                                 -- @"unsafe"@ array, omitted when empty.
+  , _unsolvedMetas :: !Int
+                                -- ^ Count of /silent/ unsolved metavariables
+                                -- this def mentions: non-interaction open
+                                -- metas (missing record fields, failed
+                                -- instance search, unsolved @_@) — honest
+                                -- interaction @?@s are NOT counted (they only
+                                -- set '_state' = 'Hole'). Always computed;
+                                -- emitted as the optional per-def
+                                -- @"unsolvedMetas"@ field, omitted when 0.
   } deriving (Show)
 
 instance Pretty ADDef where
@@ -307,7 +341,8 @@ instance Pretty ADDef where
                           , pshow "Access:" <+> pshow _access
                           , pshow "Deps:"  <+> pretty _deps
                           , pshow "DepsProv:" <+> pshow (M.toAscList _depsProv)
-                          , pshow "Unsafe:" <+> pshow _unsafe ]
+                          , pshow "Unsafe:" <+> pshow _unsafe
+                          , pshow "UnsolvedMetas:" <+> pshow _unsolvedMetas ]
 
 -- ** 'Binary' instances for the @--incremental@ fragment cache.
 -- Identity is 'NodeRef', not 'QName', so the payload is plain data
@@ -371,13 +406,14 @@ instance Binary UnsafeTag where
 instance Binary ADDef where
   -- '_deps' is derived (@M.keysSet _depsProv@), so it is not serialised but
   -- rebuilt on 'get' — the invariant can never round-trip inconsistent.
-  put (ADDef n _ dp s k l a sh sd sg u) =
+  put (ADDef n _ dp s k l a sh sd sg u um) =
        B.put n *> B.put dp *> B.put s *> B.put k *> B.put l
-    *> B.put a *> B.put sh *> B.put sd *> B.put sg *> B.put u
+    *> B.put a *> B.put sh *> B.put sd *> B.put sg *> B.put u *> B.put um
   get = do
     n <- B.get; dp <- B.get; s <- B.get; k <- B.get; l <- B.get
     a <- B.get; sh <- B.get; sd <- B.get; sg <- B.get; u <- B.get
-    pure (ADDef n (M.keysSet dp) dp s k l a sh sd sg u)
+    um <- B.get
+    pure (ADDef n (M.keysSet dp) dp s k l a sh sd sg u um)
 
 -- | Precomputed, serialisable node identity carried through 'ADDef', the
 -- side-channels and the emitters. Everything downstream of the per-module
@@ -571,7 +607,7 @@ computeDefAD opts def@Defn{..} = do
         _                        -> Nothing
   -- Reuse the raw (pre-exclude) name walks: a synthetic @unsolved#meta.*@
   -- name in an excluded module must still flip the Hole classification.
-  st <- classifyDefWith rawSig rawBody def
+  (st, silentMetas) <- classifyDefWith rawSig rawBody def
   let !kd      = classifyKind def
       !termPairs = if optWithTermHashes opts
                      then Just (concatMap (subtermHashes (optMinTermDepth opts))
@@ -625,6 +661,7 @@ computeDefAD opts def@Defn{..} = do
     , _subtermDepths = termDs
     , _sig    = sigStr
     , _unsafe = unsafeTags
+    , _unsolvedMetas = silentMetas
     }
 
 -- | Every 'Term' reachable from a 'Definition' for fingerprinting
@@ -1056,25 +1093,42 @@ classifyKind Defn{ theDef = d } = case d of
 -- @unsolved#meta.*@ name (Agda's @openMetasToPostulates@ output under
 -- @--allow-unsolved-metas@), or the def's own name being such a marker.
 classifyDef :: Definition -> TCM DefState
-classifyDef def@Defn{..} = classifyDefWith (namesIn defType) (namesIn theDef) def
+classifyDef def@Defn{..} =
+  fst <$> classifyDefWith (namesIn defType) (namesIn theDef) def
 
 -- | 'classifyDef' with the @defType@/@theDef@ name walks supplied by the
 -- caller, so 'computeDefAD' avoids a second traversal. The lists must be
 -- the *raw* (pre-exclude-filter) names.
-classifyDefWith :: [QName] -> [QName] -> Definition -> TCM DefState
-classifyDefWith sigRaw bodyRaw def@Defn{..}
-  | isUnsolvedMetaName defName = return Hole
-  | otherwise = case theDef of
-      Axiom{} -> return Postulate
-      _ -> do
-        let metas = allMetasList defType ++ metasInDefn theDef
-            referencedNames = sigRaw ++ bodyRaw
-            referencesUnsolvedMeta = any isUnsolvedMetaName referencedNames
-        if referencesUnsolvedMeta
-          then return Hole
-          else do
-            anyUnsolved <- anyM isMetaUnsolved metas
-            return $ if anyUnsolved then Hole else Defined
+--
+-- Also returns the def's /silent/ unsolved-meta count ('_unsolvedMetas'):
+-- distinct referenced @unsolved#meta.*@ markers that are silent
+-- ('markerIsSilent'; the def's own name counts when it is such a marker)
+-- plus distinct open metas that are not interaction points. State semantics
+-- are unchanged — a silent meta also implies the state the old classifier
+-- assigned ('Hole', or 'Postulate' for an 'Axiom'-typed def); the count is
+-- the additive discriminator between an honest @?@ and silently-missing
+-- evidence (missing record field, failed instance search, unsolved @_@).
+classifyDefWith :: [QName] -> [QName] -> Definition -> TCM (DefState, Int)
+classifyDefWith sigRaw bodyRaw Defn{..}
+  | isUnsolvedMetaName defName = do
+      silent <- markerIsSilent defName
+      return (Hole, if silent then 1 else 0)
+  | otherwise = do
+      let markers = dedupOrd (filter isUnsolvedMetaName (sigRaw ++ bodyRaw))
+          metas   = dedupOrd (allMetasList defType ++ metasInDefn theDef)
+      openMs     <- filterM isMetaUnsolved metas
+      silentRefs <- filterM markerIsSilent markers
+      silentOpen <-
+        if null openMs then pure [] else do
+          iset <- getInteractionMetaSet
+          pure [ m | m <- openMs, not (S.member m iset) ]
+      let !cnt = length silentRefs + length silentOpen
+          !st  = case theDef of
+            Axiom{}                -> Postulate
+            _ | not (null markers) -> Hole
+              | not (null openMs)  -> Hole
+              | otherwise          -> Defined
+      return (st, cnt)
   where
     isMetaUnsolved :: MetaId -> TCM Bool
     isMetaUnsolved m = isOpenMeta <$> lookupMetaInstantiation m
@@ -1090,6 +1144,149 @@ metasInDefn = \case
   where
     metasInClause Clause{ clauseTel = tel, clauseBody = body, clauseType = ty } =
       allMetasList tel ++ allMetasList body ++ allMetasList ty
+
+-- ** silent (non-interaction) unsolved metas
+--
+-- Agda's own split between an honest interaction @?@
+-- (@UnsolvedInteractionMetas@) and a silently-inserted unsolved meta
+-- (@UnsolvedMetaVariables@: missing record field, failed instance search,
+-- unsolved @_@) survives to backend time through two signals:
+--
+--   * /Interfaces/ (imported modules, whose open metas
+--     @openMetasToPostulates@ turned into @unsolved#meta.*@ markers):
+--     @warningHighlighting@ folded an 'UnsolvedMeta' aspect over each
+--     silent meta's range into 'iHighlighting' *before* postulation, and
+--     interaction metas got no aspect — so a marker is silent iff its
+--     binding site falls inside an 'UnsolvedMeta' span of its file.
+--   * /Live state/ (the main module, which is never postulated): open
+--     metas minus 'getInteractionMetas'.
+
+-- | Merged character-offset spans (half-open, 1-based 'posPos' space)
+-- carrying the given aspect in an interface's stored highlighting.
+aspectSpans :: OtherAspect -> HighlightingInfo -> [(Int, Int)]
+aspectSpans asp hi = mergeSpans
+  [ (HR.from r, HR.to r)
+  | (r, m) <- RangeMap.toList hi
+  , asp `S.member` otherAspects m
+  ]
+
+-- | Sort and coalesce overlapping/adjacent spans. One meta's range can be
+-- split across several 'RangeMap' entries when token highlighting merged
+-- into it, so raw entry counts are meaningless; merged spans support the
+-- membership test and per-line reporting.
+mergeSpans :: [(Int, Int)] -> [(Int, Int)]
+mergeSpans = go . sort
+  where
+    go ((a1, b1) : (a2, b2) : rest)
+      | a2 <= b1  = go ((a1, max b1 b2) : rest)
+    go (s : rest) = s : go rest
+    go []         = []
+
+-- | Source file → 'UnsolvedMeta' spans, over every visited interface.
+-- Built once per process on first demand (backend hooks run only after all
+-- modules are checked, so the visited set is complete). A file appears
+-- only when it has at least one silent span; its path is recovered from
+-- the binding site of any of the interface's own definitions (always
+-- available when the module has an @unsolved#meta.*@ marker to test —
+-- the marker itself carries the meta's range).
+getSilentSpansByFile :: TCM (Map FilePath [(Int, Int)])
+getSilentSpansByFile = do
+  cached <- liftIO (readIORef silentSpansCacheRef)
+  case cached of
+    Just m  -> return m
+    Nothing -> do
+      visited <- getVisitedModules
+      let m = M.fromList
+            [ (f, spans)
+            | mi <- M.elems visited
+            , let iface = miInterface mi
+                  spans = aspectSpans UnsolvedMeta (iHighlighting iface)
+            , not (null spans)
+            , f <- take 1 (ifaceFiles iface)
+            ]
+      liftIO (writeIORef silentSpansCacheRef (Just m))
+      return m
+
+-- | Candidate source paths of an interface, from its signature defs'
+-- binding sites (a def's binding site is always in its own file).
+ifaceFiles :: Interface -> [FilePath]
+ifaceFiles iface =
+  [ f
+  | q <- HMap.keys (iSignature iface ^. sigDefinitions)
+  , (f, _) <- maybeToList (srcLocOfQ q)
+  ]
+
+{-# NOINLINE silentSpansCacheRef #-}
+silentSpansCacheRef :: IORef (Maybe (Map FilePath [(Int, Int)]))
+silentSpansCacheRef = unsafePerformIO (newIORef Nothing)
+
+-- | MetaIds of unsolved interaction points, memoised once per process
+-- (like 'getSilentSpansByFile', the set is final by backend time).
+getInteractionMetaSet :: TCM (Set MetaId)
+getInteractionMetaSet = do
+  cached <- liftIO (readIORef interactionMetaSetRef)
+  case cached of
+    Just s  -> return s
+    Nothing -> do
+      s <- S.fromList <$> getInteractionMetas
+      liftIO (writeIORef interactionMetaSetRef (Just s))
+      return s
+
+{-# NOINLINE interactionMetaSetRef #-}
+interactionMetaSetRef :: IORef (Maybe (Set MetaId))
+interactionMetaSetRef = unsafePerformIO (newIORef Nothing)
+
+-- | Whether an @unsolved#meta.*@ marker stands for a /silent/ unsolved
+-- meta (as opposed to an honest interaction @?@): its binding site — the
+-- original meta's range — falls inside an 'UnsolvedMeta' highlighting span
+-- of its file. Unresolvable locations default to 'False' (never a false
+-- alarm on an honest hole).
+markerIsSilent :: QName -> TCM Bool
+markerIsSilent qn = do
+  spansByFile <- getSilentSpansByFile
+  return $ fromMaybe False $ do
+    let bindRange = nameBindingSite (qnameName qn)
+    rf <- case rangeFile bindRange of
+            Strict.Just rf -> Just rf
+            Strict.Nothing -> Nothing
+    p  <- rStart bindRange
+    spans <- M.lookup (filePath (rangeFilePath rf)) spansByFile
+    let off = fromIntegral (posPos p)
+    pure (any (\(a, b) -> off >= a && off < b) spans)
+
+-- | Per-interface rollup: @(silent unsolved-meta lines, unsolved-constraint
+-- lines)@, both ascending and 1-indexed. Meta lines are exact — one entry
+-- per silent @unsolved#meta.*@ marker in the interface's signature (the
+-- main module has none; its live metas come from 'liveSilentMetaLines').
+-- Constraint lines are the lines opening each 'UnsolvedConstraint'
+-- highlighting span (deduplicated; a span count would be distorted by
+-- range coalescing).
+unsolvedInterfaceLines :: Interface -> TCM ([Int], [Int])
+unsolvedInterfaceLines iface = do
+  let markers = [ q | q <- HMap.keys (iSignature iface ^. sigDefinitions)
+                    , isUnsolvedMetaName q ]
+  silent <- filterM markerIsSilent markers
+  let metaLs = sort [ fromIntegral ln | q <- silent
+                                      , (_, ln) <- maybeToList (srcLocOfQ q) ]
+      conLs  = dedupOrd
+        [ offsetToLine (iSource iface) a
+        | (a, _) <- aspectSpans UnsolvedConstraint (iHighlighting iface)
+        ]
+  return (metaLs, conLs)
+
+-- | 1-indexed line containing a 1-based character offset of a source text.
+offsetToLine :: TL.Text -> Int -> Int
+offsetToLine src off =
+  1 + fromIntegral (TL.count (TL.singleton '\n') (TL.take (fromIntegral off - 1) src))
+
+-- | Source lines of the /live/ silent unsolved metas: open metas that are
+-- not interaction points, read from TCM state. Non-empty only for the main
+-- module (imports were postulated into markers before their state was
+-- discarded), so the caller attributes these to the entry module.
+liveSilentMetaLines :: TCM [Int]
+liveSilentMetaLines = do
+  rs <- getUnsolvedMetas
+  return $ sort [ fromIntegral (posLine p) | r <- rs, p <- maybeToList (rStart r) ]
 
 -- ** filtering
 

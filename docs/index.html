@@ -43,7 +43,7 @@ agda-deps --format=html --view=module-dag-pods \
   <section>
     <h2>The four states</h2>
     <dl>
-      <div class="item"><dt><span class="mark m-D">D</span>Defined</dt><dd>Function, datatype, record — elaborated normally.</dd></div>
+      <div class="item"><dt><span class="mark m-D">D</span>Defined</dt><dd>Function, datatype, record, constructor — elaborated normally.</dd></div>
       <div class="item"><dt><span class="mark m-P">P</span>Postulate</dt><dd>An axiom / postulate. A type-level promise, no body.</dd></div>
       <div class="item"><dt><span class="mark m-H">H</span>Hole</dt><dd>Contains an unsolved meta (a <code>?</code> in source).</dd></div>
       <div class="item"><dt><span class="mark m-F">F</span>Failed</dt><dd>Module whose type-check failed under <code>--keep-going</code>.</dd></div>
@@ -64,7 +64,7 @@ agda-deps --format=html --view=module-dag-pods \
     <dl>
       <div class="item"><dt><span class="mono">--keep-going</span></dt><dd>Survive type-check errors; the failing module is tagged <code>F</code>.</dd></div>
       <div class="item"><dt><span class="mono">--skip-agda</span></dt><dd>Module-level graph straight from a source scan — no elaboration, milliseconds at any scale.</dd></div>
-      <div class="item"><dt><span class="mono">--with-source</span></dt><dd>Attach the source snippet to every definition; powers the reading / IDE views.</dd></div>
+      <div class="item"><dt><span class="mono">--with-source</span></dt><dd>Attach the source snippet to every definition (with <code>--lazy</code>); powers the reading / IDE views.</dd></div>
       <div class="item"><dt><span class="mono">--lazy</span></dt><dd>Split HTML across files so 100k-node projects stay responsive (needs an HTTP server).</dd></div>
       <div class="item"><dt><span class="mono">--no-externals</span></dt><dd>Drop everything outside the project root — stdlib and all — from the graph.</dd></div>
       <div class="item"><dt><span class="mono">--resolve-deps</span></dt><dd>Pin Agda's search path to the <code>.agda-lib</code> <code>depend:</code> closure.</dd></div>
@@ -81,7 +81,7 @@ agda-deps --format=html --view=module-dag-pods \
     <div class="rows">
       <a class="linkrow" href="views/module-dag-pods/deps.html"><span class="rk">Module DAG pods<span class="slug">--view=module-dag-pods</span></span><span class="rd">Default. Expandable module pods, dagre layout.</span></a>
       <a class="linkrow" href="views/cytoscape/deps.html"><span class="rk">Cytoscape compound<span class="slug">--view=cytoscape</span></span><span class="rd">Force-directed modules-as-boxes with a rich sidebar.</span></a>
-      <a class="linkrow" href="views/sigma/deps.html"><span class="rk">Sigma (WebGL)<span class="slug">--view=sigma</span></span><span class="rd">WebGL renderer that scales to ~1M nodes.</span></a>
+      <a class="linkrow" href="views/sigma/deps.html"><span class="rk">Sigma (WebGL)<span class="slug">--view=sigma</span></span><span class="rd">WebGL renderer — the largest-scale option.</span></a>
       <a class="linkrow" href="views/progress-dashboard/deps.html"><span class="rk">Progress dashboard<span class="slug">--view=progress-dashboard</span></span><span class="rd">KPI board: completeness %, hole debt, hot modules.</span></a>
       <a class="linkrow" href="views/critical-path-holes/deps.html"><span class="rk">Critical-path holes<span class="slug">--view=critical-path-holes</span></span><span class="rd">Kanban of proof obligations upstream of the goal.</span></a>
       <a class="linkrow" href="views/sunburst-hierarchy/deps.html"><span class="rk">Sunburst hierarchy<span class="slug">--view=sunburst-hierarchy</span></span><span class="rd">D3 sunburst over the dotted-module tree.</span></a>
@@ -94,7 +94,7 @@ agda-deps --format=html --view=module-dag-pods \
     <h2>Documentation</h2>
     <div class="rows">
       <a class="linkrow" href="guide.html"><span class="rk">Guide</span><span class="rd">Install, flags, views, YAML config, and the v2 JSON schema.</span></a>
-      <a class="linkrow" href="examples.html"><span class="rk">Examples</span><span class="rd">One runnable command per feature, with empirical defaults.</span></a>
+      <a class="linkrow" href="examples.html"><span class="rk">Examples</span><span class="rd">One runnable command per feature.</span></a>
       <a class="linkrow" href="roadmap.html"><span class="rk">Roadmap</span><span class="rd">Forward-looking work that's actively planned.</span></a>
     </div>
   </section>
