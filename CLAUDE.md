@@ -364,6 +364,62 @@ captured (pinned by `test/OptionEscapes.agda`): per-block declaration pragmas
 `--flat-split`). Omitted when empty. No CPP: `iFilePragmaOptions` is identical in
 2.8 and 2.9.
 
+**Never-used arguments are read, not computed.** Agda already runs this analysis
+for positivity/polarity checking (`Rules/Decl.checkPositivity_` → `computePolarity`,
+for *every* mutual block, plain functions included) and serialises both lists into
+the interface, so it is available cross-module with no re-checking. `Deps.argUsageOf`
+reads `defArgOccurrences` + `defPolarity` off the `Definition` already in scope and
+zips them: `Unused` + `Nonvariant` ⇒ **removable** (binder and every call-site
+argument can go), `Unused` + anything else ⇒ **erasable** (used only in types, an
+`@0` candidate). Emitted as the optional per-def `argUsage` object
+(`{removable, removableRequires?, erasable, arity}`), omitted when there is nothing
+to report — so finding-free corpora stay byte-identical. Always computed, no flag.
+Identical API on 2.8/2.9 — no CPP. Fixture: `test/ArgUsage.agda`.
+
+Four things not to revert:
+
+- **Indices are over the definition's *own* binders.** Agda prepends the enclosing
+  section's telescope to every definition inside it, so the elaborated spine that
+  `defPolarity`/`defArgOccurrences` index is longer than the signature as written: a
+  `where` helper reports its *parent's* binders as removable, and they are not on its
+  source line to delete. `argUsageOf` shifts the raw verdict down by
+  `lookupSection`'s telescope size and drops anything landing in that prefix. Same
+  hazard for `module M (n : Nat) where`. Regressions: `ArgUsage.helper@25` (2/[0],
+  not 4/[0,1,2]), `ArgUsage.Section.{keeps,drops}`, and `test-keepgoing/Good.agda`'s
+  `helper` for the `--keep-going` path. This deliberately makes `argUsage` indices
+  *inconsistent* with the sibling `type` string, which still reifies the raw
+  elaborated telescope — called out in the schema description; shifting `type` to
+  match would be a wire-visible change to `--with-signatures` output.
+- **Truncation IS the padding rule.** Either list may be shorter than the
+  arity; any index past the end of *either* counts as used. Deliberately more
+  conservative than Agda's `getArgOccurrence`, which falls back to a `telView`
+  computation for an out-of-range index — we want neither that cost nor that
+  inference.
+- **Only non-projection-like `Function`s (`droppedPars == 0`).** Projections and
+  constructors drop parameters from both lists, so their indices are shifted off the
+  telescope by exactly `droppedPars`; `Axiom`/`Primitive` have no body, and for
+  `Datatype`/`Record` `enablePhantomTypes` purges `Nonvariant` parameters to
+  `Covariant` so the signal means something else there.
+- **`removable` with ≥2 indices may be a joint set — `removableRequires` says which.**
+  `relevantInIgnoringNonvariant` ignores the domains of other `Nonvariant` arguments,
+  so a chain like `(X : Set) → X → B → B` keeps both leading arguments `Nonvariant`
+  only *because of each other*. `removableRequiresOf` recovers the actual constraint:
+  `i` requires `j` iff `j > i` is removable and `i`'s variable is free in `j`'s
+  domain, transitively. `computePolarity` has already ruled out every *other* place
+  `i` could occur (the codomain or a non-`Nonvariant` domain would have demoted it to
+  `Invariant`), which is what makes that the complete rule. The relation only ever
+  points forward, so it is a DAG — plain DFS, no cycle check — and a shifted-away
+  section prefix can never be a surviving requirement's target. Gated on ≥2 removable
+  indices, so the reducing `telView` is effectively never paid. Pinned by
+  `ArgUsage.chain` (a chain: `{"0": [1,3]}`) and `ArgUsage.indep` (genuinely
+  independent: no key at all — the case a symmetric "groups" encoding could not
+  express).
+
+Expanded-only: unlike the other analytical per-def fields there is no packed
+counterpart, because a nested variable-length object has no typed-array shape (the
+same reason `reexports` is expanded-only). `schema/packed_analytical_check.py`
+enumerates the fields it compares, so it is unaffected.
+
 ## v2 graph.json schema
 
 All HTML views consume the v2 schema; `--format=json` emits it directly. The
@@ -372,7 +428,7 @@ All HTML views consume the v2 schema; `--format=json` emits it directly. The
 (draft 2020-12). `required` covers the fields present since v2 inception; additive
 fields (`nodeKeyVersion`, `producer`, `definitionEdgesProvenance`,
 `definitionSubterm*`, `externals_summary`, `moduleOptionEscapes`, per-def
-`line`/`access`/`type`) are optional and `additionalProperties` is open, so it
+`line`/`access`/`type`/`argUsage`) are optional and `additionalProperties` is open, so it
 validates older and forward-compatible output too. The `packed` form and `--lazy`
 layout are not schematised.
 

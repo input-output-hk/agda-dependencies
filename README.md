@@ -363,7 +363,7 @@ described below and omitted when they carry nothing.
 
 Each `definitions` record always carries `{id, name, module, state, kind, x, y}`,
 plus — when known for that definition — `line`, `access` (`private` / `public`),
-`type` (under `--with-signatures`), `unsafe`, and `unsolvedMetas`.
+`type` (under `--with-signatures`), `unsafe`, `unsolvedMetas`, and `argUsage`.
 
 - **State letters** — `D` defined, `P` postulate, `H` hole, `F` failed
   (module-level marker under `--keep-going`).
@@ -382,6 +382,42 @@ plus — when known for that definition — `line`, `access` (`private` / `publi
   silently-missing evidence. Omitted when 0. Only meaningful under
   `--lenient-imports` / `--allow-unsolved-metas` (without the flag such
   modules simply fail).
+- **`argUsage`** (per-def, optional, expanded only) — arguments the
+  definition never actually uses:
+  `{ "removable": [i…], "removableRequires": {…}, "erasable": [i…], "arity": n }`.
+  Indices are telescope positions (0-based, implicits included, ascending)
+  over the definition's *own* binders — the ones on its signature line, not
+  the enclosing section's, which Agda prepends internally. `removable` means
+  the binder *and* the argument at every call site can go; `erasable` means
+  the argument is used only in types, so it is an `@0` candidate rather than
+  a removal. Not computed for projections, constructors, datatypes, records,
+  postulates or primitives. Omitted entirely when there is nothing to
+  report. Always computed — no flag.
+
+  It is Agda's own positivity/polarity result, so it is *interprocedural*:
+  an argument passed into a helper that discards it reads unused in the
+  caller too. Deleting a binder changes the definition's type, so on
+  anything exported it is an API change.
+
+  Two things to get right. The indices do **not** index the sibling `type`
+  string, which still shows the section-inherited binders — align against
+  the source signature. And `removableRequires` maps a position to the
+  others that must be deleted **with** it, since some removals are valid
+  only as a set; it is omitted when every removal stands alone, and a
+  position absent from it can be removed by itself. For
+  `length : {a} {A : Set a} {n} → Vec A n → ℕ`:
+
+  ```json
+  "argUsage": {
+    "removable": [0, 1, 3],
+    "removableRequires": { "0": [1, 3], "1": [3] },
+    "erasable": [], "arity": 4
+  }
+  ```
+
+  — dropping the vector (3) alone is valid; dropping `A` (1) also forces 3;
+  dropping the level `a` (0) forces both. Index 2 (`n`) is genuinely used
+  and so is not listed at all.
 - **`unsolvedModules`** (top-level, optional) — module →
   `{ "metas": [lines], "constraints": [lines] }` rollup of the same split:
   the source lines of each silent unsolved meta (one entry per meta) and of

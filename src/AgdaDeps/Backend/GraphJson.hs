@@ -54,7 +54,7 @@ import AgdaDeps.Csr
   , dedupSortedInt
   )
 import AgdaDeps.Deps    ( ADDef(..), NodeRef(..), DefKind(..), DefAccess(..)
-                        , EdgeProv(..), UnsafeTag(..)
+                        , EdgeProv(..), UnsafeTag(..), ArgUsage(..)
                         , nodeKey, moduleKey, nodeKeyVersion, hashQName, collectAllQNames )
 import BuildInfo        ( buildFingerprint )
 import AgdaDeps.Layout  ( Position(..) )
@@ -999,6 +999,15 @@ mkDefUnsolvedMetas defs =
   let !m = M.fromList [ (_name d, n) | d <- defs, let n = _unsolvedMetas d, n > 0 ]
   in \qn -> M.findWithDefault 0 qn m
 
+-- | Never-used-argument verdict by NodeRef; 'Nothing' for QNames with no
+-- 'ADDef' (and for the many defs with nothing to report). Expanded-only:
+-- the packed form has no typed-array shape for a nested object, so unlike
+-- the other analytical fields this one has no packed counterpart.
+mkDefArgUsage :: [ADDef] -> (NodeRef -> Maybe ArgUsage)
+mkDefArgUsage defs =
+  let !m = M.fromList [ (_name d, au) | d <- defs, Just au <- [_argUsage d] ]
+  in (`M.lookup` m)
+
 -- | Wire encoding for 'EdgeProv' in the packed JSON form.
 encodeEdgeProv :: EdgeProv -> Int8
 encodeEdgeProv ESignature   = 0
@@ -1392,6 +1401,7 @@ toExpandedGraph GraphInput{..} =
       defSig    = mkDefSig    giDefs
       defUnsafe = mkDefUnsafe giDefs
       defUnsolved = mkDefUnsolvedMetas giDefs
+      defArgUsage = mkDefArgUsage giDefs
 
       defModuleOf  = map moduleKey defsList
 
@@ -1465,6 +1475,7 @@ toExpandedGraph GraphInput{..} =
         , wdType   = defSig qn
         , wdUnsafe = defUnsafe qn
         , wdUnsolvedMetas = defUnsolved qn
+        , wdArgUsage = defArgUsage qn
         , wdX      = fmap posX (M.lookup qn giPositions)
         , wdY      = fmap posY (M.lookup qn giPositions)
         }

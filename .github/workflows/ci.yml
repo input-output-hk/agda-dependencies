@@ -180,6 +180,14 @@ jobs:
         assert "Good.double" in defs and "Good.quadruple" in defs, sorted(defs)
         assert ["Good.quadruple", "Good.double"] in g["definitionEdges"]
         assert "type" in defs["Good.quadruple"], "signatures missing in partial pass"
+        # Section telescopes must survive mergeIfaceSig. Agda prepends the
+        # parent's binders to a `where` helper, so `helper` elaborates to
+        # arity 2; argUsage subtracts that prefix via lookupSection, which
+        # returns EmptyTel *without erroring* if sigSections was not merged.
+        # Without the merge this reads {"removable": [0, 1], "arity": 2}.
+        helper = next(d for n, d in defs.items() if n.startswith("Good.helper@"))
+        assert helper.get("argUsage") == {"removable": [0], "erasable": [], "arity": 1}, \
+            f"section telescope lost in the partial pass: {helper.get('argUsage')}"
         print("keep-going fixture OK")
         EOF
 

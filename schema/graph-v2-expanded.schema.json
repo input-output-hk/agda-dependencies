@@ -192,6 +192,37 @@
       },
       "description": "One module's unsolved-meta/constraint rollup entry."
     },
+    "argUsage": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["removable", "erasable", "arity"],
+      "properties": {
+        "removable": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "description": "Telescope positions (0-based, implicits included, ascending) that are BOTH `Unused` in the body and `Nonvariant`: the binder and the corresponding argument at every call site can be deleted. Certain, and interprocedural — an argument threaded into a helper that discards it counts as unused here too."
+        },
+        "removableRequires": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 0 }
+          },
+          "description": "Additive/optional. Positions that cannot be removed on their own: maps a `removable` position (as a decimal string key) to the other `removable` positions that must be deleted along with it, transitively and ascending. A position absent from this map — and the whole map, absent whenever every removal stands alone, which includes every single-entry `removable` — can be removed by itself. Requirements always point FORWARD (every value is greater than its key), since the only thing that can still mention a removable binder's variable is the domain of a later removable argument. Example: `{\"0\": [1, 3]}` on `removable: [0,1,3]` means deleting 0 also forces 1 and 3, while 1 and 3 each stand alone."
+        },
+        "erasable": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "description": "Telescope positions that are `Unused` but NOT `Nonvariant`: used only in types, so a later binder or the codomain depends on them. An `@0` (run-time-erasure) candidate, NOT a removal — deleting one of these breaks the signature."
+        },
+        "arity": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of telescope positions the verdict ranges over; every index in either array is `< arity`."
+        }
+      },
+      "description": "One definition's never-used-argument verdict."
+    },
     "definition": {
       "type": "object",
       "additionalProperties": true,
@@ -227,6 +258,10 @@
           "type": "integer",
           "minimum": 1,
           "description": "Additive/optional. Count of SILENT unsolved metavariables this definition mentions directly (non-interaction open metas: missing record fields, failed instance search, unsolved `_`). Honest interaction `?` holes are NOT counted — they only set `state` to `H`. So `H` with no `unsolvedMetas` = honest open goal(s) only; `H` with `unsolvedMetas` = silently-missing evidence. Always computed (no flag); omitted when 0."
+        },
+        "argUsage": {
+          "$ref": "#/$defs/argUsage",
+          "description": "Additive/optional. Arguments this definition never actually uses, read off the positivity/polarity analysis Agda already runs for every mutual block. Always computed (no flag); the whole object is omitted when there is nothing to report, so finding-free corpora stay byte-identical. Indices are over the definition's OWN binders — Agda prepends the enclosing section's telescope to every definition inside it, and those inherited positions are dropped, so a `where` helper's indices line up with its own signature line rather than the lifted one. CAUTION: this means the indices are NOT positions in the sibling `type` string, which reifies the raw elaborated telescope and therefore still shows the section-inherited binders (e.g. a def in `module M (k : Nat)` renders as `(k : Nat) -> ...` while its `argUsage.arity` counts only its own binders). Align indices against the definition's source signature, never against `type`. Only non-projection-like functions are analysed: projections and constructors drop parameters from the underlying lists (so their indices would be shifted), and for datatypes/records `Nonvariant` parameters are deliberately purged to allow phantom types."
         },
         "x": {
           "type": ["number", "null"],

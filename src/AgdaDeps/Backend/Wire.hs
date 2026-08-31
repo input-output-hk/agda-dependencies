@@ -27,6 +27,7 @@ module AgdaDeps.Backend.Wire
   , SchemaDoc(..)
   , expandedFields
   , definitionFields
+  , argUsageFields
   , reexportFields
   , externalsSummaryFields
   , defsRegistry
@@ -41,7 +42,7 @@ import Data.Word  ( Word64 )
 import qualified Data.Set as S
 
 import AgdaDeps.Options ( DefState(..) )
-import AgdaDeps.Deps    ( DefKind(..), DefAccess(..), UnsafeTag(..), EdgeProv, provTag )
+import AgdaDeps.Deps    ( DefKind(..), DefAccess(..), UnsafeTag(..), ArgUsage(..), EdgeProv, provTag )
 import AgdaDeps.Util    ( jsString, jArray, jStrArray, jStrMap, jStrArrMap )
 
 -- * Wire value types
@@ -95,6 +96,8 @@ data WireDef = WireDef
   , wdType   :: Maybe String
   , wdUnsafe :: [UnsafeTag]   -- ^ soundness escapes; omitted when empty
   , wdUnsolvedMetas :: Int    -- ^ silent unsolved metas; omitted when 0
+  , wdArgUsage :: Maybe ArgUsage
+      -- ^ never-used arguments; omitted when there is nothing to report
   , wdX      :: Maybe Float
   , wdY      :: Maybe Float
   }
@@ -227,6 +230,27 @@ unsolvedModulesJson rows =
       "{\"metas\":" ++ jArray show ms
       ++ ",\"constraints\":" ++ jArray show cs ++ "}"
 
+-- | The per-def @argUsage@ object
+-- (@$defs/argUsage@): @{removable, removableRequires?, erasable, arity}@.
+--
+-- Both index arrays are always present (either may be empty — the /object/
+-- is what gets omitted when there is nothing to report), so a consumer never
+-- has to distinguish an absent array from an empty one. @removableRequires@
+-- is the exception: it is omitted when every removal stands alone, which
+-- includes every single-index verdict, so absent reads as \"no position
+-- requires another\", not \"unknown\".
+argUsageFields :: [Field ArgUsage]
+argUsageFields =
+  [ Required "removable"         (arrOf nat) (jArray show . auRemovable)
+  , Optional "removableRequires" (SMap (arrOf nat))
+      (\a -> case auRemovableRequires a of
+               [] -> Nothing
+               rq -> Just (jobj [ (show i, jArray show js) | (i, js) <- rq ]))
+  , Required "erasable"          (arrOf nat) (jArray show . auErasable)
+  , Required "arity"             nat         (show . auArity)
+  ]
+  where nat = SInteger (Just 0)
+
 -- * The field tables
 
 -- | Top-level expanded object, in emission order.
@@ -285,6 +309,8 @@ definitionFields =
   , Optional "unsolvedMetas" (SInteger (Just 1))
       (\d -> if wdUnsolvedMetas d <= 0 then Nothing
              else Just (show (wdUnsolvedMetas d)))
+  , Optional "argUsage" (SRef "argUsage")
+      (fmap (encodeObject argUsageFields) . wdArgUsage)
   , Required "x"      (SNullableType "number") (maybe "null" show . wdX)
   , Required "y"      (SNullableType "number") (maybe "null" show . wdY)
   ]
@@ -326,6 +352,7 @@ defsRegistry =
               [ ("metas",       arrOf (SInteger (Just 1)))
               , ("constraints", arrOf (SInteger (Just 1))) ]
               True)
+  , ("argUsage",         objectSchemaOf argUsageFields)
   , ("definition",       objectSchemaOf definitionFields)
   , ("reexport",         objectSchemaOf reexportFields)
   , ("externalsSummary", objectSchemaOf externalsSummaryFields)

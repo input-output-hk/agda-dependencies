@@ -448,7 +448,7 @@ naming convention, for stale-cache detection; absent reads as <code>1</code>).</
 described below and omitted when they carry nothing.</p>
 <p>Each <code>definitions</code> record always carries <code>{id, name, module, state, kind, x, y}</code>,
 plus — when known for that definition — <code>line</code>, <code>access</code> (<code>private</code> / <code>public</code>),
-<code>type</code> (under <code>--with-signatures</code>), <code>unsafe</code>, and <code>unsolvedMetas</code>.</p>
+<code>type</code> (under <code>--with-signatures</code>), <code>unsafe</code>, <code>unsolvedMetas</code>, and <code>argUsage</code>.</p>
 <ul>
 <li><strong>State letters</strong> — <code>D</code> defined, <code>P</code> postulate, <code>H</code> hole, <code>F</code> failed
   (module-level marker under <code>--keep-going</code>).</li>
@@ -467,30 +467,61 @@ plus — when known for that definition — <code>line</code>, <code>access</cod
   silently-missing evidence. Omitted when 0. Only meaningful under
   <code>--lenient-imports</code> / <code>--allow-unsolved-metas</code> (without the flag such
   modules simply fail).</li>
-<li><strong><code>unsolvedModules</code></strong> (top-level, optional) — module →
+<li><strong><code>argUsage</code></strong> (per-def, optional, expanded only) — arguments the
+  definition never actually uses:
+  <code>{ "removable": [i…], "removableRequires": {…}, "erasable": [i…], "arity": n }</code>.
+  Indices are telescope positions (0-based, implicits included, ascending)
+  over the definition's <em>own</em> binders — the ones on its signature line, not
+  the enclosing section's, which Agda prepends internally. <code>removable</code> means
+  the binder <em>and</em> the argument at every call site can go; <code>erasable</code> means
+  the argument is used only in types, so it is an <code>@0</code> candidate rather than
+  a removal. Not computed for projections, constructors, datatypes, records,
+  postulates or primitives. Omitted entirely when there is nothing to
+  report. Always computed — no flag.</li>
+</ul>
+<p>It is Agda's own positivity/polarity result, so it is <em>interprocedural</em>:
+  an argument passed into a helper that discards it reads unused in the
+  caller too. Deleting a binder changes the definition's type, so on
+  anything exported it is an API change.</p>
+<p>Two things to get right. The indices do <strong>not</strong> index the sibling <code>type</code>
+  string, which still shows the section-inherited binders — align against
+  the source signature. And <code>removableRequires</code> maps a position to the
+  others that must be deleted <strong>with</strong> it, since some removals are valid
+  only as a set; it is omitted when every removal stands alone, and a
+  position absent from it can be removed by itself. For
+  <code>length : {a} {A : Set a} {n} → Vec A n → ℕ</code>:</p>
+<p><code>json
+  "argUsage": {
+    "removable": [0, 1, 3],
+    "removableRequires": { "0": [1, 3], "1": [3] },
+    "erasable": [], "arity": 4
+  }</code></p>
+<p>— dropping the vector (3) alone is valid; dropping <code>A</code> (1) also forces 3;
+  dropping the level <code>a</code> (0) forces both. Index 2 (<code>n</code>) is genuinely used
+  and so is not listed at all.
+- <strong><code>unsolvedModules</code></strong> (top-level, optional) — module →
   <code>{ "metas": [lines], "constraints": [lines] }</code> rollup of the same split:
   the source lines of each silent unsolved meta (one entry per meta) and of
   unsolved constraints. Modules whose only holes are honest <code>?</code>s don't
   appear; omitted when empty. Under <code>--lenient-imports</code> read this <em>alongside</em>
   <code>failedModules</code> — an empty <code>failedModules</code> with a non-empty
-  <code>unsolvedModules</code> means "loaded, but with un-produced evidence".</li>
-<li><strong><code>moduleOptionEscapes</code></strong> (top-level, optional) — module → the file-level
+  <code>unsolvedModules</code> means "loaded, but with un-produced evidence".
+- <strong><code>moduleOptionEscapes</code></strong> (top-level, optional) — module → the file-level
   <code>{-# OPTIONS #-}</code> flags that make <code>agda --safe</code> reject it (<code>--type-in-type</code>,
   <code>--no-positivity-check</code>, <code>--rewriting</code>, …). Read from each module's own
-  <code>OPTIONS</code> pragma. Only safety-relevant flags; omitted when none.</li>
-<li><strong><code>definitionEdgesProvenance</code></strong> (expanded, optional) — parallel to
+  <code>OPTIONS</code> pragma. Only safety-relevant flags; omitted when none.
+- <strong><code>definitionEdgesProvenance</code></strong> (expanded, optional) — parallel to
   <code>definitionEdges</code>, tagging each edge <code>signature | body | module-local | with |
-  unknown</code>. Absent falls back to <code>unknown</code>.</li>
-<li><strong><code>reexports</code></strong> rows (expanded only) — <code>{ "from", "to", "names": [...] }</code>,
+  unknown</code>. Absent falls back to <code>unknown</code>.
+- <strong><code>reexports</code></strong> rows (expanded only) — <code>{ "from", "to", "names": [...] }</code>,
   one per <code>open import … public</code>; a row that used <code>renaming</code> also carries a
-  <code>"renames"</code> map (<code>alias → canonical name</code>).</li>
-<li><strong><code>externals_summary</code></strong> (top-level, optional) — under <code>--no-externals</code>, the
+  <code>"renames"</code> map (<code>alias → canonical name</code>).
+- <strong><code>externals_summary</code></strong> (top-level, optional) — under <code>--no-externals</code>, the
   modules that were dropped plus their postulates
-  (<code>{ "modules": [...], "postulates_by_module": {...} }</code>).</li>
-<li><strong><code>definitionSubtermHashes</code></strong> / <strong><code>definitionSubtermDepths</code></strong> (expanded,
+  (<code>{ "modules": [...], "postulates_by_module": {...} }</code>).
+- <strong><code>definitionSubtermHashes</code></strong> / <strong><code>definitionSubtermDepths</code></strong> (expanded,
   optional) — under <code>--with-term-hashes</code>, one array per definition, parallel to
-  <code>definitions</code>.</li>
-</ul>
+  <code>definitions</code>.</p>
 <p>The expanded form has a JSON Schema at
 <a href="schema/graph-v2-expanded.schema.json"><code>schema/graph-v2-expanded.schema.json</code></a>.
 Validate with e.g.

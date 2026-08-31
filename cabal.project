@@ -3,7 +3,5 @@ packages: .
 -- Default build target: Agda 2.8.0 from Hackage, on the system GHC
 -- (9.12.4). Pinned for a reproducible build (and a stable golden).
 --
--- To build against Agda 2.9.0 instead — a git pin, since 2.9.0 isn't on
--- Hackage yet — use cabal.project.agda29:
 --   cabal build --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps
 constraints: Agda ==2.8.0

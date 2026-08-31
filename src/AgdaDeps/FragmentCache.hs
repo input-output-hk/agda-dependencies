@@ -75,7 +75,7 @@ instance Binary FragmentData where
 -- deltas, not name-prefix filters — a filter drops anonymous-module
 -- entries no module name prefixes.
 fragmentFormatVersion :: Word64
-fragmentFormatVersion = 7  -- v7: ADDef gained '_unsolvedMetas'
+fragmentFormatVersion = 8  -- v8: ADDef gained '_argUsage'
 
 -- | Fingerprint of every option that changes fragment /content/.
 -- Rendering-only options (format, view, colours, externals filtering,

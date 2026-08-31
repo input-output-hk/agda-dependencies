@@ -91,7 +91,6 @@ import Agda.TypeChecking.Monad.Base
   ( stCurrentModule, eActiveBackendName
   , Interface, iTopLevelModuleName, iSignature, miInterface
   , stImports, stSignature, emptySignature
-  , sigDefinitions
   -- Import-state lenses + interface fields for 'mergeIfaceState'.
   , stImportedBuiltins, stImportedMetaStore
   , stPatternSynImports, stImportedDisplayForms
@@ -104,6 +103,7 @@ import Agda.TypeChecking.Monad.Base
   , TCMT(TCM, unTCM)
 #endif
   )
+import Agda.TypeChecking.Monad.Signature ( unionSignature )
 import Agda.TypeChecking.Primitive.Base ( lookupPrimitiveFunction )
 import qualified Data.HashMap.Strict as HMap
 import Agda.Utils.Lens ( over, (^.) )
@@ -370,14 +370,21 @@ mergeIfaceState iface = do
         "agda-deps: --keep-going: skipping primitive rebind for '"
         ++ prettyShow q ++ "' (" ++ exceptionLine ex ++ ")"
 
--- | Merge a single interface's 'Definitions' into the persistent
--- 'stImports' signature so that downstream 'getConstInfo' lookups
--- across the partial graph succeed.
+-- | Merge a single interface's 'Signature' into the persistent 'stImports'
+-- one, so downstream lookups across the partial graph succeed.
+--
+-- Delegate to 'unionSignature' — what 'addImportedThings' uses, the function
+-- this pass mirrors — rather than merging chosen fields. All four must
+-- arrive, and two need accumulating semantics a plain union cannot express
+-- (rewrite rules @unionWith mappend@, instances @(<>)@). Dropping one is
+-- silent rather than fatal: 'lookupSection' returns 'EmptyTel' for an
+-- unknown module, so a missing 'sigSections' turns every section-telescope
+-- measurement into a wrong number with no error — see
+-- 'AgdaDeps.Deps.argUsageOf'. Pinned by @test-keepgoing/Good.agda@'s
+-- @withHelper@\/@helper@ pair.
 mergeIfaceSig :: Interface -> TCM ()
-mergeIfaceSig iface = do
-  let sig = iSignature iface
-      defs = sig ^. sigDefinitions
-  modifyTCLens' stImports $ over sigDefinitions (HMap.union defs)
+mergeIfaceSig iface =
+  modifyTCLens' stImports $ \ imp -> unionSignature imp (iSignature iface)
 
 reportSkippedModule :: TopLevelModuleName -> String -> TCM ()
 reportSkippedModule tlmn reason =

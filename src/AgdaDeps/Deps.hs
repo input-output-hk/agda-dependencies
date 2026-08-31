@@ -20,6 +20,8 @@ module AgdaDeps.Deps
   , DefKind(..)
   , DefAccess(..)
   , UnsafeTag(..)
+  , ArgUsage(..)
+  , argUsageOf
 
     -- * Module-level soundness escapes (file @OPTIONS@ pragmas)
   , safetyRelevantOptionFlags
@@ -106,12 +108,13 @@ import Agda.Syntax.Common ( unArg, namedThing )
 import Agda.Syntax.Internal
   ( qnameName, qnameModule, MetaId, Clause(..)
   , Pattern'(..)
-  , Term, unEl
+  , Term, Telescope, arity, telToList, unDom, unEl
   )
 import Agda.Syntax.Internal.Names ( namesIn )
 import Agda.Syntax.Internal.MetaVars ( allMetasList )
 import Agda.Syntax.Position ( rStart, posLine, posPos, rangeFile, rangeFilePath )
 import Agda.Utils.FileName ( filePath )
+import Agda.Utils.Size ( size )
 import qualified Agda.Utils.Maybe.Strict as Strict
 
 -- Silent-unsolved-meta detection: the split between an honest interaction
@@ -144,7 +147,14 @@ import Agda.TypeChecking.Monad
   , pattern Datatype
   , pattern Record
   , pattern Constructor
+  , Polarity(..)
   )
+-- Argument-usage analysis ('argUsageOf') reads two fields Agda already
+-- fills in during positivity/polarity checking. 'Polarity' rides in on the
+-- re-export chain above (Monad -> Monad.Base -> Monad.Base.Types), but
+-- 'Occurrence' is imported plainly into Monad.Base and NOT re-exported, so
+-- it needs its own import. Same modules and fields on 2.8 and 2.9 — no CPP.
+import Agda.TypeChecking.Positivity.Occurrence ( Occurrence(..) )
 -- 'defInstance' comes in via 'Agda.TypeChecking.Monad' alongside 'Defn'.
 import Agda.TypeChecking.Monad.Base
   ( Interface, miInterface, iHighlighting, iSignature, iSource
@@ -153,9 +163,12 @@ import Agda.TypeChecking.Monad.Imports ( getVisitedModules )
 import Agda.TypeChecking.Monad.MetaVars
   ( lookupMetaInstantiation, isOpenMeta, getInteractionMetas, getUnsolvedMetas )
 import Agda.TypeChecking.Monad.Options ( withShowAllArguments )
-import Agda.TypeChecking.Monad.Signature ( getConstInfo )
+import Agda.TypeChecking.Monad.Signature ( droppedPars, getConstInfo, lookupSection )
 import Agda.TypeChecking.Pretty ( prettyTCM )
 import Agda.TypeChecking.Reduce ( normalise )
+import Agda.TypeChecking.Free ( freeIn )
+import Agda.TypeChecking.Telescope ( telView )
+import Agda.TypeChecking.Substitute ( TelV(..) )
 
 import Agda.Compiler.Backend ( IsMain )
 
@@ -207,6 +220,203 @@ data UnsafeTag
 
 instance NFData UnsafeTag where
   rnf x = x `seq` ()
+
+-- | Arguments a definition never actually uses, read straight off the
+-- analysis Agda already ran for positivity\/polarity checking. Nothing is
+-- computed here beyond two field reads and a zip — see 'argUsageOf'.
+--
+-- Both index lists are ascending /telescope positions, implicits
+-- included/, over the definition's __own__ binders — the ones a reader
+-- sees on its signature line. See 'argUsageOf' for why that is not the
+-- same thing as the elaborated telescope.
+data ArgUsage = ArgUsage
+  { auRemovable :: ![Int]
+    -- ^ @Unused@ /and/ 'Nonvariant': the binder and the argument at every
+    -- call site can go.
+  , auRemovableRequires :: ![(Int, [Int])]
+    -- ^ Which /other/ 'auRemovable' positions must be removed alongside a
+    -- given one, transitively. Ascending by key; only positions with a
+    -- non-empty requirement appear, so this is empty whenever every
+    -- removal stands alone (always, for a single-index verdict). See
+    -- 'removableRequiresOf'.
+  , auErasable  :: ![Int]
+    -- ^ @Unused@ but not 'Nonvariant': used only in types, so an @\@0@
+    -- candidate rather than a removal.
+  , auArity     :: !Int
+    -- ^ Telescope positions this verdict ranges over; every index in
+    -- either list is @< auArity@.
+  } deriving (Show, Eq)
+
+instance NFData ArgUsage where
+  rnf (ArgUsage r q e a) = rnf r `seq` rnf q `seq` rnf e `seq` rnf a
+
+-- | Per-argument \"never used\" verdict for a definition, or 'Nothing'
+-- when there is nothing to report (the overwhelmingly common case, so it
+-- costs one constructor tag).
+--
+-- __Indices are over the definition's own binders.__ Agda prepends the
+-- enclosing section's telescope to every definition inside it, so for a
+-- @where@ helper or a def in a parametrised @module M (n : Nat) where@,
+-- the elaborated telescope 'defPolarity' \/ 'defArgOccurrences' index is
+-- /longer/ than the signature as written. A @where@ helper that ignores
+-- its parent's arguments would otherwise report those parent binders as
+-- \"removable\" — binders that do not exist on its source line and cannot
+-- be deleted from it. So the raw verdict is shifted down by the section
+-- telescope size and anything landing in that prefix is dropped, leaving
+-- exactly the positions a reader could strike off the signature.
+--
+-- The 'lookupSection' is a plain state read (two 'Map' lookups, no
+-- reduction), gated on there being something to report. Do not read that
+-- gate as \"rare\": 'auErasable' fires on the ubiquitous @{A : Set}@
+-- implicit used only in later types, so roughly a quarter of definitions
+-- reach it. Only 'auRemovable' is rare.
+--
+-- Agda runs this analysis for /every/ mutual block, plain functions
+-- included (@Rules.Decl.checkPositivity_@ → @computePolarity@), and
+-- serialises both lists into the interface, so the verdict is available
+-- cross-module with no re-checking. The two fields compose
+-- interprocedurally — an occurrence \"as argument @i@ of @g@\" is composed
+-- with @g@'s own stored occurrence for that argument — so an argument
+-- threaded into a @where@-helper that discards it reads @Unused@ in the
+-- parent too. 'computePolarity' also post-processes with
+-- @dependentPolarity@, demoting to 'Invariant' any argument a later
+-- relevant argument's type (or the codomain) depends on, which is what
+-- keeps type-dependent arguments out of 'auRemovable'.
+--
+-- Scope, phase 1 — only non-projection-like 'Function's:
+--
+-- * Projection(-like) functions and constructors drop their parameters
+--   from /both/ lists, so the indices are shifted off the telescope by
+--   @droppedPars@. Testing @droppedPars == 0@ is exactly that condition;
+--   a later phase wanting these rows can add the offset back rather than
+--   emitting a misaligned one.
+-- * @Axiom@ \/ @Primitive@ have no body for an argument to go unused in,
+--   and for @Datatype@ \/ @Record@ the polarity signal means something
+--   else: @enablePhantomTypes@ deliberately purges 'Nonvariant' to
+--   'Covariant' on parameters so phantom types keep working.
+--
+-- Padding: the classifying pass stops when /either/ list runs out, which
+-- implements the rule that any index past the end of one counts as used. That
+-- is deliberately more conservative than Agda's own @getArgOccurrence@,
+-- which falls back to a @telView@-driven computation for an out-of-range
+-- index; silence is the right answer for a missing entry, and we do not
+-- want that cost here.
+argUsageOf :: Definition -> TCM (Maybe ArgUsage)
+argUsageOf def = case rawArgUsage def of
+  Nothing -> pure Nothing
+  Just au0 -> do
+    -- Only a multi-index verdict can have a requirement at all, and those
+    -- are a fraction of a percent of definitions, so the reducing 'telView'
+    -- is effectively never paid.
+    au <- case auRemovable au0 of
+            (_ : _ : _) -> do
+              TelV tel _ <- telView (defType def)
+              pure au0 { auRemovableRequires =
+                           removableRequiresOf (auRemovable au0) tel }
+            _ -> pure au0
+    -- Section telescope of the def's own module: the binders Agda
+    -- prepended, which are not this definition's to remove.
+    secTel <- lookupSection (qnameModule (defName def))
+    pure (dropSectionPrefix (size secTel) au)
+
+-- | Which other removable positions must go with each one.
+--
+-- If binder @i@ is deleted, every part of the type that still mentions its
+-- variable breaks. 'computePolarity' has already ruled out the codomain and
+-- the domain of every /non-/'Nonvariant' argument — a variable relevant
+-- there would have been demoted to 'Invariant' and so would not be
+-- removable at all. That leaves exactly one place @i@'s variable can still
+-- occur: the domain of another __removable__ argument later in the
+-- telescope. So @i@ requires @j@ whenever @j > i@ is removable and @i@'s
+-- variable is free in @j@'s domain — then transitively, since removing @j@
+-- drags in whatever @j@ requires.
+--
+-- The relation is forward-only (@j > i@ always), which is what makes it a
+-- DAG and lets the closure be a plain DFS with no cycle check. It also
+-- means a shifted-away section prefix can never be the target of a
+-- surviving requirement, so 'dropSectionPrefix' can renumber safely.
+--
+-- Occurrence uses 'freeIn' rather than Agda's own
+-- @relevantInIgnoringSortAnn@: erring towards /more/ requirements only ever
+-- makes a suggested removal larger, never unsound.
+removableRequiresOf :: [Int] -> Telescope -> [(Int, [Int])]
+removableRequiresOf removable tel =
+  [ (i, reqs) | i <- removable, let reqs = closure i, not (null reqs) ]
+  where
+    -- Domain of telescope position j, in the context of binders 0..j-1.
+    doms = IM.fromList (zip [0 ..] (map (snd . unDom) (telToList tel)))
+    -- Direct requirements: j's domain still mentions the variable bound at
+    -- i. Inside domain j, the binder at i has de Bruijn index j-1-i.
+    -- 'removable' is ascending, so 'dropWhile' is the later-positions
+    -- filter. Materialised once per source position: 'closure' revisits
+    -- these sets, and each entry costs a 'freeIn' walk of a domain.
+    direct = IM.fromList
+      [ (i, IS.fromList
+              [ j
+              | j <- dropWhile (<= i) removable
+              , Just d <- [IM.lookup j doms]
+              , freeIn (j - 1 - i) d
+              ])
+      | i <- removable ]
+    edges i = IM.findWithDefault IS.empty i direct
+    -- Seeded with i's direct targets rather than i itself: the relation
+    -- only points forward, so i can never be reached back and needs no
+    -- removing from the result.
+    closure i = IS.toAscList (go IS.empty (IS.toAscList (edges i)))
+      where
+        go !seen []       = seen
+        go !seen (x : xs)
+          | x `IS.member` seen = go seen xs
+          | otherwise          = go (IS.insert x seen) (IS.toAscList (edges x) ++ xs)
+
+-- | Re-index an 'ArgUsage' from the elaborated telescope to the
+-- definition's own, dropping the @k@ section-inherited leading binders
+-- and everything that pointed into them. Yields 'Nothing' when nothing
+-- survives, so a @where@ helper that only \"wastes\" its parent's
+-- arguments correctly reports nothing at all.
+dropSectionPrefix :: Int -> ArgUsage -> Maybe ArgUsage
+dropSectionPrefix k au@(ArgUsage rm rq er ar)
+  | k <= 0                = Just au
+  | null rm' && null er'  = Nothing
+  | otherwise             = Just (ArgUsage rm' rq' er' (max 0 (ar - k)))
+  where
+    shift = map (subtract k) . filter (>= k)
+    rm'   = shift rm
+    er'   = shift er
+    -- Requirements point forward, so a surviving key's targets all survive
+    -- too; a key inside the prefix goes with its binder.
+    rq'   = [ (i - k, shift js) | (i, js) <- rq, i >= k ]
+
+-- | The raw verdict, indices over the /elaborated/ telescope. Pure: two
+-- field reads and a zip. 'argUsageOf' wraps it to re-index onto the
+-- definition's own binders.
+rawArgUsage :: Definition -> Maybe ArgUsage
+rawArgUsage def@Defn{..}
+  | not analysable                  = Nothing
+  | null removable && null erasable = Nothing
+  -- Requirements need a reducing 'telView'; 'argUsageOf' fills them in.
+  | otherwise = Just (ArgUsage removable [] erasable telArity)
+  where
+    analysable = case theDef of
+      Function{} -> droppedPars def == 0
+      _          -> False
+    -- One strict pass: the two stored lists are zipped, classified and
+    -- counted together. This runs for every non-ignored function, so it
+    -- allocates no intermediate tuples and walks neither list twice.
+    -- Stopping when *either* list runs out IS the padding rule — any
+    -- position past the end of one of them counts as used.
+    (removable, erasable, analysed) = classify 0 [] [] defArgOccurrences defPolarity
+    classify !i !rm !er (o : os) (p : ps) = case o of
+      Unused | p == Nonvariant -> classify (i + 1) (i : rm) er os ps
+             | otherwise       -> classify (i + 1) rm (i : er) os ps
+      _                        -> classify (i + 1) rm er os ps
+    classify !i !rm !er _ _ = (reverse rm, reverse er, i)
+    -- Agda's 'arity' is the syntactic 'Pi' spine (no reduction), widened
+    -- to cover every analysed position: 'dependentPolarity' walks a
+    -- *reduced* spine, so the stored lists can outrun the unreduced one.
+    -- The 'max' keeps @index < auArity@ true without paying for a
+    -- reduction here.
+    telArity = max (arity defType) analysed
 
 -- | File-level @{-# OPTIONS ⋯ #-}@ flags that make @agda --safe@ reject a
 -- whole module — the module-level analogue of 'UnsafeTag'. The
@@ -331,6 +541,14 @@ data ADDef = ADDef
                                 -- set '_state' = 'Hole'). Always computed;
                                 -- emitted as the optional per-def
                                 -- @"unsolvedMetas"@ field, omitted when 0.
+  , _argUsage :: !(Maybe ArgUsage)
+                                -- ^ Arguments this def never uses, read
+                                -- off Agda's own positivity\/polarity
+                                -- analysis (see 'argUsageOf'). Always
+                                -- computed; 'Nothing' when there is
+                                -- nothing to report, and the optional
+                                -- per-def @"argUsage"@ object is then
+                                -- omitted.
   } deriving (Show)
 
 instance Pretty ADDef where
@@ -342,7 +560,8 @@ instance Pretty ADDef where
                           , pshow "Deps:"  <+> pretty _deps
                           , pshow "DepsProv:" <+> pshow (M.toAscList _depsProv)
                           , pshow "Unsafe:" <+> pshow _unsafe
-                          , pshow "UnsolvedMetas:" <+> pshow _unsolvedMetas ]
+                          , pshow "UnsolvedMetas:" <+> pshow _unsolvedMetas
+                          , pshow "ArgUsage:" <+> pshow _argUsage ]
 
 -- ** 'Binary' instances for the @--incremental@ fragment cache.
 -- Identity is 'NodeRef', not 'QName', so the payload is plain data
@@ -406,14 +625,19 @@ instance Binary UnsafeTag where
 instance Binary ADDef where
   -- '_deps' is derived (@M.keysSet _depsProv@), so it is not serialised but
   -- rebuilt on 'get' — the invariant can never round-trip inconsistent.
-  put (ADDef n _ dp s k l a sh sd sg u um) =
+  put (ADDef n _ dp s k l a sh sd sg u um au) =
        B.put n *> B.put dp *> B.put s *> B.put k *> B.put l
     *> B.put a *> B.put sh *> B.put sd *> B.put sg *> B.put u *> B.put um
+    *> B.put au
   get = do
     n <- B.get; dp <- B.get; s <- B.get; k <- B.get; l <- B.get
     a <- B.get; sh <- B.get; sd <- B.get; sg <- B.get; u <- B.get
-    um <- B.get
-    pure (ADDef n (M.keysSet dp) dp s k l a sh sd sg u um)
+    um <- B.get; au <- B.get
+    pure (ADDef n (M.keysSet dp) dp s k l a sh sd sg u um au)
+
+instance Binary ArgUsage where
+  put (ArgUsage r q e a) = B.put r *> B.put q *> B.put e *> B.put a
+  get = ArgUsage <$> B.get <*> B.get <*> B.get <*> B.get
 
 -- | Precomputed, serialisable node identity carried through 'ADDef', the
 -- side-channels and the emitters. Everything downstream of the per-module
@@ -635,6 +859,9 @@ computeDefAD opts def@Defn{..} = do
         _                                      -> []
       usesTrustMe = any ((== trustMeNodeKey) . nodeKeyOfQ) (rawSig ++ rawBody)
       !unsafeTags = termTag ++ [ UTrustMe | usesTrustMe ]
+  -- Never-used arguments, read off Agda's positivity/polarity analysis.
+  -- The state read inside only fires for a def that has a finding.
+  argUsage <- argUsageOf def
   -- Convert to 'NodeRef' at the producer boundary: everything downstream
   -- is identity-as-data.
   nameRef  <- mkRef defName
@@ -662,6 +889,7 @@ computeDefAD opts def@Defn{..} = do
     , _sig    = sigStr
     , _unsafe = unsafeTags
     , _unsolvedMetas = silentMetas
+    , _argUsage = argUsage
     }
 
 -- | Every 'Term' reachable from a 'Definition' for fingerprinting

@@ -15,6 +15,7 @@ open import AnonSection using (useSection)  -- anonymous-module section lifting 
 import RenamedReexport  -- R14 fixture. Qualified (no `open`) on purpose: `open`ing pulls the Nat->Number alias into scope and reprints every --with-signatures type as `Number`.
 import Unsafe  -- R12 fixture (soundness escapes). Qualified (no `open`) to keep its names out of scope, same rationale as RenamedReexport above.
 import OptionEscapes  -- R15 fixture (file-level {-# OPTIONS #-} escapes). Qualified; --type-in-type is non-infective so Test stays unaffected.
+import ArgUsage  -- M1 fixture (never-used arguments). Qualified: its `Vec`/`Box`/`ident` names would otherwise collide with the corpus.
 
 variable a b : Set
 

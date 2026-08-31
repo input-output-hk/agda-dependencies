@@ -7,6 +7,46 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-08-31 — `agda-deps` — never-used arguments (`argUsage`)
+
+Expanded `graph.json` reports arguments a definition never uses. Additive: no
+`v` bump, no `nodeKeyVersion` bump, no flag.
+
+- **Per-def `argUsage`** (expanded only) —
+  `{removable: [i…], removableRequires: {…}, erasable: [i…], arity: n}`.
+  `removable` = the binder and every call-site argument can go; `erasable` =
+  used only in types, an `@0` candidate rather than a removal. Omitted when
+  there is nothing to report.
+- **`removableRequires`** maps a position to the others that must be removed
+  with it, transitively; omitted when every removal stands alone. Some
+  multi-position removals are valid only as a set, others are independent,
+  and the relation is directed rather than a partition.
+
+Read off `defArgOccurrences` + `defPolarity`, which Agda fills in for every
+mutual block during positivity/polarity checking and serialises into the
+interface. So the verdict is interprocedural — an argument passed to a helper
+that discards it reads unused in the caller — and type-dependency aware.
+
+Indices are the definition's **own** binders. Agda prepends the enclosing
+section's telescope to every definition inside it, so the raw verdict is
+shifted down by `lookupSection`'s size and anything in that prefix dropped;
+otherwise a `where` helper reports its parent's binders. The sibling `type`
+string is *not* shifted, so indices do not index it.
+
+Scope: non-projection-like functions only (`droppedPars == 0`). Projections
+and constructors drop parameters from both lists, shifting their indices;
+`Axiom`/`Primitive` have no body; for `Datatype`/`Record` `enablePhantomTypes`
+purges `Nonvariant` parameters.
+
+Also fixed: under `--keep-going`, `mergeIfaceSig` merged only `sigDefinitions`
+out of the interface's `Signature`. Since `lookupSection` falls back to
+`EmptyTel` rather than failing, section telescopes silently read as empty —
+and `sigRewriteRules` / `sigInstances` were empty too. Now delegates to Agda's
+`unionSignature`, which merges all four fields with the right per-field
+semantics.
+
+Fragment cache format v7 → v8 (`ADDef` gained `_argUsage`).
+
 ## 2026-08-13 — `agda-deps` — silent unsolved metas are first-class
 
 Under `--allow-unsolved-metas` / `--lenient-imports`, a module with unsolved
