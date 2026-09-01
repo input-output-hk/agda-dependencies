@@ -37,7 +37,7 @@ import Data.Bits ( (.|.) )
 import Data.Char ( isAlphaNum, toLower )
 import Data.Int ( Int32, Int8 )
 import Data.List ( foldl', inits, intercalate, sort, sortOn )
-import Data.Maybe ( isJust )
+import Data.Maybe ( fromMaybe, isJust )
 import Data.Word ( Word64 )
 import qualified Data.Map.Strict as M
 import qualified Data.IntMap.Strict as IM
@@ -949,29 +949,36 @@ encodeUnsafeByte = foldl' (\acc t -> acc .|. tagBit t) 0
 -- with no local 'ADDef' gets the same default in both — this keeps
 -- packed-analytical node-for-node identical to expanded. Don't inline per-form.
 
+-- | Index the defs by 'NodeRef' on a field that is only sometimes present:
+-- absent entries stay out of the map, so a lookup answers 'Nothing' both for
+-- a QName with no 'ADDef' and for one whose field is unset.
+mkDefOptional :: (ADDef -> Maybe b) -> [ADDef] -> (NodeRef -> Maybe b)
+mkDefOptional get defs =
+  let !m = M.fromList [ (_name d, v) | d <- defs, Just v <- [get d] ]
+  in (`M.lookup` m)
+
+-- | Index the defs by 'NodeRef' on a total field, with @dflt@ standing in for
+-- a QName that has no 'ADDef' at all.
+mkDefDefault :: b -> (ADDef -> b) -> [ADDef] -> (NodeRef -> b)
+mkDefDefault dflt get defs =
+  let !m = M.fromList [ (_name d, get d) | d <- defs ]
+  in \qn -> M.findWithDefault dflt qn m
+
 -- | Structural kind by NodeRef; 'DKOther' for QNames with no 'ADDef'.
 mkDefKind :: [ADDef] -> (NodeRef -> DefKind)
-mkDefKind defs =
-  let !m = M.fromList [ (_name d, _kind d) | d <- defs ]
-  in \qn -> M.findWithDefault DKOther qn m
+mkDefKind = mkDefDefault DKOther _kind
 
 -- | Source line by NodeRef; 'Nothing' for QNames with no 'ADDef' / no line.
 mkDefLine :: [ADDef] -> (NodeRef -> Maybe Int)
-mkDefLine defs =
-  let !m = M.fromList [ (_name d, ln) | d <- defs, Just ln <- [_line d] ]
-  in (`M.lookup` m)
+mkDefLine = mkDefOptional _line
 
 -- | Access by NodeRef; 'Nothing' for QNames with no 'ADDef'.
 mkDefAccess :: [ADDef] -> (NodeRef -> Maybe DefAccess)
-mkDefAccess defs =
-  let !m = M.fromList [ (_name d, a) | d <- defs, Just a <- [_access d] ]
-  in (`M.lookup` m)
+mkDefAccess = mkDefOptional _access
 
 -- | Rendered signature by NodeRef ('--with-signatures'); 'Nothing' otherwise.
 mkDefSig :: [ADDef] -> (NodeRef -> Maybe String)
-mkDefSig defs =
-  let !m = M.fromList [ (_name d, s) | d <- defs, Just s <- [_sig d] ]
-  in (`M.lookup` m)
+mkDefSig = mkDefOptional _sig
 
 -- | Subterm-hash map by NodeRef ('--with-term-hashes'); empty when off.
 mkDefHashes :: [ADDef] -> M.Map NodeRef [Word64]
@@ -987,33 +994,33 @@ mkDefDepths defs =
 -- Shared by packed-analytical and expanded so the two agree
 -- node-for-node.
 mkDefUnsafe :: [ADDef] -> (NodeRef -> [UnsafeTag])
-mkDefUnsafe defs =
-  let !m = M.fromList [ (_name d, _unsafe d) | d <- defs ]
-  in \qn -> M.findWithDefault [] qn m
+mkDefUnsafe = mkDefDefault [] _unsafe
 
 -- | Silent unsolved-meta count by NodeRef; @0@ for QNames with no 'ADDef'.
 -- Shared by packed-analytical and expanded so the two agree
 -- node-for-node.
+-- Sparse on purpose: only the defs that actually carry a meta are stored,
+-- and an absent entry reads back as the 0 it would have held.
 mkDefUnsolvedMetas :: [ADDef] -> (NodeRef -> Int)
-mkDefUnsolvedMetas defs =
-  let !m = M.fromList [ (_name d, n) | d <- defs, let n = _unsolvedMetas d, n > 0 ]
-  in \qn -> M.findWithDefault 0 qn m
+mkDefUnsolvedMetas defs = fromMaybe 0 . mkDefOptional nonZero defs
+  where nonZero d = case _unsolvedMetas d of
+          n | n > 0     -> Just n
+            | otherwise -> Nothing
 
 -- | Never-used-argument verdict by NodeRef; 'Nothing' for QNames with no
 -- 'ADDef' (and for the many defs with nothing to report). Expanded-only:
 -- the packed form has no typed-array shape for a nested object, so unlike
 -- the other analytical fields this one has no packed counterpart.
 mkDefArgUsage :: [ADDef] -> (NodeRef -> Maybe ArgUsage)
-mkDefArgUsage defs =
-  let !m = M.fromList [ (_name d, au) | d <- defs, Just au <- [_argUsage d] ]
-  in (`M.lookup` m)
+mkDefArgUsage = mkDefOptional _argUsage
 
 -- | Wire encoding for 'EdgeProv' in the packed JSON form.
 encodeEdgeProv :: EdgeProv -> Int8
 encodeEdgeProv ESignature   = 0
 encodeEdgeProv EBody        = 1
 encodeEdgeProv EModuleLocal = 2
-encodeEdgeProv EWith        = 3
+-- 3 was the retired 'with' tag; left a hole so decoders of already-emitted
+-- packed graphs keep reading 4 as 'unknown'.
 encodeEdgeProv EUnknown     = 4
 
 -- ** File tree

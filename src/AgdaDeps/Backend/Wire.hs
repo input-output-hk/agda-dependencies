@@ -28,6 +28,7 @@ module AgdaDeps.Backend.Wire
   , expandedFields
   , definitionFields
   , argUsageFields
+  , argBinderFields
   , reexportFields
   , externalsSummaryFields
   , defsRegistry
@@ -42,7 +43,8 @@ import Data.Word  ( Word64 )
 import qualified Data.Set as S
 
 import AgdaDeps.Options ( DefState(..) )
-import AgdaDeps.Deps    ( DefKind(..), DefAccess(..), UnsafeTag(..), ArgUsage(..), EdgeProv, provTag )
+import AgdaDeps.Deps    ( DefKind(..), DefAccess(..), UnsafeTag(..), ArgUsage(..)
+                        , ArgBinder(..), BinderHiding(..), EdgeProv, provTag )
 import AgdaDeps.Util    ( jsString, jArray, jStrArray, jStrMap, jStrArrMap )
 
 -- * Wire value types
@@ -138,6 +140,11 @@ wireUnsafe :: UnsafeTag -> String
 wireUnsafe UNonTerminating = "non-terminating"
 wireUnsafe UTrustMe        = "trustme"
 
+wireHiding :: BinderHiding -> String
+wireHiding BHExplicit = "explicit"
+wireHiding BHImplicit = "implicit"
+wireHiding BHInstance = "instance"
+
 -- * The JSON-Schema model (draft 2020-12 subset)
 
 -- | The subset of JSON Schema the expanded wire format uses; one
@@ -230,8 +237,8 @@ unsolvedModulesJson rows =
       "{\"metas\":" ++ jArray show ms
       ++ ",\"constraints\":" ++ jArray show cs ++ "}"
 
--- | The per-def @argUsage@ object
--- (@$defs/argUsage@): @{removable, removableRequires?, erasable, arity}@.
+-- | The per-def @argUsage@ object (@$defs/argUsage@):
+-- @{removable, removableRequires?, erasable, arity, binders?}@.
 --
 -- Both index arrays are always present (either may be empty — the /object/
 -- is what gets omitted when there is nothing to report), so a consumer never
@@ -239,17 +246,38 @@ unsolvedModulesJson rows =
 -- is the exception: it is omitted when every removal stands alone, which
 -- includes every single-index verdict, so absent reads as \"no position
 -- requires another\", not \"unknown\".
+--
+-- @binders@ is keyed like @removableRequires@ (decimal-string position) and
+-- is /sparse/: it annotates the reported positions only, and only those the
+-- syntactic spine reaches. An absent position means \"no information\" —
+-- never a default.
+
 argUsageFields :: [Field ArgUsage]
 argUsageFields =
   [ Required "removable"         (arrOf nat) (jArray show . auRemovable)
   , Optional "removableRequires" (SMap (arrOf nat))
-      (\a -> case auRemovableRequires a of
-               [] -> Nothing
-               rq -> Just (jobj [ (show i, jArray show js) | (i, js) <- rq ]))
+      (omitEmpty auRemovableRequires
+                 (\rq -> jobj [ (show i, jArray show js) | (i, js) <- rq ]))
   , Required "erasable"          (arrOf nat) (jArray show . auErasable)
   , Required "arity"             nat         (show . auArity)
+  , Optional "binders"           (SMap (SRef "argBinder"))
+      (omitEmpty auBinders
+                 (\bs -> jobj [ (show i, encodeObject argBinderFields b)
+                              | (i, b) <- bs ]))
   ]
   where nat = SInteger (Just 0)
+
+-- | The @argBinder@ object (@$defs/argBinder@): how one reported argument
+-- is /written/, so a report line can say @argument 0 ({A : Set})@.
+--
+-- @hiding@ is always present (a spine position always has an argument
+-- info); @name@ is omitted when the binder has none to report — a nameless
+-- domain (@Nat -> Nat@), never a name Agda invented.
+argBinderFields :: [Field ArgBinder]
+argBinderFields =
+  [ Required "hiding" (SRef "hiding") (jsString . wireHiding . abHiding)
+  , Optional "name"   (SString Nothing) (fmap jsString . abName)
+  ]
 
 -- * The field tables
 
@@ -274,11 +302,9 @@ expandedFields =
   , Required "sourceFiles"               strArr                   (jStrArray . egSourceFiles)
   , Required "reexports"                 (arrOf (SRef "reexport")) (jArray (encodeObject reexportFields) . egReExports)
   , Optional "moduleOptionEscapes"       (SMap (arrOf (SString Nothing)))
-      (\g -> let es = egModuleOptionEscapes g
-             in if null es then Nothing else Just (jStrArrMap es))
+      (omitEmpty egModuleOptionEscapes jStrArrMap)
   , Optional "unsolvedModules"           (SMap (SRef "unsolvedModule"))
-      (\g -> let um = egUnsolvedModules g
-             in if null um then Nothing else Just (unsolvedModulesJson um))
+      (omitEmpty egUnsolvedModules unsolvedModulesJson)
   , Optional "definitionSubtermHashes"   (arrOf nats)             (fmap (jArray natArr) . egSubtermHashes)
   , Optional "definitionSubtermDepths"   (arrOf nats)             (fmap (jArray natArrI) . egSubtermDepths)
   , Optional "externals_summary"         (SRef "externalsSummary") (fmap (encodeObject externalsSummaryFields) . egExternalsSummary)
@@ -292,6 +318,17 @@ expandedFields =
 arrOf :: SchemaDoc -> SchemaDoc
 arrOf s = SArray s Nothing Nothing
 
+-- | Encoder for an 'Optional' list-shaped field: omitted entirely when the
+-- list is empty, so a corpus with nothing to report stays byte-identical.
+--
+-- One spelling for the whole file. These tables are the drift-checked source
+-- of truth for the wire shape, so a reader confirming the omission rule
+-- should not have to recognise it in four different phrasings.
+omitEmpty :: (a -> [b]) -> ([b] -> String) -> a -> Maybe String
+omitEmpty get enc x = case get x of
+  [] -> Nothing
+  ys -> Just (enc ys)
+
 -- | The @definition@ object (@$defs/definition@), in @defJson@ order.
 definitionFields :: [Field WireDef]
 definitionFields =
@@ -304,8 +341,7 @@ definitionFields =
   , Optional "access" (SRef "access")          (fmap (jsString . wireAccess) . wdAccess)
   , Optional "type"   (SString Nothing)        (fmap jsString . wdType)
   , Optional "unsafe" (arrOf (SRef "unsafeTag"))
-      (\d -> if null (wdUnsafe d) then Nothing
-             else Just (jArray (jsString . wireUnsafe) (wdUnsafe d)))
+      (omitEmpty wdUnsafe (jArray (jsString . wireUnsafe)))
   , Optional "unsolvedMetas" (SInteger (Just 1))
       (\d -> if wdUnsolvedMetas d <= 0 then Nothing
              else Just (show (wdUnsolvedMetas d)))
@@ -325,7 +361,7 @@ reexportFields =
   [ Required "from"    (SString Nothing)         (\(f, _, _, _) -> jsString f)
   , Required "to"      (SString Nothing)         (\(_, t, _, _) -> jsString t)
   , Required "names"   (arrOf (SString Nothing)) (\(_, _, ns, _) -> jStrArray ns)
-  , Optional "renames" (SMap (SString Nothing))  (\(_, _, _, rs) -> if null rs then Nothing else Just (jStrMap rs))
+  , Optional "renames" (SMap (SString Nothing))  (omitEmpty (\(_, _, _, rs) -> rs) jStrMap)
   ]
 
 -- | The @externalsSummary@ object (@$defs/externalsSummary@).
@@ -345,13 +381,15 @@ defsRegistry =
                                   , "primitive", "other" ]))
   , ("access",     SString (Just ["private", "public"]))
   , ("provenance", SString (Just [ "signature", "body", "module-local"
-                                  , "with", "unknown" ]))
+                                  , "unknown" ]))
   , ("unsafeTag",  SString (Just [ "non-terminating", "trustme" ]))
+  , ("hiding",     SString (Just [ "explicit", "implicit", "instance" ]))
   , ("unsolvedModule",
       SObject ["metas", "constraints"]
               [ ("metas",       arrOf (SInteger (Just 1)))
               , ("constraints", arrOf (SInteger (Just 1))) ]
               True)
+  , ("argBinder",        objectSchemaOf argBinderFields)
   , ("argUsage",         objectSchemaOf argUsageFields)
   , ("definition",       objectSchemaOf definitionFields)
   , ("reexport",         objectSchemaOf reexportFields)
@@ -426,10 +464,45 @@ validateExpanded eg = concat
   , ck (null danglers)
        ("definitionEdges endpoints absent from definitions, e.g. "
         ++ show (take 3 danglers))
+  , ck (null auBad)
+       ("argUsage cross-field invariants violated, e.g. "
+        ++ show (take 3 auBad))
   ]
   where
     nDefs    = length (egDefs eg)
     names    = S.fromList (map wdName (egDefs eg))
     danglers = [ (s, t) | WireEdge (s, t) <- egDefEdges eg
                         , not (S.member s names) || not (S.member t names) ]
+    -- The rules the schema can only state in prose. Worth asserting rather
+    -- than describing: the riskiest code behind this field is the four-way
+    -- re-index in 'AgdaDeps.Deps.dropSectionPrefix', and a mis-shift there
+    -- stays schema-valid while telling a consumer to delete the wrong binder.
+    auBad = [ (wdName d, why)
+            | d <- egDefs eg
+            , Just au <- [wdArgUsage d]
+            , why <- argUsageProblems au
+            ]
     ck cond msg = if cond then [] else [msg]
+
+-- | The cross-field 'ArgUsage' invariants the JSON Schema cannot express:
+-- every index addresses an existing argument, @removableRequires@ relates
+-- @removable@ positions and only ever points forward, and @binders@
+-- annotates reported positions only.
+argUsageProblems :: ArgUsage -> [String]
+argUsageProblems au = concat
+  [ [ "index outside [0, arity)"
+    | any (\i -> i < 0 || i >= auArity au) allIdx ]
+  , [ "removableRequires key not a removable position"
+    | any (`notElem` rm) (map fst rq) ]
+  , [ "removableRequires target not a removable position"
+    | any (`notElem` rm) (concatMap snd rq) ]
+  , [ "removableRequires does not point forward"
+    | or [ j <= i | (i, js) <- rq, j <- js ] ]
+  , [ "binders key is not a reported position"
+    | any (`notElem` (rm ++ auErasable au)) (map fst (auBinders au)) ]
+  ]
+  where
+    rm = auRemovable au
+    rq = auRemovableRequires au
+    allIdx = rm ++ auErasable au ++ map fst rq ++ concatMap snd rq
+               ++ map fst (auBinders au)

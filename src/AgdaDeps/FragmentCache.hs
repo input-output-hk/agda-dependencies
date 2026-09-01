@@ -74,8 +74,13 @@ instance Binary FragmentData where
 -- meaning) changes. The side-channel slices must be exact before/after
 -- deltas, not name-prefix filters — a filter drops anonymous-module
 -- entries no module name prefixes.
+-- Keep the reasons cumulative — overwriting the line loses the payload-shape
+-- history that says which bump a stale fragment predates.
+--   v8:  ADDef gained '_argUsage'
+--   v9:  ArgUsage gained '_auBinders' (binder names + hiding)
+--   v10: EdgeProv lost the unreachable 'with' tag
 fragmentFormatVersion :: Word64
-fragmentFormatVersion = 8  -- v8: ADDef gained '_argUsage'
+fragmentFormatVersion = 10
 
 -- | Fingerprint of every option that changes fragment /content/.
 -- Rendering-only options (format, view, colours, externals filtering,

@@ -114,6 +114,31 @@ Emits canonical-form hashes for every elaborated subterm. Off by default (adds a
 Term walk, ~50–100% wire growth). `--min-term-depth=3` (the default) cuts trivial
 `Var`/`Lit`/`Sort` noise; `1` disables the filter.
 
+## `argUsage` — find arguments a definition never uses
+
+No flag: it is always computed, and rides in expanded JSON on the definitions
+that have something to report.
+
+```bash
+cabal run agda-deps -- --format=json --json-mode=expanded \
+  -i test/ -o out/ test/Test.agda
+
+python3 - <<'EOF'
+import json
+for d in json.load(open("out/deps.json"))["definitions"]:
+    au = d.get("argUsage")
+    if au and au["removable"]:
+        print(d["name"], au["removable"], au.get("removableRequires", {}))
+EOF
+```
+
+`removable` positions can lose the binder *and* the argument at every call
+site; `erasable` ones are used only in types, so they are `@0` candidates
+rather than removals. Indices count the definition's own binders (implicits
+included) — not the sibling `type` string, which still shows the binders Agda
+inherited from an enclosing section. Check `removableRequires` before editing:
+a position listed there is only removable together with the ones it names.
+
 ## `--incremental` — cache per-module work across rebuilds
 
 ```bash

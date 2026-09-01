@@ -41,7 +41,10 @@ GHC) — the same string stamped into `graph.json` as `"producer"`.
 
 No test suite or lint config. Exercise the backend against `test/` (entry
 `test/Test.agda`). CI (`.github/workflows/ci.yml`) builds and runs `dot` / `html`
-/ `html --lazy` / `json` over this corpus.
+/ `html --lazy` / `json` over this corpus. Three fixture corpora live outside
+`test/` so the main one needs no flags: `test-keepgoing/` (`--keep-going`),
+`test-unsolved/` (`--allow-unsolved-metas`) and `test-matchconstant/`
+(`AGDA_DEPS_MATCH_CONSTANT=1`, the unshipped phase-2 probe).
 
 Two side-channels skip parts of the pipeline:
 
@@ -95,6 +98,11 @@ src/AgdaDeps/
                           between keys. Exit 1 on error (--strict: on warning).
   Deps.hs                 ADDef, compileDefAD, classifyDef, ignoreDef,
                           ignoredEdgesRef, contractIgnoredEdges.
+  MatchConstant.hs        A PROBE, not a feature: match-constant positions
+                          (a case split replaceable by a wildcard), off the
+                          compiled case tree. Emits nothing to the wire; runs
+                          only under AGDA_DEPS_MATCH_CONSTANT. Measured and
+                          rejected for the wire — see Backlog.md.
   Layout.hs               (x, y) positions per definition.
   Csr.hs                  CSR adjacency + base64 serialisation.
   Source.hs               --with-source machinery.
@@ -196,16 +204,38 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges expands hidden refs int
   gated in CI against the same golden and produce byte-identical graphs (modulo
   `producer`). API deltas are bridged with CPP on `MIN_VERSION_Agda(2,9,0)` in
   five modules:
-  - `Util.hs` — `funWith` is `Maybe QName` (2.8) vs `IsWithFunction QName` (2.9).
+  - `Util.hs` — `funWith` is `Maybe QName` (2.8) vs `IsWithFunction QName` (2.9);
+    and `ccDone`, because 2.9 turned the case tree's `Done` into a pattern
+    synonym over `CCDone` with a clause number and a recursion flag in front of
+    the bound-variable list. Both shims exist so their callers stay CPP-free.
   - `Help.hs` — `usageInfo` gained a leading column-width arg in 2.9.
   - `Main.hs` — 2.8 has no `runAgdaArgs`; shimmed via `withArgs` + `runAgda'`.
   - `Backend.hs` — `anameName` in `Scope.Base` (2.8) vs `Abstract.Name` (2.9).
   - `ModuleExplorer.hs` — `stCurrentModule` lazy `Maybe` (2.8) vs strict `:!:`
-    (2.9); `setTCLens' stBackends` (2.8) vs `setSession lensBackends` (2.9).
+    (2.9); `setTCLens' stBackends` (2.8) vs `setSession lensBackends` (2.9);
+    `unionSignature` is exported by `Monad.Signature` in 2.8 but gone in 2.9
+    (its successor `importSignature` is private to `Interaction.Imports`), so
+    2.9 gets a local mirror over the whole `Sig` record — keep that pattern
+    exhaustive so a new field breaks the build instead of being dropped.
 
   In CPP modules, don't use backslash string gaps (cpp collapses them) — use `++`.
   Agda 2.9's `funProjection` is `Either ProjectionLikenessMissing Projection` —
   match `Right{projProper = Just _}`.
+
+  Measuring on agda-stdlib: pass **both** `-i <root>` and `-i <root>/src`. The
+  root `Everything.agda` does not sit under the library's own `include: src`, so
+  with only one of them `--keep-going` tags it Failed and emits 0 definitions
+  (this cost a build on each side of the consumer exchange).
+
+  The 2.9 job is **opt-in**, so a 2.9-only break can sit in `main` unnoticed:
+  build it locally (`cabal build --project-file=cabal.project.agda29
+  --builddir=dist-agda29`) and re-run the golden against it before calling a
+  change done. Watch `--with-signatures` in particular — `prettyTCM` resolves a
+  qname against the *entry module's* scope, so a name reachable under two
+  aliases can reify differently per version. `test/RenamedReexport.agda`
+  re-exports `Nat`'s constructors, which is why no fixture type may mention
+  `suc` (`test/ArgUsage.agda` indexes its `Vec` by a local `Idx` for exactly
+  this reason).
 
 - **`Main.hs` argv pre-processing** canonicalizes path-bearing flags (`-o`, `-i`,
   `--include-path`, `--out-dir`, `.agda`/`.lagda*` positionals) to absolute paths,
@@ -249,14 +279,30 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges expands hidden refs int
   thread-safe and the `Backend'` hooks run serially. No `parMap` / `forkIO` /
   `Async` under `src/AgdaDeps/`.
 
-- **Edge provenance (producer side).** `computeDefAD` (`Deps.tagOne`) walks
+- **Edge provenance (producer side).** `computeDefAD` (`Deps.tagOneWith`) walks
   `defType` and `theDef` separately: `defType` names → `Signature`; `theDef` names
-  → `Body`, refined to `With` when the parent's `funWith` points at the target and
-  `ModuleLocal` (wire `module-local`) when the qname's `prettyShow` contains
-  `._.`. `module-local` is a property of the *target*. Precedence: `Signature >
-  With > ModuleLocal > Body > Unknown`. Contracted edges inherit the source side's
-  provenance; `addInstanceMethodEdges` adds `Unknown` with a left-biased `M.union`.
-  Invariant: every kept edge has one tag and `M.keysSet _depsProv == _deps`.
+  → `Body`, refined to `ModuleLocal` (wire `module-local`) when the target is an
+  anonymous-module helper (`nrWhereHelper`). `module-local` is a property of the
+  *target*. Precedence: `Signature > ModuleLocal > Body > Unknown`. Contracted
+  edges inherit the source side's provenance; `addInstanceMethodEdges` adds
+  `Unknown` with a left-biased `M.union`. Invariant: every kept edge has one tag
+  and `M.keysSet _depsProv == _deps`.
+
+- **There is no `with` provenance tag, and re-adding the old one is wrong.** One
+  existed until 2026-08-31 and could never fire: it was emitted when a dep
+  equalled the source's `funWith`, but `funWith` names a with-function's *parent*
+  (`Monad/Base.hs`, `_funWith`) and is non-empty on **exactly** the defs
+  `ignoreDef` drops (`isWithFun funWith`) — so the branch was only ever reachable
+  while walking a def that is never emitted, and only for a *recursive* `with`
+  (the helper must reference its parent). `contractIgnoredEdges` discards
+  inside-chain provenance on top of that. Measured: zero `with` edges on a probe
+  with nested `with` + a recursive `with`, on both 2.8 and 2.9; a dependency
+  reached only through a with-abstraction arrives on the parent as `body`.
+  Removing the tag changed no emitted byte (the golden was unaffected). The
+  numeric slot 3 in `encodeEdgeProv` / `Binary EdgeProv` is left as a **hole** so
+  the packed encoding of the surviving tags does not shift. A *meaningful* with
+  signal would have to be applied at contraction time — a deliberate
+  wire-content change, logged in [Backlog.md](Backlog.md), not a bug fix.
 
 - **Clauses are all `noRange` post-`KillRange`** — count them with `funCompiled`
   (`CompiledClauses`), not `clauseLHSRange`.
@@ -372,11 +418,11 @@ reads `defArgOccurrences` + `defPolarity` off the `Definition` already in scope 
 zips them: `Unused` + `Nonvariant` ⇒ **removable** (binder and every call-site
 argument can go), `Unused` + anything else ⇒ **erasable** (used only in types, an
 `@0` candidate). Emitted as the optional per-def `argUsage` object
-(`{removable, removableRequires?, erasable, arity}`), omitted when there is nothing
-to report — so finding-free corpora stay byte-identical. Always computed, no flag.
-Identical API on 2.8/2.9 — no CPP. Fixture: `test/ArgUsage.agda`.
+(`{removable, removableRequires?, erasable, arity, binders?}`), omitted when there is
+nothing to report — so finding-free corpora stay byte-identical. Always computed, no
+flag. Identical API on 2.8/2.9 — no CPP. Fixture: `test/ArgUsage.agda`.
 
-Four things not to revert:
+Seven things not to revert:
 
 - **Indices are over the definition's *own* binders.** Agda prepends the enclosing
   section's telescope to every definition inside it, so the elaborated spine that
@@ -390,11 +436,69 @@ Four things not to revert:
   *inconsistent* with the sibling `type` string, which still reifies the raw
   elaborated telescope — called out in the schema description; shifting `type` to
   match would be a wire-visible change to `--with-signatures` output.
+- **`removable` needs the deletability guard; Agda's verdict alone is unsound.**
+  `Unused` + `Nonvariant` answers "does the meaning depend on this value", not
+  "can the binder be deleted". They differ when the argument occurs in the type
+  only at an **irrelevant** position: `dependentPolarity` tests occurrence with
+  `relevantInIgnoringSortAnn`, whose `RelevantIn` monoid *discards* occurrences
+  under irrelevance (`withVarOcc o x | isIrrelevant o = mempty`,
+  `TypeChecking/Free.hs`), so the position stays `Nonvariant` — while deleting the
+  binder leaves the type naming something out of scope. Three shapes, all real on
+  stdlib: an irrelevant binder (42 defs); a **relevant** binder whose only
+  occurrence is at a callee's irrelevant argument position (5 — invisible to any
+  test on the binder itself, so a consumer-side filter cannot substitute); and an
+  occurrence **hidden by reduction** (20), where the codomain as written names the
+  binder but the reduced one puts it in a later `Nonvariant` argument's domain,
+  which Agda's rule discounts by design — so relevance-blindness alone is not
+  enough. `guardDeletable`
+  / `deletableRemovable` reject a position whose variable is free in the codomain
+  or in a *surviving* argument's domain — Agda's own
+  `relevantInIgnoringNonvariant` condition re-run with relevance-blind `freeIn`.
+  Keep three things: the **exemption** for other surviving-removable domains (a
+  jointly-removable chain is free in them by construction — without it every
+  multi-index verdict dies, `ArgUsage.chain`); the **fixpoint** (rejecting one
+  position strands earlier ones that only occurred inside it); and **both
+  spines** — see the next bullet. Reported by the consumer repo; it affected 67 of
+  145 stdlib `removable`-carrying defs (47 lost every finding, 20 lost some),
+  244 → 142 positions, 145 → 98 defs. `erasable` is untouched by
+  design: it claims an `@0` candidate, not a removal. Fixtures:
+  `ArgUsage.{irrInCodomain,relAtIrrelevantPosition}` fire nothing,
+  `ArgUsage.irrUnmentioned` still fires.
+- **Occurrence questions need the syntactic spine *and* the reduced one.**
+  `telView` reduces, which can **erase** an occurrence: a codomain `Irrel n p`
+  whose `Irrel` ignores its second argument reduces to `Wrap n`, and the binder
+  the source still mentions is gone. The syntactic spine (`piSpineOf`) is what a
+  source edit must respect, but it stops at a type that only becomes a function
+  after unfolding. So `Spine` is built both ways and either view may veto
+  (`guardDeletable`, `removableRequiresOf`). **Descend with `absBody`, never
+  `unAbs`**: a non-dependent `Pi` is stored as `NoAbs`, whose body is *not* under
+  the binder, so `unAbs` silently mixes two de Bruijn index spaces and every
+  occurrence test then answers about the wrong variable (this bug made
+  `ArgUsage.chain` grow a phantom requirement before it was caught). `absBody`
+  `raise`s a `NoAbs` body by one, which is why `telView` is safe. The sibling
+  `piSpine` may use `unAbs` because it reads only hiding and names, never an index.
 - **Truncation IS the padding rule.** Either list may be shorter than the
   arity; any index past the end of *either* counts as used. Deliberately more
   conservative than Agda's `getArgOccurrence`, which falls back to a `telView`
   computation for an out-of-range index — we want neither that cost nor that
   inference.
+- **`binders` comes off the syntactic `Pi` spine, never a `telView`.** Hiding is in
+  the domain's argument info and the name in the `Abs`, both on the spine Agda's own
+  `arity` walks — so `Deps.piSpine` *replaces* that count (`max (length spine)
+  analysed`) and the names cost what the count already cost, measurably nothing.
+  `telView` would be wrong twice: it reduces, and a source binder name is not a fact
+  reduction can reveal. Three consequences, each pinned: the spine can be *shorter*
+  than the stored lists (`dependentPolarity` walked a reduced one), so a position
+  past its end gets no entry — silence, not a guessed `explicit` (`ArgUsage.opaqueArg`,
+  and 76 of 244 stdlib `removable` positions); the entries are re-indexed by
+  `dropSectionPrefix` alongside the verdict, or a `where` helper reports its parent's
+  binder *name* (`ArgUsage.Section.named` reports `m`, not `k`; `test-keepgoing`'s
+  `helper` asserts the unnamed own binder against the parent's named `n`); and a name
+  containing `.` (`A.a`) is a generalisation-inserted binder, kept as-is because it is
+  what Agda's own printer emits and `.` cannot occur in a written binder name
+  (`ArgUsage.genDependency`). `defGeneralizedParams` is *not* a usable marker for
+  these — Agda fills it for data/record signatures only, so it is always `[]` on the
+  `Function{}` path.
 - **Only non-projection-like `Function`s (`droppedPars == 0`).** Projections and
   constructors drop parameters from both lists, so their indices are shifted off the
   telescope by exactly `droppedPars`; `Axiom`/`Primitive` have no body, and for
@@ -409,11 +513,51 @@ Four things not to revert:
   `i` could occur (the codomain or a non-`Nonvariant` domain would have demoted it to
   `Invariant`), which is what makes that the complete rule. The relation only ever
   points forward, so it is a DAG — plain DFS, no cycle check — and a shifted-away
-  section prefix can never be a surviving requirement's target. Gated on ≥2 removable
-  indices, so the reducing `telView` is effectively never paid. Pinned by
+  section prefix can never be a surviving requirement's target.
+
+  Two corollaries worth keeping: for an analysable `Function`, `polFromOcc` is the
+  *only* source of `Nonvariant` (`Unused ↦ Nonvariant`; `sizePolarity` and
+  `dependentPolarity` only ever demote), so **`removable` ⟺ `Nonvariant`** and the
+  two-field test is belt-and-braces rather than two independent facts. And because
+  `dependentPolarity` demotes on the codomain *and* on every non-`Nonvariant`
+  domain, a removable position's variable can only survive in another *removable*
+  position's domain — so every closure ends at a binder the author actually wrote.
+  That is why a generalisation-inserted position never needs its own wire marker:
+  acting on its closure is always a well-defined source edit. Verified on the
+  standard library — of the 15 provably inserted (dotted-name) `removable`
+  positions, 0 have a closure without a written position.
+
+  The reducing `telView` is paid only for a definition that already carries a
+  `removable` finding — the gate is **≥1**, not ≥2, because round-4's
+  deletability guard needs both spines even for a single position. It stays
+  effectively never paid all the same: on agda-stdlib 2.4 the 98
+  `removable`-carrying defs are the only ones that reach it, well under 1% of
+  the corpus. Pinned by
   `ArgUsage.chain` (a chain: `{"0": [1,3]}`) and `ArgUsage.indep` (genuinely
   independent: no key at all — the case a symmetric "groups" encoding could not
   express).
+
+**Phase 2 (`matchConstant`) was measured and rejected — and the reason is a trap
+worth keeping.** `AgdaDeps.MatchConstant` finds positions whose case split could
+be wildcarded. The obvious property ("every branch computes the same thing", i.e.
+compare the branch bodies) is **unsound in a dependently typed language**: a match
+also refines the branches' *types*, so `not-involutive true = refl;
+not-involutive false = refl` has one identical body and still fails to typecheck
+when wildcarded (`[UnequalTerms]`). On the standard library that shape was 101 of
+102 raw candidates. Reporting therefore also requires the split variable to be
+free in neither a later domain nor the codomain (`typeIndependent`) — a plain
+occurrence check, *not* a re-implementation of `dependentPolarity`. Two further
+non-obvious parts: a position counts only when **every** split on it in the tree
+is collapsible (one argument can be split in several subtrees, and wildcarding
+removes them all); and the index bookkeeping across a `Case` node is Agda's own
+`splitC` convention (`ps0 ++ qs ++ ps1`) — a constructor branch of arity `k`
+replaces the split position with `k` fields, a literal branch drops it, and the
+catch-all keeps it, which is why the catch-all is treated as a slab of size 1.
+Yield after the fix: 1 finding in 15,298 stdlib functions (0 in 6,795 from an
+implementation-heavy corpus), and that one is `Data.Unit.NonEta.hide`, whose
+stuck match is deliberate. Kept as a probe behind `AGDA_DEPS_MATCH_CONSTANT`,
+pinned by `test-matchconstant/`; **delete it rather than fix it** if an Agda bump
+breaks it.
 
 Expanded-only: unlike the other analytical per-def fields there is no packed
 counterpart, because a nested variable-length object has no typed-array shape (the
@@ -428,8 +572,9 @@ All HTML views consume the v2 schema; `--format=json` emits it directly. The
 (draft 2020-12). `required` covers the fields present since v2 inception; additive
 fields (`nodeKeyVersion`, `producer`, `definitionEdgesProvenance`,
 `definitionSubterm*`, `externals_summary`, `moduleOptionEscapes`, per-def
-`line`/`access`/`type`/`argUsage`) are optional and `additionalProperties` is open, so it
-validates older and forward-compatible output too. The `packed` form and `--lazy`
+`line`/`access`/`type`/`argUsage` (and within it `binders`)) are optional and
+`additionalProperties` is open, so it validates older and forward-compatible
+output too. The `packed` form and `--lazy`
 layout are not schematised.
 
 **Single source of truth + drift check.** The expanded wire shape is described once
@@ -460,7 +605,7 @@ Three conventions for downstream consumers:
   - *expanded* — arrays of records keyed by qname / module name, no base64. Carries
     `schemaVersion` / `mode`, `kind` per definition, and a `reexports[]` array. An
     optional `definitionEdgesProvenance` array parallel to `definitionEdges`
-    (`signature | body | module-local | with | unknown`) is always emitted; absence
+    (`signature | body | module-local | unknown`) is always emitted; absence
     means "every edge `unknown`". Under `--with-signatures` each definition carries
     an optional `"type"` string (reified, Agda default printing, via `prettyTCM`). A
     `reexports[]` row that used `renaming` carries an optional `renames` map

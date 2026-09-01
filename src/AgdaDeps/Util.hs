@@ -1,15 +1,17 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | Small, general-purpose helpers shared by the other AgdaDeps
--- modules: with-function detection ('isWithFun', 'isWithFun''), hex
+-- modules: with-function detection ('isWithFun'), case-tree leaf access
+-- ('ccDone'), hex
 -- colour parsing ('isValidHexColor', 'parseHexColor'), list dedup
 -- ('dedupOrd'), JSON string escaping ('jsString'), and argv inspection
 -- ('candidateDirs', 'looksLikeAgdaSource').
 module AgdaDeps.Util
   ( -- * Agda with-function compatibility (2.8 / 2.9)
     isWithFun
-  , isWithFun'
+  , ccDone
 
     -- * Hex colour parsing
   , isValidHexColor
@@ -41,6 +43,7 @@ import Data.Word ( Word8 )
 import Numeric ( readHex, showHex )
 import System.FilePath ( takeDirectory )
 
+import Agda.TypeChecking.CompiledClause ( CompiledClauses', pattern Done )
 #if MIN_VERSION_Agda(2,9,0)
 import Agda.TypeChecking.Monad.Base.Types ( IsWithFunction(..) )
 #else
@@ -55,19 +58,30 @@ isWithFun :: IsWithFunction a -> Bool
 isWithFun NoWithFunction    = False
 isWithFun (WithFunction _)  = True
 
--- | Like 'isWithFun', but extracts the with-helper's payload when
--- present.
-isWithFun' :: IsWithFunction a -> Maybe a
-isWithFun' NoWithFunction    = Nothing
-isWithFun' (WithFunction a)  = Just a
 #else
 -- Agda 2.8: @funWith :: Maybe QName@ (@Nothing@ / @Just helper@).
 isWithFun :: Maybe a -> Bool
 isWithFun = isJust
-
-isWithFun' :: Maybe a -> Maybe a
-isWithFun' = id
 #endif
+
+-- | A case-tree leaf: @Just (bound variables, body)@ for a @Done@ node,
+-- 'Nothing' for @Case@ and @Fail@. Abstracts the one 2.8\/2.9 difference in
+-- the case-tree API — 2.9 turned @Done@ into a pattern synonym over @CCDone@,
+-- adding the originating clause number and a recursion flag — so
+-- "AgdaDeps.MatchConstant" needs no CPP of its own.
+--
+-- The count is what a caller wants far more often than the names: at a leaf
+-- every pattern is a variable, so it /is/ the size of the body's context.
+-- Deliberately drops the name suggestions (and 2.9's clause number): they
+-- differ between leaves with identical bodies, so anything comparing leaves
+-- must not see them.
+ccDone :: CompiledClauses' a -> Maybe (Int, a)
+#if MIN_VERSION_Agda(2,9,0)
+ccDone (Done _ _ xs b) = Just (length xs, b)
+#else
+ccDone (Done xs b)     = Just (length xs, b)
+#endif
+ccDone _               = Nothing
 
 -- | Validate a "#RRGGBB" string. Case-insensitive on the hex digits.
 isValidHexColor :: String -> Bool

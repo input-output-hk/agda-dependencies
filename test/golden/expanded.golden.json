@@ -113,6 +113,70 @@
       "Nat.Nat"
     ],
     [
+      "ArgUsage.Def",
+      "ArgUsage.Def.constructor"
+    ],
+    [
+      "ArgUsage.Def",
+      "ArgUsage.Def.def"
+    ],
+    [
+      "ArgUsage.Def.constructor",
+      "ArgUsage.Def"
+    ],
+    [
+      "ArgUsage.Def.constructor",
+      "ArgUsage.Def.constructor"
+    ],
+    [
+      "ArgUsage.Def.def",
+      "ArgUsage.Def"
+    ],
+    [
+      "ArgUsage.Def.def",
+      "ArgUsage.Def.constructor"
+    ],
+    [
+      "ArgUsage.Fun",
+      "Nat.Nat"
+    ],
+    [
+      "ArgUsage.Idx",
+      "ArgUsage.Idx.su"
+    ],
+    [
+      "ArgUsage.Idx",
+      "ArgUsage.Idx.ze"
+    ],
+    [
+      "ArgUsage.Idx.su",
+      "ArgUsage.Idx"
+    ],
+    [
+      "ArgUsage.Idx.su",
+      "ArgUsage.Idx.su"
+    ],
+    [
+      "ArgUsage.Idx.su",
+      "ArgUsage.su-0"
+    ],
+    [
+      "ArgUsage.Idx.ze",
+      "ArgUsage.Idx"
+    ],
+    [
+      "ArgUsage.Idx.ze",
+      "ArgUsage.Idx.ze"
+    ],
+    [
+      "ArgUsage.Irrel",
+      "ArgUsage.Wrap"
+    ],
+    [
+      "ArgUsage.Irrel",
+      "Nat.Nat"
+    ],
+    [
       "ArgUsage.Section.drops",
       "Nat.Nat"
     ],
@@ -125,6 +189,18 @@
       "Nat._+_"
     ],
     [
+      "ArgUsage.Section.named",
+      "Nat.Nat"
+    ],
+    [
+      "ArgUsage.Section.named",
+      "Nat._+_"
+    ],
+    [
+      "ArgUsage.Vec",
+      "ArgUsage.Idx"
+    ],
+    [
       "ArgUsage.Vec",
       "ArgUsage.Vec.[]"
     ],
@@ -133,8 +209,8 @@
       "ArgUsage.Vec._\u2237_"
     ],
     [
-      "ArgUsage.Vec",
-      "Nat.Nat"
+      "ArgUsage.Vec.[]",
+      "ArgUsage.Idx.ze"
     ],
     [
       "ArgUsage.Vec.[]",
@@ -145,8 +221,12 @@
       "ArgUsage.Vec.[]"
     ],
     [
-      "ArgUsage.Vec.[]",
-      "Nat.Nat.zero"
+      "ArgUsage.Vec._\u2237_",
+      "ArgUsage.Idx"
+    ],
+    [
+      "ArgUsage.Vec._\u2237_",
+      "ArgUsage.Idx.su"
     ],
     [
       "ArgUsage.Vec._\u2237_",
@@ -169,12 +249,24 @@
       "ArgUsage._\u2237_-2"
     ],
     [
-      "ArgUsage.Vec._\u2237_",
+      "ArgUsage.Wrap",
+      "ArgUsage.Wrap.wrap"
+    ],
+    [
+      "ArgUsage.Wrap",
       "Nat.Nat"
     ],
     [
-      "ArgUsage.Vec._\u2237_",
-      "Nat.Nat.suc"
+      "ArgUsage.Wrap.wrap",
+      "ArgUsage.Wrap"
+    ],
+    [
+      "ArgUsage.Wrap.wrap",
+      "ArgUsage.Wrap.wrap"
+    ],
+    [
+      "ArgUsage.Wrap.wrap",
+      "Nat.Nat"
     ],
     [
       "ArgUsage.box",
@@ -190,11 +282,11 @@
     ],
     [
       "ArgUsage.chain",
-      "ArgUsage.Vec"
+      "ArgUsage.Idx"
     ],
     [
       "ArgUsage.chain",
-      "Nat.Nat"
+      "ArgUsage.Vec"
     ],
     [
       "ArgUsage.f1",
@@ -222,6 +314,18 @@
     ],
     [
       "ArgUsage.f5",
+      "ArgUsage.Idx"
+    ],
+    [
+      "ArgUsage.f5",
+      "ArgUsage.Idx.su"
+    ],
+    [
+      "ArgUsage.f5",
+      "ArgUsage.Idx.ze"
+    ],
+    [
+      "ArgUsage.f5",
       "ArgUsage.Vec"
     ],
     [
@@ -238,11 +342,15 @@
     ],
     [
       "ArgUsage.f5",
-      "Nat.Nat.suc"
+      "Nat.Nat.zero"
     ],
     [
-      "ArgUsage.f5",
-      "Nat.Nat.zero"
+      "ArgUsage.genDependency",
+      "Nat.Nat"
+    ],
+    [
+      "ArgUsage.genMentions",
+      "Nat.Nat"
     ],
     [
       "ArgUsage.helper@25",
@@ -253,7 +361,47 @@
       "Nat.Nat"
     ],
     [
-      "ArgUsage.inner@91",
+      "ArgUsage.inner@108",
+      "Nat.Nat"
+    ],
+    [
+      "ArgUsage.irrInCodomain",
+      "ArgUsage.Irrel"
+    ],
+    [
+      "ArgUsage.irrInCodomain",
+      "ArgUsage.Wrap.wrap"
+    ],
+    [
+      "ArgUsage.irrInCodomain",
+      "Nat.Nat"
+    ],
+    [
+      "ArgUsage.irrUnmentioned",
+      "Nat.Nat"
+    ],
+    [
+      "ArgUsage.opaqueArg",
+      "ArgUsage.Fun"
+    ],
+    [
+      "ArgUsage.opaqueArg",
+      "Nat.Nat"
+    ],
+    [
+      "ArgUsage.opaqueArg",
+      "Nat.Nat.zero"
+    ],
+    [
+      "ArgUsage.relAtIrrelevantPosition",
+      "ArgUsage.Irrel"
+    ],
+    [
+      "ArgUsage.relAtIrrelevantPosition",
+      "ArgUsage.Wrap.wrap"
+    ],
+    [
+      "ArgUsage.relAtIrrelevantPosition",
       "Nat.Nat"
     ],
     [
@@ -269,8 +417,16 @@
       "Nat.Nat"
     ],
     [
+      "ArgUsage.useless",
+      "ArgUsage.Def"
+    ],
+    [
+      "ArgUsage.useless",
+      "Nat.Nat"
+    ],
+    [
       "ArgUsage.wasteful",
-      "ArgUsage.inner@91"
+      "ArgUsage.inner@108"
     ],
     [
       "ArgUsage.wasteful",
@@ -1222,21 +1378,44 @@
     "signature",
     "body",
     "signature",
-    "signature",
-    "signature",
-    "body",
     "body",
     "body",
     "signature",
-    "signature",
     "body",
-    "signature",
     "signature",
     "body",
     "body",
     "body",
     "body",
     "signature",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "signature",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "signature",
+    "body",
+    "signature",
+    "signature",
+    "signature",
+    "body",
+    "body",
+    "body",
+    "body",
+    "body",
+    "signature",
+    "signature",
+    "body",
     "signature",
     "signature",
     "body",
@@ -1256,10 +1435,26 @@
     "body",
     "body",
     "signature",
+    "body",
+    "signature",
+    "signature",
+    "signature",
     "signature",
     "signature",
     "signature",
     "body",
+    "signature",
+    "signature",
+    "signature",
+    "body",
+    "body",
+    "signature",
+    "body",
+    "signature",
+    "signature",
+    "body",
+    "signature",
+    "signature",
     "signature",
     "module-local",
     "signature",
@@ -1575,6 +1770,9 @@
       3
     ],
     [
+      3
+    ],
+    [
       6,
       5,
       4,
@@ -1589,6 +1787,8 @@
     [
       3
     ],
+    [],
+    [],
     [
       5,
       4,
@@ -1599,6 +1799,11 @@
       4,
       3
     ],
+    [
+      4,
+      3
+    ],
+    [],
     [],
     [],
     [
@@ -1626,89 +1831,7 @@
       4,
       3
     ],
-    [
-      3
-    ],
     [],
-    [],
-    [],
-    [],
-    [
-      3,
-      3
-    ],
-    [
-      4,
-      3
-    ],
-    [],
-    [],
-    [
-      3
-    ],
-    [
-      3
-    ],
-    [
-      4,
-      3
-    ],
-    [
-      3
-    ],
-    [],
-    [
-      3,
-      3
-    ],
-    [
-      3
-    ],
-    [],
-    [],
-    [
-      3
-    ],
-    [
-      3,
-      3
-    ],
-    [],
-    [
-      3
-    ],
-    [],
-    [
-      3
-    ],
-    [
-      4,
-      3
-    ],
-    [
-      4,
-      3
-    ],
-    [
-      3
-    ],
-    [
-      3
-    ],
-    [
-      3
-    ],
-    [
-      4,
-      3
-    ],
-    [],
-    [],
-    [
-      4,
-      3,
-      3
-    ],
     [
       4,
       3
@@ -1723,31 +1846,8 @@
       3
     ],
     [],
-    [
-      6,
-      5,
-      4,
-      3
-    ],
-    [],
     [],
     [
-      3,
-      3
-    ],
-    [
-      3
-    ],
-    [
-      4,
-      3
-    ],
-    [
-      4,
-      3
-    ],
-    [
-      5,
       4,
       3
     ],
@@ -1757,8 +1857,12 @@
     ],
     [],
     [],
-    [],
-    [],
+    [
+      3
+    ],
+    [
+      3
+    ],
     [
       4,
       3
@@ -1774,11 +1878,25 @@
       3
     ],
     [],
+    [
+      3,
+      3
+    ],
+    [
+      3
+    ],
     [],
     [],
     [
+      3
+    ],
+    [],
+    [
       3,
-      3,
+      3
+    ],
+    [],
+    [
       3
     ],
     [
@@ -1787,6 +1905,57 @@
       4,
       3
     ],
+    [],
+    [
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [
+      3
+    ],
+    [
+      3
+    ],
+    [
+      3
+    ],
+    [
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [],
+    [],
+    [
+      4,
+      3,
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [
+      3
+    ],
+    [],
+    [
+      3
+    ],
+    [],
     [
       4,
       3
@@ -1796,6 +1965,81 @@
       6,
       5,
       4,
+      3
+    ],
+    [],
+    [],
+    [
+      3,
+      3
+    ],
+    [
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [],
+    [
+      4,
+      3
+    ],
+    [
+      5,
+      4,
+      3
+    ],
+    [
+      3,
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [],
+    [],
+    [],
+    [],
+    [
+      4,
+      3
+    ],
+    [],
+    [
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [
+      3
+    ],
+    [],
+    [],
+    [],
+    [
+      3,
+      3,
+      3
+    ],
+    [
+      6,
+      5,
+      4,
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [],
+    [
+      6,
+      5,
+      4,
       3,
       3
     ],
@@ -1810,7 +2054,8 @@
     ],
     [
       3
-    ]
+    ],
+    []
   ],
   "definitionSubtermHashes": [
     [
@@ -1826,11 +2071,11 @@
       14929642634682412436
     ],
     [
-      2529423414001559196,
-      3174250544678197403,
-      2340036614347329462,
-      13284031056433125300,
-      12960542361253054659
+      7142729137323921509,
+      4341779826615509818,
+      2222833327026133554,
+      9782678338998334768,
+      8915882174408837287
     ],
     [],
     [
@@ -1843,10 +2088,10 @@
       12414141865957839590
     ],
     [
-      2507265480574413289,
-      1174982511452182405,
-      2041349472932421197,
-      15459855560903280647
+      8364821664855344797,
+      7047288042280336383,
+      1527714591841021793,
+      12891341474172315942
     ],
     [
       8898627849982343010,
@@ -1891,7 +2136,10 @@
       6892163928050598771
     ],
     [
-      7323139662528369761
+      7705823676471030654
+    ],
+    [
+      15058666949816219313
     ],
     [
       10056469477656895440,
@@ -1908,6 +2156,8 @@
     [
       15058666949816219313
     ],
+    [],
+    [],
     [
       2761753525227269783,
       6693803233404257260,
@@ -1918,6 +2168,11 @@
       10024656216500979893,
       18116076500930457536
     ],
+    [
+      8898627849982343010,
+      15058666949816219313
+    ],
+    [],
     [],
     [],
     [
@@ -1942,6 +2197,11 @@
     ],
     [],
     [
+      17406516242438536942,
+      4358242613329150198
+    ],
+    [],
+    [
       17757480843250017643,
       7027669866769713802
     ],
@@ -1950,20 +2210,24 @@
     ],
     [],
     [],
+    [
+      15407305282778607141,
+      8793213517329024573
+    ],
     [],
     [],
+    [
+      15407305282778607141,
+      8793213517329024573
+    ],
     [
       17407368232927050545,
       6085404679124660906
     ],
-    [
-      8898627849982343010,
-      15058666949816219313
-    ],
     [],
     [],
     [
-      2106337721098471220
+      5200028583206116358
     ],
     [
       15058666949816219313
@@ -1974,6 +2238,13 @@
     ],
     [
       17116068848986125513
+    ],
+    [
+      8814764357275475453,
+      15957041783005220645
+    ],
+    [
+      13517678868695865755
     ],
     [],
     [
@@ -1988,6 +2259,7 @@
     [
       413320548182850463
     ],
+    [],
     [
       15058666949816219313,
       11537642600578598316
@@ -1995,6 +2267,12 @@
     [],
     [
       17407368232927050545
+    ],
+    [
+      10701684262753907898,
+      3961909058343997853,
+      16264171993980879505,
+      17578241341995968014
     ],
     [],
     [
@@ -2015,7 +2293,14 @@
       2922849905253142238
     ],
     [
+      1193395985094708424
+    ],
+    [
       2261524423492794912
+    ],
+    [
+      8898627849982343010,
+      15058666949816219313
     ],
     [
       8898627849982343010,
@@ -2036,6 +2321,9 @@
       15110967548103553614
     ],
     [],
+    [
+      12908861952448286861
+    ],
     [],
     [
       5290952726666939646,
@@ -2058,9 +2346,10 @@
       5746864539318884019
     ],
     [
-      8490007384349379732,
+      12150244388463930172,
       17942834878183733634
     ],
+    [],
     [
       5021708859911725975,
       8077591264472154065
@@ -2074,6 +2363,10 @@
       15058666949816219313,
       959041256776938437
     ],
+    [
+      7124235680211566728,
+      17291543255174663180
+    ],
     [],
     [],
     [],
@@ -2082,6 +2375,7 @@
       8898627849982343010,
       15058666949816219313
     ],
+    [],
     [
       4143807130429274998
     ],
@@ -2129,7 +2423,8 @@
     ],
     [
       1842168825312284360
-    ]
+    ],
+    []
   ],
   "definitions": [
     {
@@ -2155,6 +2450,12 @@
       "access": "public",
       "argUsage": {
         "arity": 3,
+        "binders": {
+          "0": {
+            "hiding": "implicit",
+            "name": "a"
+          }
+        },
         "erasable": [
           0
         ],
@@ -2172,11 +2473,11 @@
       "access": "public",
       "id": 3,
       "kind": "constructor",
-      "line": 45,
+      "line": 55,
       "module": "ArgUsage.Vec",
       "name": "ArgUsage.Vec._\u2237_",
       "state": "D",
-      "type": "{A : Set} {n : Nat} \u2192 A \u2192 ArgUsage.Vec A n \u2192 ArgUsage.Vec A (Nat.suc n)"
+      "type": "{A : Set} {n : ArgUsage.Idx} \u2192 A \u2192 ArgUsage.Vec A n \u2192 ArgUsage.Vec A (ArgUsage.su n)"
     },
     {
       "access": "public",
@@ -2212,6 +2513,18 @@
       "access": "public",
       "argUsage": {
         "arity": 4,
+        "binders": {
+          "0": {
+            "hiding": "explicit",
+            "name": "X"
+          },
+          "1": {
+            "hiding": "explicit"
+          },
+          "3": {
+            "hiding": "explicit"
+          }
+        },
         "erasable": [],
         "removable": [
           0,
@@ -2227,16 +2540,24 @@
       },
       "id": 7,
       "kind": "function",
-      "line": 108,
+      "line": 125,
       "module": "ArgUsage",
       "name": "ArgUsage.chain",
       "state": "D",
-      "type": "(X : Set) \u2192 X \u2192 (n : Nat) \u2192 ArgUsage.Vec X n \u2192 Nat"
+      "type": "(X : Set) \u2192 X \u2192 (n : ArgUsage.Idx) \u2192 ArgUsage.Vec X n \u2192 ArgUsage.Idx"
     },
     {
       "access": "public",
       "argUsage": {
         "arity": 3,
+        "binders": {
+          "0": {
+            "hiding": "explicit"
+          },
+          "2": {
+            "hiding": "explicit"
+          }
+        },
         "erasable": [],
         "removable": [
           0,
@@ -2245,7 +2566,7 @@
       },
       "id": 8,
       "kind": "function",
-      "line": 115,
+      "line": 132,
       "module": "ArgUsage",
       "name": "ArgUsage.indep",
       "state": "D",
@@ -2275,6 +2596,18 @@
       "access": "public",
       "argUsage": {
         "arity": 3,
+        "binders": {
+          "0": {
+            "hiding": "implicit",
+            "name": "a"
+          },
+          "1": {
+            "hiding": "explicit"
+          },
+          "2": {
+            "hiding": "explicit"
+          }
+        },
         "erasable": [],
         "removable": [
           0,
@@ -2349,6 +2682,11 @@
       "access": "public",
       "argUsage": {
         "arity": 1,
+        "binders": {
+          "0": {
+            "hiding": "explicit"
+          }
+        },
         "erasable": [],
         "removable": [
           0
@@ -2379,6 +2717,12 @@
       "access": "public",
       "argUsage": {
         "arity": 3,
+        "binders": {
+          "0": {
+            "hiding": "implicit",
+            "name": "a"
+          }
+        },
         "erasable": [
           0
         ],
@@ -2406,15 +2750,38 @@
       "access": "public",
       "id": 21,
       "kind": "constructor",
-      "line": 44,
+      "line": 54,
       "module": "ArgUsage.Vec",
       "name": "ArgUsage.Vec.[]",
       "state": "D",
-      "type": "{A : Set} \u2192 ArgUsage.Vec A zero"
+      "type": "{A : Set} \u2192 ArgUsage.Vec A ArgUsage.ze"
     },
     {
       "access": "public",
+      "argUsage": {
+        "arity": 2,
+        "binders": {
+          "1": {
+            "hiding": "explicit",
+            "name": "p"
+          }
+        },
+        "erasable": [],
+        "removable": [
+          1
+        ]
+      },
       "id": 22,
+      "kind": "function",
+      "line": 206,
+      "module": "ArgUsage",
+      "name": "ArgUsage.irrUnmentioned",
+      "state": "D",
+      "type": "Nat \u2192 .Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 23,
       "kind": "function",
       "line": 12,
       "module": "Agda.Builtin.TrustMe",
@@ -2424,9 +2791,9 @@
     },
     {
       "access": "public",
-      "id": 23,
+      "id": 24,
       "kind": "constructor",
-      "line": 56,
+      "line": 66,
       "module": "ArgUsage",
       "name": "ArgUsage.box",
       "state": "D",
@@ -2434,7 +2801,7 @@
     },
     {
       "access": "public",
-      "id": 24,
+      "id": 25,
       "kind": "function",
       "line": 18,
       "module": "Nat",
@@ -2444,7 +2811,27 @@
     },
     {
       "access": "public",
-      "id": 25,
+      "id": 26,
+      "kind": "function",
+      "line": 149,
+      "module": "ArgUsage",
+      "name": "ArgUsage.Fun",
+      "state": "D",
+      "type": "Set"
+    },
+    {
+      "access": "public",
+      "id": 27,
+      "kind": "constructor",
+      "line": 47,
+      "module": "ArgUsage.Idx",
+      "name": "ArgUsage.Idx.ze",
+      "state": "D",
+      "type": "ArgUsage.Idx"
+    },
+    {
+      "access": "public",
+      "id": 28,
       "kind": "datatype",
       "line": 6,
       "module": "Agda.Builtin.Equality",
@@ -2454,7 +2841,7 @@
     },
     {
       "access": "public",
-      "id": 26,
+      "id": 29,
       "kind": "projection",
       "line": 10,
       "module": "Coinductive.Stream",
@@ -2464,7 +2851,17 @@
     },
     {
       "access": "public",
-      "id": 27,
+      "id": 30,
+      "kind": "function",
+      "line": 108,
+      "module": "ArgUsage",
+      "name": "ArgUsage.inner@108",
+      "state": "D",
+      "type": "(a b : Nat) \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 31,
       "kind": "function",
       "line": 26,
       "module": "Collision",
@@ -2474,7 +2871,7 @@
     },
     {
       "access": "public",
-      "id": 28,
+      "id": 32,
       "kind": "constructor",
       "line": 7,
       "module": "Nat.Nat",
@@ -2484,7 +2881,17 @@
     },
     {
       "access": "public",
-      "id": 29,
+      "id": 33,
+      "kind": "datatype",
+      "line": 46,
+      "module": "ArgUsage",
+      "name": "ArgUsage.Idx",
+      "state": "D",
+      "type": "Set"
+    },
+    {
+      "access": "public",
+      "id": 34,
       "kind": "function",
       "line": 36,
       "module": "AnonSection",
@@ -2493,7 +2900,7 @@
       "type": "Nat"
     },
     {
-      "id": 30,
+      "id": 35,
       "kind": "other",
       "module": "ArgUsage",
       "name": "ArgUsage._\u2237_-1",
@@ -2503,12 +2910,17 @@
       "access": "public",
       "argUsage": {
         "arity": 2,
+        "binders": {
+          "0": {
+            "hiding": "explicit"
+          }
+        },
         "erasable": [],
         "removable": [
           0
         ]
       },
-      "id": 31,
+      "id": 36,
       "kind": "function",
       "line": 25,
       "module": "ArgUsage",
@@ -2518,7 +2930,7 @@
     },
     {
       "access": "public",
-      "id": 32,
+      "id": 37,
       "kind": "function",
       "line": 27,
       "module": "Where",
@@ -2528,7 +2940,7 @@
     },
     {
       "access": "public",
-      "id": 33,
+      "id": 38,
       "kind": "postulate",
       "line": 8,
       "module": "Holes",
@@ -2537,7 +2949,7 @@
       "type": "Nat"
     },
     {
-      "id": 34,
+      "id": 39,
       "kind": "other",
       "module": "Nat",
       "name": "Nat.suc-0",
@@ -2545,7 +2957,7 @@
     },
     {
       "access": "public",
-      "id": 35,
+      "id": 40,
       "kind": "projection",
       "line": 12,
       "module": "Records.Point",
@@ -2555,9 +2967,9 @@
     },
     {
       "access": "public",
-      "id": 36,
+      "id": 41,
       "kind": "projection",
-      "line": 59,
+      "line": 69,
       "module": "ArgUsage.Box",
       "name": "ArgUsage.Box.unusedTag",
       "state": "D",
@@ -2565,7 +2977,7 @@
     },
     {
       "access": "public",
-      "id": 37,
+      "id": 42,
       "kind": "function",
       "line": 18,
       "module": "AnonSection",
@@ -2575,365 +2987,17 @@
     },
     {
       "access": "public",
-      "id": 38,
-      "kind": "projection",
-      "line": 36,
-      "module": "Records.Box",
-      "name": "Records.Box.contents",
-      "state": "D",
-      "type": "{A : Set} \u2192 Records.Box A \u2192 A"
-    },
-    {
-      "access": "public",
-      "argUsage": {
-        "arity": 2,
-        "erasable": [
-          0
-        ],
-        "removable": []
-      },
-      "id": 39,
-      "kind": "function",
-      "line": 99,
-      "module": "ArgUsage",
-      "name": "ArgUsage.ident",
-      "state": "D",
-      "type": "{A : Set} \u2192 A \u2192 A"
-    },
-    {
-      "access": "public",
-      "id": 40,
-      "kind": "function",
-      "line": 28,
-      "module": "Records",
-      "name": "Records.origin",
-      "state": "D",
-      "type": "Point"
-    },
-    {
-      "id": 41,
-      "kind": "other",
-      "module": "ArgUsage",
-      "name": "ArgUsage._\u2237_-0",
-      "state": "D"
-    },
-    {
-      "access": "public",
-      "id": 42,
-      "kind": "function",
-      "line": 14,
-      "module": "OptionEscapes",
-      "name": "OptionEscapes.bigType",
-      "state": "D",
-      "type": "Set"
-    },
-    {
-      "id": 43,
-      "kind": "other",
-      "module": "OptionEscapes",
-      "name": "OptionEscapes.rec-0",
-      "state": "D"
-    },
-    {
-      "access": "public",
-      "id": 44,
-      "kind": "function",
-      "line": 41,
-      "module": "Test",
-      "name": "Test.sum",
-      "state": "D",
-      "type": "List Nat \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "id": 45,
-      "kind": "function",
-      "line": 91,
-      "module": "ArgUsage",
-      "name": "ArgUsage.inner@91",
-      "state": "D",
-      "type": "(a b : Nat) \u2192 Nat \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "id": 46,
-      "kind": "function",
-      "line": 17,
-      "module": "Collision",
-      "name": "Collision.useA",
-      "state": "D",
-      "type": "Nat"
-    },
-    {
-      "id": 47,
-      "kind": "other",
-      "module": "List",
-      "name": "List._\u2237_-1",
-      "state": "D"
-    },
-    {
-      "access": "public",
-      "id": 48,
-      "kind": "datatype",
-      "line": 43,
-      "module": "ArgUsage",
-      "name": "ArgUsage.Vec",
-      "state": "D",
-      "type": "Set \u2192 Nat \u2192 Set"
-    },
-    {
-      "access": "public",
-      "id": 49,
-      "kind": "function",
-      "line": 37,
-      "module": "ArgUsage",
-      "name": "ArgUsage.f4",
-      "state": "D",
-      "type": "Nat \u2192 Nat \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "id": 50,
-      "kind": "function",
-      "module": "Test",
-      "name": "Test.Int-0",
-      "state": "D",
-      "type": "(v : Set) (d : Exp v) \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "id": 51,
-      "kind": "function",
-      "line": 21,
-      "module": "AnonSection",
-      "name": "AnonSection.client@21",
-      "state": "D",
-      "type": "(n : Nat) \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "id": 52,
-      "kind": "function",
-      "line": 14,
-      "module": "Collision",
-      "name": "Collision.targetB",
-      "state": "D",
-      "type": "Nat"
-    },
-    {
-      "access": "public",
-      "id": 53,
-      "kind": "function",
-      "line": 23,
-      "module": "Nat",
-      "name": "Nat._*_",
-      "state": "D",
-      "type": "Nat \u2192 Nat \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "argUsage": {
-        "arity": 2,
-        "erasable": [],
-        "removable": [
-          0
-        ]
-      },
-      "id": 54,
-      "kind": "function",
-      "line": 22,
-      "module": "ArgUsage",
-      "name": "ArgUsage.f2",
-      "state": "D",
-      "type": "Nat \u2192 Nat \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "id": 55,
-      "kind": "record",
-      "line": 55,
-      "module": "ArgUsage",
-      "name": "ArgUsage.Box",
-      "state": "D",
-      "type": "(A : Set) \u2192 Set"
-    },
-    {
-      "access": "public",
-      "id": 56,
-      "kind": "datatype",
-      "line": 6,
-      "module": "Nat",
-      "name": "Nat.Nat",
-      "state": "D",
-      "type": "Set"
-    },
-    {
-      "access": "public",
-      "id": 57,
-      "kind": "constructor",
-      "line": 22,
-      "module": "OptionEscapes.Rec",
-      "name": "OptionEscapes.Rec.rec",
-      "state": "D",
-      "type": "(OptionEscapes.Rec \u2192 OptionEscapes.Rec) \u2192 OptionEscapes.Rec"
-    },
-    {
-      "access": "public",
-      "id": 58,
-      "kind": "function",
-      "line": 14,
-      "module": "Nat",
-      "name": "Nat._+_",
-      "state": "D",
-      "type": "Nat \u2192 Nat \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "id": 59,
-      "kind": "function",
-      "line": 32,
-      "module": "InlineGap",
-      "name": "InlineGap.useAlias",
-      "state": "D",
-      "type": "Nat \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "id": 60,
-      "kind": "function",
-      "line": 12,
-      "module": "Where",
-      "name": "Where.sumSquares",
-      "state": "D",
-      "type": "List Nat \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "id": 61,
-      "kind": "record",
-      "line": 34,
-      "module": "Records",
-      "name": "Records.Box",
-      "state": "D",
-      "type": "(A : Set) \u2192 Set"
-    },
-    {
-      "access": "public",
-      "id": 62,
-      "kind": "function",
-      "line": 17,
-      "module": "Records",
-      "name": "Records.mkPoint",
-      "state": "D",
-      "type": "Nat \u2192 Nat \u2192 Point"
-    },
-    {
-      "access": "public",
-      "id": 63,
-      "kind": "projection",
-      "line": 37,
-      "module": "Records.Box",
-      "name": "Records.Box.count",
-      "state": "D",
-      "type": "{A : Set} \u2192 Records.Box A \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "id": 64,
-      "kind": "constructor",
-      "line": 26,
-      "module": "Test.Exp",
-      "name": "Test.Exp.Int",
-      "state": "D",
-      "type": "{v : Set} \u2192 Nat \u2192 Exp v"
-    },
-    {
-      "access": "public",
-      "argUsage": {
-        "arity": 2,
-        "erasable": [],
-        "removable": [
-          0
-        ]
-      },
-      "id": 65,
-      "kind": "function",
-      "line": 14,
-      "module": "ArgUsage",
-      "name": "ArgUsage.f1",
-      "state": "D",
-      "type": "Nat \u2192 Nat \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "id": 66,
-      "kind": "constructor",
-      "module": "Records.Point",
-      "name": "Records.Point.constructor",
-      "state": "D",
-      "type": "(x y : Nat) \u2192 Point"
-    },
-    {
-      "access": "public",
-      "id": 67,
-      "kind": "function",
-      "line": 28,
-      "module": "InlineGap",
-      "name": "InlineGap.aliasTwice",
-      "state": "D",
-      "type": "Nat \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "argUsage": {
-        "arity": 2,
-        "erasable": [],
-        "removable": [
-          0
-        ]
-      },
-      "id": 68,
-      "kind": "function",
-      "line": 82,
-      "module": "ArgUsage.Section",
-      "name": "ArgUsage.Section.drops",
-      "state": "D",
-      "type": "(k : Nat) \u2192 Nat \u2192 Nat \u2192 Nat"
-    },
-    {
-      "access": "public",
-      "id": 69,
-      "kind": "function",
-      "line": 18,
-      "module": "Coinductive",
-      "name": "Coinductive.zeros",
-      "state": "D",
-      "type": "Stream Nat"
-    },
-    {
-      "access": "public",
-      "id": 70,
-      "kind": "record",
-      "line": 9,
-      "module": "Records",
-      "name": "Records.Point",
-      "state": "D",
-      "type": "Set"
-    },
-    {
-      "access": "public",
-      "id": 71,
-      "kind": "function",
-      "line": 18,
-      "module": "Where",
-      "name": "Where.go@18",
-      "state": "D",
-      "type": "(xs : List Nat) \u2192 List Nat \u2192 Nat"
-    },
-    {
-      "access": "public",
       "argUsage": {
         "arity": 3,
+        "binders": {
+          "0": {
+            "hiding": "implicit",
+            "name": "A"
+          },
+          "1": {
+            "hiding": "explicit"
+          }
+        },
         "erasable": [],
         "removable": [
           0,
@@ -2945,7 +3009,577 @@
           ]
         }
       },
+      "id": 43,
+      "kind": "function",
+      "line": 168,
+      "module": "ArgUsage",
+      "name": "ArgUsage.genMentions",
+      "state": "D",
+      "type": "{A : Set} \u2192 A \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 44,
+      "kind": "datatype",
+      "line": 184,
+      "module": "ArgUsage",
+      "name": "ArgUsage.Wrap",
+      "state": "D",
+      "type": "Nat \u2192 Set"
+    },
+    {
+      "access": "public",
+      "id": 45,
+      "kind": "projection",
+      "line": 36,
+      "module": "Records.Box",
+      "name": "Records.Box.contents",
+      "state": "D",
+      "type": "{A : Set} \u2192 Records.Box A \u2192 A"
+    },
+    {
+      "access": "public",
+      "argUsage": {
+        "arity": 2,
+        "binders": {
+          "0": {
+            "hiding": "implicit",
+            "name": "A"
+          }
+        },
+        "erasable": [
+          0
+        ],
+        "removable": []
+      },
+      "id": 46,
+      "kind": "function",
+      "line": 116,
+      "module": "ArgUsage",
+      "name": "ArgUsage.ident",
+      "state": "D",
+      "type": "{A : Set} \u2192 A \u2192 A"
+    },
+    {
+      "access": "public",
+      "id": 47,
+      "kind": "function",
+      "line": 28,
+      "module": "Records",
+      "name": "Records.origin",
+      "state": "D",
+      "type": "Point"
+    },
+    {
+      "id": 48,
+      "kind": "other",
+      "module": "ArgUsage",
+      "name": "ArgUsage._\u2237_-0",
+      "state": "D"
+    },
+    {
+      "access": "public",
+      "argUsage": {
+        "arity": 2,
+        "binders": {
+          "0": {
+            "hiding": "explicit",
+            "name": "n"
+          }
+        },
+        "erasable": [
+          0
+        ],
+        "removable": []
+      },
+      "id": 49,
+      "kind": "function",
+      "line": 193,
+      "module": "ArgUsage",
+      "name": "ArgUsage.irrInCodomain",
+      "state": "D",
+      "type": "(n : Nat) .(p : Nat) \u2192 ArgUsage.Irrel n _"
+    },
+    {
+      "access": "public",
+      "id": 50,
+      "kind": "function",
+      "line": 14,
+      "module": "OptionEscapes",
+      "name": "OptionEscapes.bigType",
+      "state": "D",
+      "type": "Set"
+    },
+    {
+      "id": 51,
+      "kind": "other",
+      "module": "OptionEscapes",
+      "name": "OptionEscapes.rec-0",
+      "state": "D"
+    },
+    {
+      "access": "public",
+      "argUsage": {
+        "arity": 2,
+        "binders": {
+          "0": {
+            "hiding": "explicit",
+            "name": "n"
+          }
+        },
+        "erasable": [
+          0
+        ],
+        "removable": []
+      },
+      "id": 52,
+      "kind": "function",
+      "line": 200,
+      "module": "ArgUsage",
+      "name": "ArgUsage.relAtIrrelevantPosition",
+      "state": "D",
+      "type": "(n p : Nat) \u2192 ArgUsage.Irrel n _"
+    },
+    {
+      "access": "public",
+      "id": 53,
+      "kind": "function",
+      "line": 41,
+      "module": "Test",
+      "name": "Test.sum",
+      "state": "D",
+      "type": "List Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 54,
+      "kind": "function",
+      "line": 17,
+      "module": "Collision",
+      "name": "Collision.useA",
+      "state": "D",
+      "type": "Nat"
+    },
+    {
+      "id": 55,
+      "kind": "other",
+      "module": "List",
+      "name": "List._\u2237_-1",
+      "state": "D"
+    },
+    {
+      "access": "public",
+      "id": 56,
+      "kind": "datatype",
+      "line": 53,
+      "module": "ArgUsage",
+      "name": "ArgUsage.Vec",
+      "state": "D",
+      "type": "Set \u2192 ArgUsage.Idx \u2192 Set"
+    },
+    {
+      "access": "public",
+      "id": 57,
+      "kind": "function",
+      "line": 37,
+      "module": "ArgUsage",
+      "name": "ArgUsage.f4",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 58,
+      "kind": "function",
+      "module": "Test",
+      "name": "Test.Int-0",
+      "state": "D",
+      "type": "(v : Set) (d : Exp v) \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 59,
+      "kind": "function",
+      "line": 21,
+      "module": "AnonSection",
+      "name": "AnonSection.client@21",
+      "state": "D",
+      "type": "(n : Nat) \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 60,
+      "kind": "projection",
+      "line": 139,
+      "module": "ArgUsage.Def",
+      "name": "ArgUsage.Def.def",
+      "state": "D",
+      "type": "{A : Set} \u2192 ArgUsage.Def A \u2192 A"
+    },
+    {
+      "access": "public",
+      "id": 61,
+      "kind": "constructor",
+      "line": 185,
+      "module": "ArgUsage.Wrap",
+      "name": "ArgUsage.Wrap.wrap",
+      "state": "D",
+      "type": "{n : Nat} \u2192 ArgUsage.Wrap n"
+    },
+    {
+      "access": "public",
+      "id": 62,
+      "kind": "function",
+      "line": 14,
+      "module": "Collision",
+      "name": "Collision.targetB",
+      "state": "D",
+      "type": "Nat"
+    },
+    {
+      "access": "public",
+      "id": 63,
+      "kind": "function",
+      "line": 23,
+      "module": "Nat",
+      "name": "Nat._*_",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "argUsage": {
+        "arity": 2,
+        "binders": {
+          "0": {
+            "hiding": "explicit"
+          }
+        },
+        "erasable": [],
+        "removable": [
+          0
+        ]
+      },
+      "id": 64,
+      "kind": "function",
+      "line": 22,
+      "module": "ArgUsage",
+      "name": "ArgUsage.f2",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 65,
+      "kind": "record",
+      "line": 65,
+      "module": "ArgUsage",
+      "name": "ArgUsage.Box",
+      "state": "D",
+      "type": "(A : Set) \u2192 Set"
+    },
+    {
+      "access": "public",
+      "id": 66,
+      "kind": "datatype",
+      "line": 6,
+      "module": "Nat",
+      "name": "Nat.Nat",
+      "state": "D",
+      "type": "Set"
+    },
+    {
+      "access": "public",
+      "id": 67,
+      "kind": "constructor",
+      "line": 22,
+      "module": "OptionEscapes.Rec",
+      "name": "OptionEscapes.Rec.rec",
+      "state": "D",
+      "type": "(OptionEscapes.Rec \u2192 OptionEscapes.Rec) \u2192 OptionEscapes.Rec"
+    },
+    {
+      "id": 68,
+      "kind": "other",
+      "module": "ArgUsage",
+      "name": "ArgUsage.su-0",
+      "state": "D"
+    },
+    {
+      "access": "public",
+      "id": 69,
+      "kind": "function",
+      "line": 14,
+      "module": "Nat",
+      "name": "Nat._+_",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 70,
+      "kind": "function",
+      "line": 32,
+      "module": "InlineGap",
+      "name": "InlineGap.useAlias",
+      "state": "D",
+      "type": "Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 71,
+      "kind": "function",
+      "line": 12,
+      "module": "Where",
+      "name": "Where.sumSquares",
+      "state": "D",
+      "type": "List Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "argUsage": {
+        "arity": 4,
+        "binders": {
+          "0": {
+            "hiding": "implicit",
+            "name": "P.A"
+          },
+          "1": {
+            "hiding": "implicit",
+            "name": "P"
+          },
+          "2": {
+            "hiding": "explicit"
+          }
+        },
+        "erasable": [],
+        "removable": [
+          0,
+          1,
+          2
+        ],
+        "removableRequires": {
+          "0": [
+            1,
+            2
+          ],
+          "1": [
+            2
+          ]
+        }
+      },
       "id": 72,
+      "kind": "function",
+      "line": 173,
+      "module": "ArgUsage",
+      "name": "ArgUsage.genDependency",
+      "state": "D",
+      "type": "{P.A : Set} {P : P.A \u2192 Set} \u2192 ({x : P.A} \u2192 P x) \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 73,
+      "kind": "record",
+      "line": 34,
+      "module": "Records",
+      "name": "Records.Box",
+      "state": "D",
+      "type": "(A : Set) \u2192 Set"
+    },
+    {
+      "access": "public",
+      "id": 74,
+      "kind": "function",
+      "line": 17,
+      "module": "Records",
+      "name": "Records.mkPoint",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Point"
+    },
+    {
+      "access": "public",
+      "id": 75,
+      "kind": "projection",
+      "line": 37,
+      "module": "Records.Box",
+      "name": "Records.Box.count",
+      "state": "D",
+      "type": "{A : Set} \u2192 Records.Box A \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 76,
+      "kind": "constructor",
+      "line": 26,
+      "module": "Test.Exp",
+      "name": "Test.Exp.Int",
+      "state": "D",
+      "type": "{v : Set} \u2192 Nat \u2192 Exp v"
+    },
+    {
+      "access": "public",
+      "argUsage": {
+        "arity": 2,
+        "binders": {
+          "0": {
+            "hiding": "explicit"
+          }
+        },
+        "erasable": [],
+        "removable": [
+          0
+        ]
+      },
+      "id": 77,
+      "kind": "function",
+      "line": 14,
+      "module": "ArgUsage",
+      "name": "ArgUsage.f1",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 78,
+      "kind": "constructor",
+      "module": "Records.Point",
+      "name": "Records.Point.constructor",
+      "state": "D",
+      "type": "(x y : Nat) \u2192 Point"
+    },
+    {
+      "access": "public",
+      "argUsage": {
+        "arity": 2,
+        "binders": {
+          "0": {
+            "hiding": "instance",
+            "name": "d"
+          }
+        },
+        "erasable": [],
+        "removable": [
+          0
+        ]
+      },
+      "id": 79,
+      "kind": "function",
+      "line": 141,
+      "module": "ArgUsage",
+      "name": "ArgUsage.useless",
+      "state": "D",
+      "type": "\u2983 d : ArgUsage.Def Nat \u2984 \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 80,
+      "kind": "function",
+      "line": 28,
+      "module": "InlineGap",
+      "name": "InlineGap.aliasTwice",
+      "state": "D",
+      "type": "Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "argUsage": {
+        "arity": 2,
+        "binders": {
+          "0": {
+            "hiding": "explicit"
+          }
+        },
+        "erasable": [],
+        "removable": [
+          0
+        ]
+      },
+      "id": 81,
+      "kind": "function",
+      "line": 92,
+      "module": "ArgUsage.Section",
+      "name": "ArgUsage.Section.drops",
+      "state": "D",
+      "type": "(k : Nat) \u2192 Nat \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "argUsage": {
+        "arity": 2,
+        "binders": {
+          "0": {
+            "hiding": "explicit",
+            "name": "m"
+          }
+        },
+        "erasable": [],
+        "removable": [
+          0
+        ]
+      },
+      "id": 82,
+      "kind": "function",
+      "line": 99,
+      "module": "ArgUsage.Section",
+      "name": "ArgUsage.Section.named",
+      "state": "D",
+      "type": "Nat \u2192 Nat \u2192 Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "id": 83,
+      "kind": "function",
+      "line": 18,
+      "module": "Coinductive",
+      "name": "Coinductive.zeros",
+      "state": "D",
+      "type": "Stream Nat"
+    },
+    {
+      "access": "public",
+      "id": 84,
+      "kind": "record",
+      "line": 9,
+      "module": "Records",
+      "name": "Records.Point",
+      "state": "D",
+      "type": "Set"
+    },
+    {
+      "access": "public",
+      "id": 85,
+      "kind": "function",
+      "line": 18,
+      "module": "Where",
+      "name": "Where.go@18",
+      "state": "D",
+      "type": "(xs : List Nat) \u2192 List Nat \u2192 Nat"
+    },
+    {
+      "access": "public",
+      "argUsage": {
+        "arity": 3,
+        "binders": {
+          "0": {
+            "hiding": "explicit",
+            "name": "X"
+          },
+          "1": {
+            "hiding": "explicit"
+          }
+        },
+        "erasable": [],
+        "removable": [
+          0,
+          1
+        ],
+        "removableRequires": {
+          "0": [
+            1
+          ]
+        }
+      },
+      "id": 86,
       "kind": "function",
       "line": 33,
       "module": "ArgUsage",
@@ -2955,7 +3589,7 @@
     },
     {
       "access": "public",
-      "id": 73,
+      "id": 87,
       "kind": "function",
       "line": 27,
       "module": "Nat",
@@ -2965,7 +3599,7 @@
     },
     {
       "access": "public",
-      "id": 74,
+      "id": 88,
       "kind": "projection",
       "line": 11,
       "module": "Records.Point",
@@ -2975,7 +3609,33 @@
     },
     {
       "access": "public",
-      "id": 75,
+      "argUsage": {
+        "arity": 2,
+        "binders": {
+          "0": {
+            "hiding": "explicit"
+          },
+          "1": {
+            "hiding": "explicit"
+          }
+        },
+        "erasable": [],
+        "removable": [
+          0,
+          1
+        ]
+      },
+      "id": 89,
+      "kind": "function",
+      "line": 188,
+      "module": "ArgUsage",
+      "name": "ArgUsage.Irrel",
+      "state": "D",
+      "type": "Nat \u2192 .Nat \u2192 Set"
+    },
+    {
+      "access": "public",
+      "id": 90,
       "kind": "function",
       "line": 11,
       "module": "Collision",
@@ -2985,7 +3645,7 @@
     },
     {
       "access": "public",
-      "id": 76,
+      "id": 91,
       "kind": "function",
       "module": "Test",
       "name": "Test.Plus-1",
@@ -2994,7 +3654,7 @@
     },
     {
       "access": "public",
-      "id": 77,
+      "id": 92,
       "kind": "function",
       "line": 21,
       "module": "Unsafe",
@@ -3004,7 +3664,7 @@
     },
     {
       "access": "public",
-      "id": 78,
+      "id": 93,
       "kind": "constructor",
       "module": "Coinductive.Stream",
       "name": "Coinductive.Stream.constructor",
@@ -3013,7 +3673,7 @@
     },
     {
       "access": "public",
-      "id": 79,
+      "id": 94,
       "kind": "datatype",
       "line": 24,
       "module": "Test",
@@ -3022,7 +3682,7 @@
       "type": "Set \u2192 Set"
     },
     {
-      "id": 80,
+      "id": 95,
       "kind": "other",
       "module": "ArgUsage",
       "name": "ArgUsage._\u2237_-2",
@@ -3030,7 +3690,7 @@
     },
     {
       "access": "public",
-      "id": 81,
+      "id": 96,
       "kind": "function",
       "line": 24,
       "module": "Where",
@@ -3040,7 +3700,7 @@
     },
     {
       "access": "public",
-      "id": 82,
+      "id": 97,
       "kind": "function",
       "line": 15,
       "module": "Where",
@@ -3050,19 +3710,36 @@
     },
     {
       "access": "public",
-      "id": 83,
+      "id": 98,
       "kind": "function",
-      "line": 47,
+      "line": 57,
       "module": "ArgUsage",
       "name": "ArgUsage.f5",
       "state": "D",
-      "type": "(n : Nat) \u2192 ArgUsage.Vec Nat n \u2192 Nat"
+      "type": "(n : ArgUsage.Idx) \u2192 ArgUsage.Vec Nat n \u2192 Nat"
     },
     {
       "access": "public",
-      "id": 84,
+      "argUsage": {
+        "arity": 1,
+        "erasable": [],
+        "removable": [
+          0
+        ]
+      },
+      "id": 99,
+      "kind": "function",
+      "line": 152,
+      "module": "ArgUsage",
+      "name": "ArgUsage.opaqueArg",
+      "state": "D",
+      "type": "ArgUsage.Fun"
+    },
+    {
+      "access": "public",
+      "id": 100,
       "kind": "projection",
-      "line": 58,
+      "line": 68,
       "module": "ArgUsage.Box",
       "name": "ArgUsage.Box.content",
       "state": "D",
@@ -3070,7 +3747,7 @@
     },
     {
       "access": "public",
-      "id": 85,
+      "id": 101,
       "kind": "constructor",
       "line": 7,
       "module": "Agda.Builtin.Equality._\u2261_",
@@ -3080,9 +3757,9 @@
     },
     {
       "access": "public",
-      "id": 86,
+      "id": 102,
       "kind": "function",
-      "line": 88,
+      "line": 105,
       "module": "ArgUsage",
       "name": "ArgUsage.wasteful",
       "state": "D",
@@ -3090,7 +3767,16 @@
     },
     {
       "access": "public",
-      "id": 87,
+      "id": 103,
+      "kind": "constructor",
+      "module": "ArgUsage.Def",
+      "name": "ArgUsage.Def.constructor",
+      "state": "D",
+      "type": "{A : Set} (def : A) \u2192 ArgUsage.Def A"
+    },
+    {
+      "access": "public",
+      "id": 104,
       "kind": "function",
       "line": 30,
       "module": "Unsafe",
@@ -3100,7 +3786,7 @@
     },
     {
       "access": "public",
-      "id": 88,
+      "id": 105,
       "kind": "datatype",
       "line": 21,
       "module": "OptionEscapes",
@@ -3110,7 +3796,7 @@
     },
     {
       "access": "public",
-      "id": 89,
+      "id": 106,
       "kind": "postulate",
       "line": 12,
       "module": "Holes",
@@ -3120,7 +3806,7 @@
     },
     {
       "access": "public",
-      "id": 90,
+      "id": 107,
       "kind": "function",
       "line": 11,
       "module": "Holes",
@@ -3132,14 +3818,19 @@
       "access": "public",
       "argUsage": {
         "arity": 2,
+        "binders": {
+          "0": {
+            "hiding": "explicit"
+          }
+        },
         "erasable": [],
         "removable": [
           0
         ]
       },
-      "id": 91,
+      "id": 108,
       "kind": "function",
-      "line": 76,
+      "line": 86,
       "module": "ArgUsage.Section",
       "name": "ArgUsage.Section.keeps",
       "state": "D",
@@ -3147,9 +3838,19 @@
     },
     {
       "access": "public",
-      "id": 92,
+      "id": 109,
+      "kind": "constructor",
+      "line": 48,
+      "module": "ArgUsage.Idx",
+      "name": "ArgUsage.Idx.su",
+      "state": "D",
+      "type": "ArgUsage.Idx \u2192 ArgUsage.Idx"
+    },
+    {
+      "access": "public",
+      "id": 110,
       "kind": "function",
-      "line": 64,
+      "line": 74,
       "module": "ArgUsage",
       "name": "ArgUsage.unbox",
       "state": "D",
@@ -3157,7 +3858,7 @@
     },
     {
       "access": "public",
-      "id": 93,
+      "id": 111,
       "kind": "function",
       "module": "Test",
       "name": "Test.Plus-0",
@@ -3166,7 +3867,7 @@
     },
     {
       "access": "public",
-      "id": 94,
+      "id": 112,
       "kind": "function",
       "line": 28,
       "module": "AnonSection",
@@ -3176,7 +3877,7 @@
     },
     {
       "access": "public",
-      "id": 95,
+      "id": 113,
       "kind": "constructor",
       "line": 5,
       "module": "Bool.Bool",
@@ -3185,7 +3886,7 @@
       "type": "Bool.Bool"
     },
     {
-      "id": 96,
+      "id": 114,
       "kind": "other",
       "module": "List",
       "name": "List._\u2237_-0",
@@ -3193,7 +3894,7 @@
     },
     {
       "access": "public",
-      "id": 97,
+      "id": 115,
       "kind": "constructor",
       "line": 5,
       "module": "Bool.Bool",
@@ -3203,7 +3904,7 @@
     },
     {
       "access": "public",
-      "id": 98,
+      "id": 116,
       "kind": "function",
       "line": 25,
       "module": "Coinductive",
@@ -3213,7 +3914,7 @@
     },
     {
       "access": "private",
-      "id": 99,
+      "id": 117,
       "kind": "postulate",
       "line": 10,
       "module": "Agda.Builtin.TrustMe",
@@ -3223,7 +3924,7 @@
     },
     {
       "access": "public",
-      "id": 100,
+      "id": 118,
       "kind": "function",
       "line": 26,
       "module": "Unsafe",
@@ -3236,7 +3937,7 @@
     },
     {
       "access": "public",
-      "id": 101,
+      "id": 119,
       "kind": "function",
       "line": 23,
       "module": "Collision",
@@ -3248,13 +3949,23 @@
       "access": "public",
       "argUsage": {
         "arity": 4,
+        "binders": {
+          "0": {
+            "hiding": "implicit",
+            "name": "a"
+          },
+          "1": {
+            "hiding": "implicit",
+            "name": "b"
+          }
+        },
         "erasable": [
           0,
           1
         ],
         "removable": []
       },
-      "id": 102,
+      "id": 120,
       "kind": "function",
       "line": 53,
       "module": "Test",
@@ -3264,7 +3975,7 @@
     },
     {
       "access": "public",
-      "id": 103,
+      "id": 121,
       "kind": "constructor",
       "line": 7,
       "module": "List.List",
@@ -3274,7 +3985,7 @@
     },
     {
       "access": "public",
-      "id": 104,
+      "id": 122,
       "kind": "function",
       "line": 23,
       "module": "Records",
@@ -3284,13 +3995,23 @@
     },
     {
       "access": "public",
-      "id": 105,
+      "id": 123,
       "kind": "record",
       "line": 7,
       "module": "Coinductive",
       "name": "Coinductive.Stream",
       "state": "D",
       "type": "{a : Agda.Primitive.Level} (A : Set a) \u2192 Set a"
+    },
+    {
+      "access": "public",
+      "id": 124,
+      "kind": "record",
+      "line": 138,
+      "module": "ArgUsage",
+      "name": "ArgUsage.Def",
+      "state": "D",
+      "type": "(A : Set) \u2192 Set"
     }
   ],
   "entryModule": "Test",
@@ -3364,7 +4085,19 @@
     ],
     [
       "ArgUsage",
+      "ArgUsage.Def"
+    ],
+    [
+      "ArgUsage",
+      "ArgUsage.Idx"
+    ],
+    [
+      "ArgUsage",
       "ArgUsage.Vec"
+    ],
+    [
+      "ArgUsage",
+      "ArgUsage.Wrap"
     ],
     [
       "ArgUsage",
@@ -3381,6 +4114,14 @@
     [
       "ArgUsage.Box",
       "Nat"
+    ],
+    [
+      "ArgUsage.Def",
+      "ArgUsage"
+    ],
+    [
+      "ArgUsage.Idx",
+      "ArgUsage"
     ],
     [
       "ArgUsage.Section",
@@ -3392,11 +4133,15 @@
     ],
     [
       "ArgUsage.Vec",
-      "Nat"
+      "ArgUsage.Idx"
     ],
     [
-      "ArgUsage.Vec",
-      "Nat.Nat"
+      "ArgUsage.Wrap",
+      "ArgUsage"
+    ],
+    [
+      "ArgUsage.Wrap",
+      "Nat"
     ],
     [
       "Bool",
@@ -3682,8 +4427,11 @@
     "AnonSection": "AnonSection.agda",
     "ArgUsage": "ArgUsage.agda",
     "ArgUsage.Box": "ArgUsage.agda",
+    "ArgUsage.Def": "ArgUsage.agda",
+    "ArgUsage.Idx": "ArgUsage.agda",
     "ArgUsage.Section": "ArgUsage.agda",
     "ArgUsage.Vec": "ArgUsage.agda",
+    "ArgUsage.Wrap": "ArgUsage.agda",
     "Bool": "Bool.agda",
     "Bool.Bool": "Bool.agda",
     "Coinductive": "Coinductive.agda",
@@ -3727,8 +4475,11 @@
     "AnonSection",
     "ArgUsage",
     "ArgUsage.Box",
+    "ArgUsage.Def",
+    "ArgUsage.Idx",
     "ArgUsage.Section",
     "ArgUsage.Vec",
+    "ArgUsage.Wrap",
     "Bool",
     "Bool.Bool",
     "Coinductive",
@@ -3774,8 +4525,24 @@
     {
       "from": "ArgUsage",
       "names": [
+        "ArgUsage.Def.def"
+      ],
+      "to": "ArgUsage.Def"
+    },
+    {
+      "from": "ArgUsage",
+      "names": [
+        "ArgUsage.Idx.su",
+        "ArgUsage.Idx.ze"
+      ],
+      "to": "ArgUsage.Idx"
+    },
+    {
+      "from": "ArgUsage",
+      "names": [
         "ArgUsage.Section.drops",
-        "ArgUsage.Section.keeps"
+        "ArgUsage.Section.keeps",
+        "ArgUsage.Section.named"
       ],
       "to": "ArgUsage.Section"
     },
@@ -3786,6 +4553,13 @@
         "ArgUsage.Vec._\u2237_"
       ],
       "to": "ArgUsage.Vec"
+    },
+    {
+      "from": "ArgUsage",
+      "names": [
+        "ArgUsage.Wrap.wrap"
+      ],
+      "to": "ArgUsage.Wrap"
     },
     {
       "from": "Bool",
@@ -3934,7 +4708,19 @@
     ],
     [
       "ArgUsage",
+      "ArgUsage.Def"
+    ],
+    [
+      "ArgUsage",
+      "ArgUsage.Idx"
+    ],
+    [
+      "ArgUsage",
       "ArgUsage.Vec"
+    ],
+    [
+      "ArgUsage",
+      "ArgUsage.Wrap"
     ],
     [
       "ArgUsage",
@@ -3950,11 +4736,15 @@
     ],
     [
       "ArgUsage.Vec",
-      "Nat"
+      "ArgUsage"
     ],
     [
       "ArgUsage.Vec",
-      "Nat.Nat"
+      "ArgUsage.Idx"
+    ],
+    [
+      "ArgUsage.Wrap",
+      "Nat"
     ],
     [
       "Bool",

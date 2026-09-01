@@ -18,7 +18,7 @@ Each node is coloured by the state of its definition:
 | --------- | ----------------- | ---------------------------------------------------- |
 | Defined   | green `#4caf50`   | A function, datatype, record, or constructor.        |
 | Postulate | red `#f44336`     | An `Axiom` / `postulate`.                            |
-| Hole      | purple `#9c27b0`  | Contains an unsolved meta (`?` in source).           |
+| Hole      | purple `#9c27b0`  | Contains an unsolved meta — a `?` or a silent one.   |
 | Failed    | orange `#ff9800`  | Module whose type-check failed under `--keep-going`. |
 
 ## Prerequisites
@@ -384,7 +384,7 @@ plus — when known for that definition — `line`, `access` (`private` / `publi
   modules simply fail).
 - **`argUsage`** (per-def, optional, expanded only) — arguments the
   definition never actually uses:
-  `{ "removable": [i…], "removableRequires": {…}, "erasable": [i…], "arity": n }`.
+  `{ "removable": [i…], "removableRequires": {…}, "erasable": [i…], "arity": n, "binders": {…} }`.
   Indices are telescope positions (0-based, implicits included, ascending)
   over the definition's *own* binders — the ones on its signature line, not
   the enclosing section's, which Agda prepends internally. `removable` means
@@ -399,6 +399,15 @@ plus — when known for that definition — `line`, `access` (`private` / `publi
   caller too. Deleting a binder changes the definition's type, so on
   anything exported it is an API change.
 
+  `removable` additionally requires that the binder can *actually* be deleted:
+  a position whose variable still occurs in the rest of the type is filtered
+  out, even when Agda's verdict calls it unused. That matters for arguments
+  used only at **irrelevant** positions (`.(p : A)`, or a relevant binder
+  passed to a callee that consumes it irrelevantly) — Agda's own occurrence
+  test ignores those, so without the filter such a binder looks removable and
+  deleting it leaves the type naming something out of scope. `erasable` is not
+  filtered: it claims an `@0` candidate, not a removal.
+
   Two things to get right. The indices do **not** index the sibling `type`
   string, which still shows the section-inherited binders — align against
   the source signature. And `removableRequires` maps a position to the
@@ -411,13 +420,32 @@ plus — when known for that definition — `line`, `access` (`private` / `publi
   "argUsage": {
     "removable": [0, 1, 3],
     "removableRequires": { "0": [1, 3], "1": [3] },
-    "erasable": [], "arity": 4
+    "erasable": [], "arity": 4,
+    "binders": {
+      "0": { "hiding": "implicit", "name": "A.a" },
+      "1": { "hiding": "implicit", "name": "A" },
+      "3": { "hiding": "explicit" }
+    }
   }
   ```
 
   — dropping the vector (3) alone is valid; dropping `A` (1) also forces 3;
   dropping the level `a` (0) forces both. Index 2 (`n`) is genuinely used
   and so is not listed at all.
+
+  **`binders`** says how each *reported* position is written, so a report
+  line can read `argument 0 ({A : Set})` instead of `argument 0` — the
+  difference between a correct edit and deleting the wrong argument, since
+  most reported positions are implicit or instance rather than explicit.
+  Keyed like `removableRequires` (position as a decimal string), sparse, and
+  read off the syntactic `Pi` spine — so `hiding` is always present
+  (`explicit` / `implicit` / `instance`), `name` only when the binder has
+  one (`Nat → Nat` names nothing), and a position whose type only becomes a
+  function after unfolding gets no entry at all. An absent entry carries no
+  information; it is never a default. A name containing a `.` (`A.a` above)
+  is a binder Agda *inserted* by generalising a `variable` declaration —
+  a written binder name can never contain `.`, so that is a reliable signal
+  that the position has nothing on the signature line to edit.
 - **`unsolvedModules`** (top-level, optional) — module →
   `{ "metas": [lines], "constraints": [lines] }` rollup of the same split:
   the source lines of each silent unsolved meta (one entry per meta) and of
@@ -430,8 +458,10 @@ plus — when known for that definition — `line`, `access` (`private` / `publi
   `--no-positivity-check`, `--rewriting`, …). Read from each module's own
   `OPTIONS` pragma. Only safety-relevant flags; omitted when none.
 - **`definitionEdgesProvenance`** (expanded, optional) — parallel to
-  `definitionEdges`, tagging each edge `signature | body | module-local | with |
-  unknown`. Absent falls back to `unknown`.
+  `definitionEdges`, tagging each edge `signature | body | module-local |
+  unknown`. Absent falls back to `unknown`. There is no `with` tag: a dependency
+  reached only through a `with`-abstraction arrives on the parent as `body`,
+  because the helper's edges are contracted into it.
 - **`reexports`** rows (expanded only) — `{ "from", "to", "names": [...] }`,
   one per `open import … public`; a row that used `renaming` also carries a
   `"renames"` map (`alias → canonical name`).

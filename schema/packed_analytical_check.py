@@ -7,7 +7,12 @@ of the same corpus does: kind, line, access, unsafe, unsolvedMetas,
 type (``--with-signatures``),
 and subterm hashes/depths (``--with-term-hashes``). This is the
 definition of done for the packed-complete work — packed must lose no
-fidelity vs. expanded.
+fidelity vs. expanded on the fields enumerated above.
+
+Two per-definition fields are deliberately expanded-only and therefore
+absent from that list: ``reexports`` and ``argUsage``. Both are nested
+variable-length objects, which have no typed-array shape for the packed
+form to carry. Their absence from packed is by design, not a gap.
 
 Usage:
     packed_analytical_check.py <packed.json> <expanded.json>

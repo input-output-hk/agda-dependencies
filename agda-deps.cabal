@@ -44,6 +44,7 @@ executable agda-deps
                        AgdaDeps.Config
                        AgdaDeps.Layout
                        AgdaDeps.Options
+                       AgdaDeps.MatchConstant
                        AgdaDeps.Deps
                        AgdaDeps.FragmentCache
                        AgdaDeps.SerialiseCache

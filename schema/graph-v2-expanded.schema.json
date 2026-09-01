@@ -166,13 +166,31 @@
     },
     "provenance": {
       "type": "string",
-      "enum": ["signature", "body", "module-local", "with", "unknown"],
-      "description": "How an edge was discovered: defType (signature), theDef body, anonymous-module-local helper (where-block helper or parameterised-section member; does not imply ownership by this source), with-auxiliary, or unclassified."
+      "enum": ["signature", "body", "module-local", "unknown"],
+      "description": "How an edge was discovered: defType (signature), theDef body, anonymous-module-local helper (where-block helper or parameterised-section member; does not imply ownership by this source), or unclassified. A `with` value existed through 2026-08-31 and was removed as unreachable: `funWith` names a with-function's parent and is non-empty on exactly the definitions the node filter drops, so no corpus could ever produce the tag. A dependency reached only through a `with`-abstraction arrives on the parent as `body` (the with-helper's edges are contracted into it), which post-elaboration is indistinguishable from any other body reference."
     },
     "unsafeTag": {
       "type": "string",
       "enum": ["non-terminating", "trustme"],
       "description": "A soundness escape a definition uses directly: `non-terminating` (a `{-# NON_TERMINATING #-}` function) or `trustme` (the body/type references `primTrustMe`). A `{-# TERMINATING #-}` marker is deliberately NOT surfaced: Agda's ordinary termination checker also stamps proven defs, so it cannot be distinguished from a normal proof."
+    },
+    "hiding": {
+      "type": "string",
+      "enum": ["explicit", "implicit", "instance"],
+      "description": "How a binder is written, hence how a call site passes it: `explicit` (`(x : A)` / `A`), `implicit` (`{x : A}`) or `instance` (`⦃ x : A ⦄`)."
+    },
+    "argBinder": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["hiding"],
+      "properties": {
+        "hiding": { "$ref": "#/$defs/hiding" },
+        "name": {
+          "type": "string",
+          "description": "Additive/optional. The binder name as Agda spells it. Omitted when the spine binds no name (`Nat → Nat`), so absence means \"unnamed\", not \"unknown\". A name containing a `.` (e.g. `P.A`) is NOT a source binder: it is one Agda inserted by generalising a `variable` declaration (a dependency of the variable the signature mentions), and since a written binder name can never contain `.`, that is a sound test for \"this position has no binder on the signature line to edit\". Reported as-is because it is the name Agda's own printer uses — the sibling `type` string shows it too."
+        }
+      },
+      "description": "One reported argument as written: its hiding, and its name when it has one."
     },
     "unsolvedModule": {
       "type": "object",
@@ -200,7 +218,7 @@
         "removable": {
           "type": "array",
           "items": { "type": "integer", "minimum": 0 },
-          "description": "Telescope positions (0-based, implicits included, ascending) that are BOTH `Unused` in the body and `Nonvariant`: the binder and the corresponding argument at every call site can be deleted. Certain, and interprocedural — an argument threaded into a helper that discards it counts as unused here too."
+          "description": "Telescope positions (0-based, implicits included, ascending) whose binder AND corresponding argument at every call site can be deleted. Interprocedural — an argument threaded into a helper that discards it counts as unused here too. Agda's `Unused` + `Nonvariant` verdict is necessary but not sufficient, and is filtered: a position whose variable still occurs in the rest of the type (the codomain, or the domain of a later argument that is not itself being removed) is NOT reported, even though Agda calls it unused. That filter is what makes this field mean deletability rather than \"the meaning does not depend on this value\" — an argument occurring only at an IRRELEVANT position (`.(p : A)`, or a relevant binder handed to a callee that consumes it irrelevantly) is invisible to Agda's own relevance-aware occurrence test, so without the filter such a binder looks removable and deleting it leaves the type naming something out of scope."
         },
         "removableRequires": {
           "type": "object",
@@ -219,6 +237,11 @@
           "type": "integer",
           "minimum": 0,
           "description": "Number of telescope positions the verdict ranges over; every index in either array is `< arity`."
+        },
+        "binders": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/argBinder" },
+          "description": "Additive/optional. How the reported positions are *written*, so a report line can say `argument 0 ({A : Set})` instead of `argument 0`. Keyed like `removableRequires` (position as a decimal string) and SPARSE: only positions listed in `removable` or `erasable`, and only those the definition's syntactic `Pi` spine reaches. An absent position carries NO information — it is not a claim that the binder is explicit or unnamed. Absent entirely when no reported position has an entry (a definition whose type only becomes a function after unfolding). Read against the definition's own source signature line, never against the sibling `type` string: like the index arrays, these are re-indexed past any inherited section telescope."
         }
       },
       "description": "One definition's never-used-argument verdict."

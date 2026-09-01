@@ -20,7 +20,7 @@
 <main><div class="layout">
 <aside class="toc"><div class="toc-inner">
 <div class="toc-title">On this page</div>
-<nav><a class="lvl2" href="#setup">Setup</a><a class="lvl2" href="#dot-output-default">DOT output (default)</a><a class="lvl2" href="#html-output-interactive-viewer">HTML output — interactive viewer</a><a class="lvl2" href="#json-output-for-downstream-tooling">JSON output — for downstream tooling</a><a class="lvl2" href="#-no-externals-drop-stdlib-from-the-graph">--no-externals — drop stdlib from the graph</a><a class="lvl2" href="#-keep-going-survive-type-check-errors">--keep-going — survive type-check errors</a><a class="lvl2" href="#-skip-agda-module-level-graph-no-type-checking">--skip-agda — module-level graph, no type-checking</a><a class="lvl2" href="#-with-source-lazy-full-html-viewer-at-scale">--with-source + --lazy — full HTML viewer at scale</a><a class="lvl2" href="#-with-term-hashes-subterm-fingerprints">--with-term-hashes — subterm fingerprints</a><a class="lvl2" href="#-incremental-cache-per-module-work-across-rebuilds">--incremental — cache per-module work across rebuilds</a><a class="lvl2" href="#-packed-analytical-compact-json-without-losing-fidelity">--packed-analytical — compact JSON without losing fidelity</a><a class="lvl2" href="#a-yaml-config-checked-before-use">A YAML config, checked before use</a></nav>
+<nav><a class="lvl2" href="#setup">Setup</a><a class="lvl2" href="#dot-output-default">DOT output (default)</a><a class="lvl2" href="#html-output-interactive-viewer">HTML output — interactive viewer</a><a class="lvl2" href="#json-output-for-downstream-tooling">JSON output — for downstream tooling</a><a class="lvl2" href="#-no-externals-drop-stdlib-from-the-graph">--no-externals — drop stdlib from the graph</a><a class="lvl2" href="#-keep-going-survive-type-check-errors">--keep-going — survive type-check errors</a><a class="lvl2" href="#-skip-agda-module-level-graph-no-type-checking">--skip-agda — module-level graph, no type-checking</a><a class="lvl2" href="#-with-source-lazy-full-html-viewer-at-scale">--with-source + --lazy — full HTML viewer at scale</a><a class="lvl2" href="#-with-term-hashes-subterm-fingerprints">--with-term-hashes — subterm fingerprints</a><a class="lvl2" href="#argusage-find-arguments-a-definition-never-uses">argUsage — find arguments a definition never uses</a><a class="lvl2" href="#-incremental-cache-per-module-work-across-rebuilds">--incremental — cache per-module work across rebuilds</a><a class="lvl2" href="#-packed-analytical-compact-json-without-losing-fidelity">--packed-analytical — compact JSON without losing fidelity</a><a class="lvl2" href="#a-yaml-config-checked-before-use">A YAML config, checked before use</a></nav>
 </div></aside>
 <div class="prose"><h1 id="examples">Examples</h1>
 <p>Runnable recipes for <code>agda-deps</code>. Full flag reference: <a href="guide.html">README.md</a>.</p>
@@ -100,6 +100,26 @@ so the initial load stays small. Lazy mode <strong>requires HTTP serving</strong
 <p>Emits canonical-form hashes for every elaborated subterm. Off by default (adds a
 Term walk, ~50–100% wire growth). <code>--min-term-depth=3</code> (the default) cuts trivial
 <code>Var</code>/<code>Lit</code>/<code>Sort</code> noise; <code>1</code> disables the filter.</p>
+<h2 id="argusage-find-arguments-a-definition-never-uses"><code>argUsage</code> — find arguments a definition never uses</h2>
+<p>No flag: it is always computed, and rides in expanded JSON on the definitions
+that have something to report.</p>
+<pre><code class="language-bash">cabal run agda-deps -- --format=json --json-mode=expanded \
+  -i test/ -o out/ test/Test.agda
+
+python3 - &lt;&lt;'EOF'
+import json
+for d in json.load(open(&quot;out/deps.json&quot;))[&quot;definitions&quot;]:
+    au = d.get(&quot;argUsage&quot;)
+    if au and au[&quot;removable&quot;]:
+        print(d[&quot;name&quot;], au[&quot;removable&quot;], au.get(&quot;removableRequires&quot;, {}))
+EOF
+</code></pre>
+<p><code>removable</code> positions can lose the binder <em>and</em> the argument at every call
+site; <code>erasable</code> ones are used only in types, so they are <code>@0</code> candidates
+rather than removals. Indices count the definition's own binders (implicits
+included) — not the sibling <code>type</code> string, which still shows the binders Agda
+inherited from an enclosing section. Check <code>removableRequires</code> before editing:
+a position listed there is only removable together with the ones it names.</p>
 <h2 id="-incremental-cache-per-module-work-across-rebuilds"><code>--incremental</code> — cache per-module work across rebuilds</h2>
 <pre><code class="language-bash"># First run: full work, writes out/.agda-deps-cache/. Later runs: unchanged
 # modules served from cache, no-op rebuilds skip re-emitting output.

@@ -185,9 +185,15 @@ jobs:
         # arity 2; argUsage subtracts that prefix via lookupSection, which
         # returns EmptyTel *without erroring* if sigSections was not merged.
         # Without the merge this reads {"removable": [0, 1], "arity": 2}.
+        # `binders` is shifted with the verdict it annotates, so the same
+        # assertion pins the names too: the parent's binder IS named (`n`,
+        # visible in `type`) while the helper's own is not, so an unshifted
+        # read would show {"hiding": "explicit", "name": "n"} here.
         helper = next(d for n, d in defs.items() if n.startswith("Good.helper@"))
-        assert helper.get("argUsage") == {"removable": [0], "erasable": [], "arity": 1}, \
-            f"section telescope lost in the partial pass: {helper.get('argUsage')}"
+        assert helper.get("argUsage") == {
+            "removable": [0], "erasable": [], "arity": 1,
+            "binders": {"0": {"hiding": "explicit"}},
+        }, f"section telescope lost in the partial pass: {helper.get('argUsage')}"
         print("keep-going fixture OK")
         EOF
 
@@ -222,6 +228,43 @@ jobs:
         markers = [d for n, d in defs.items() if "unsolved#meta." in n]
         assert len(markers) == 1 and markers[0].get("unsolvedMetas") == 1, markers
         print("unsolved-metas fixture OK")
+        EOF
+
+    - name: match-constant probe (unshipped analysis) still behaves
+      # AgdaDeps.MatchConstant is a MEASUREMENT PROBE, not a wire feature: it
+      # emits nothing to graph.json and runs only under
+      # AGDA_DEPS_MATCH_CONSTANT. It was measured and rejected for the wire
+      # (1 sound finding in 15298 stdlib functions, 0 in 6795 Jolteon ones —
+      # see Backlog.md), but the analysis is kept so the number can be
+      # re-measured on any corpus. Nothing else covers it, so assert the
+      # fixture here: five positions that must fire, and the controls that
+      # must not — above all `notInv`, the type-refinement case that made 101
+      # of 102 raw stdlib candidates unsound.
+      run: |
+        rm -rf test-matchconstant/*.agdai test-matchconstant/_build
+        AGDA_DEPS_MATCH_CONSTANT=1 cabal run -v0 agda-deps -- --format=json \
+          --json-mode=expanded -i test-matchconstant -o ci-out/mc \
+          test-matchconstant/MC.agda 2> ci-out/mc.err
+        python3 - <<'EOF'
+        import re
+        hits = {}
+        for line in open("ci-out/mc.err"):
+            if line.startswith("MC-HIT "):
+                p = line.split()
+                hits[re.sub(r"@\d+$", "@L", p[1])] = p[2]
+        expected = {
+            "MC.f1": "mc=[0]",        # motivating case
+            "MC.f4": "mc=[0]",        # constructor with an ignored field (slab)
+            "MC.f6": "mc=[0]",        # catch-all branch
+            "MC.f10": "mc=[0]",       # mixed arities
+            "MC.helper@L": "mc=[0]",  # where helper: its OWN position 0
+        }
+        assert hits == expected, f"probe drifted: {hits}"
+        # And the controls, named individually so a regression says which:
+        for name in ("MC.f2", "MC.f3", "MC.f5", "MC.f7", "MC.f8",
+                     "MC.mkR", "MC.notInv"):
+            assert name not in hits, f"{name} must not fire"
+        print("match-constant probe OK (5 findings, 7 controls silent)")
         EOF
 
     - name: incremental cache reproduces the golden byte-for-byte

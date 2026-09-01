@@ -222,7 +222,7 @@ backendWithSeed seed = Backend'
       , Option []    ["cache-dir"] (ReqArg cacheDirOpt "DIR")
         "Override the --incremental cache location (fragments +\nserialise manifest). Default: <out-dir>/.agda-deps-cache. No\neffect without --incremental."
       , Option []    ["packed-analytical"] (NoArg packedAnalyticalOpt)
-        "Augment --json-mode=packed's 'defs' with per-definition\nanalytical arrays (kind/line/access, plus type under\n--with-signatures and subterm hashes under --with-term-hashes),\nso the compact form carries everything expanded does. Off by\ndefault; no effect on expanded output."
+        "Augment --json-mode=packed's 'defs' with per-definition\nanalytical arrays (kind/line/access/unsafe/unsolvedMetas, plus\ntype under --with-signatures and subterm hashes under\n--with-term-hashes), so the compact form carries everything\nexpanded does. Off by default; no effect on expanded output."
       , Option []    ["quiet"] (NoArg quietOpt)
         "Suppress 'I am working' progress lines on stderr; only genuine\nwarnings and errors are printed."
       , Option []    ["no-externals"] (NoArg noExternalsOpt)

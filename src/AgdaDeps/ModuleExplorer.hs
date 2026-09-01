@@ -103,7 +103,11 @@ import Agda.TypeChecking.Monad.Base
   , TCMT(TCM, unTCM)
 #endif
   )
+#if MIN_VERSION_Agda(2,9,0)
+import Agda.TypeChecking.Monad.Base ( Signature(Sig) )
+#else
 import Agda.TypeChecking.Monad.Signature ( unionSignature )
+#endif
 import Agda.TypeChecking.Primitive.Base ( lookupPrimitiveFunction )
 import qualified Data.HashMap.Strict as HMap
 import Agda.Utils.Lens ( over, (^.) )
@@ -374,7 +378,8 @@ mergeIfaceState iface = do
 -- one, so downstream lookups across the partial graph succeed.
 --
 -- Delegate to 'unionSignature' — what 'addImportedThings' uses, the function
--- this pass mirrors — rather than merging chosen fields. All four must
+-- this pass mirrors (2.8 exports it; on 2.9 it is mirrored locally just below)
+-- — rather than merging chosen fields. All four must
 -- arrive, and two need accumulating semantics a plain union cannot express
 -- (rewrite rules @unionWith mappend@, instances @(<>)@). Dropping one is
 -- silent rather than fatal: 'lookupSection' returns 'EmptyTel' for an
@@ -385,6 +390,26 @@ mergeIfaceState iface = do
 mergeIfaceSig :: Interface -> TCM ()
 mergeIfaceSig iface =
   modifyTCLens' stImports $ \ imp -> unionSignature imp (iSignature iface)
+
+#if MIN_VERSION_Agda(2,9,0)
+-- | 2.9 has no exported signature union: @unionSignature@ is gone from
+-- @Monad.Signature@ and its successor @importSignature@ is private to
+-- @Interaction.Imports@. So mirror 2.8's, field for field, with the same
+-- per-field semantics.
+--
+-- The pattern is exhaustive on purpose: a fifth 'Sig' field must break this
+-- build rather than be silently dropped, which is the exact failure mode
+-- 'mergeIfaceSig' exists to prevent. Not mirrored: 2.9's @importSignature@
+-- additionally replays rewrite-rule adjustments over the merged definitions
+-- (its @fixupDefs@). 2.8's @unionSignature@ does not either, and this pass
+-- reads sections/definitions rather than reducing with rewrite rules.
+unionSignature :: Signature -> Signature -> Signature
+unionSignature (Sig a b c d) (Sig a' b' c' d') =
+  Sig (Map.union a a')
+      (HMap.union b b')             -- definitions are unique to one module
+      (HMap.unionWith mappend c c') -- rewrite rules are accumulated
+      (d <> d')                     -- instances are accumulated
+#endif
 
 reportSkippedModule :: TopLevelModuleName -> String -> TCM ()
 reportSkippedModule tlmn reason =

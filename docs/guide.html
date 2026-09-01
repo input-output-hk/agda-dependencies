@@ -56,7 +56,7 @@ overview of the state of a library.</p>
 <tr>
 <td>Hole</td>
 <td>purple <code>#9c27b0</code></td>
-<td>Contains an unsolved meta (<code>?</code> in source).</td>
+<td>Contains an unsolved meta — a <code>?</code> or a silent one.</td>
 </tr>
 <tr>
 <td>Failed</td>
@@ -469,7 +469,7 @@ plus — when known for that definition — <code>line</code>, <code>access</cod
   modules simply fail).</li>
 <li><strong><code>argUsage</code></strong> (per-def, optional, expanded only) — arguments the
   definition never actually uses:
-  <code>{ "removable": [i…], "removableRequires": {…}, "erasable": [i…], "arity": n }</code>.
+  <code>{ "removable": [i…], "removableRequires": {…}, "erasable": [i…], "arity": n, "binders": {…} }</code>.
   Indices are telescope positions (0-based, implicits included, ascending)
   over the definition's <em>own</em> binders — the ones on its signature line, not
   the enclosing section's, which Agda prepends internally. <code>removable</code> means
@@ -483,6 +483,14 @@ plus — when known for that definition — <code>line</code>, <code>access</cod
   an argument passed into a helper that discards it reads unused in the
   caller too. Deleting a binder changes the definition's type, so on
   anything exported it is an API change.</p>
+<p><code>removable</code> additionally requires that the binder can <em>actually</em> be deleted:
+  a position whose variable still occurs in the rest of the type is filtered
+  out, even when Agda's verdict calls it unused. That matters for arguments
+  used only at <strong>irrelevant</strong> positions (<code>.(p : A)</code>, or a relevant binder
+  passed to a callee that consumes it irrelevantly) — Agda's own occurrence
+  test ignores those, so without the filter such a binder looks removable and
+  deleting it leaves the type naming something out of scope. <code>erasable</code> is not
+  filtered: it claims an <code>@0</code> candidate, not a removal.</p>
 <p>Two things to get right. The indices do <strong>not</strong> index the sibling <code>type</code>
   string, which still shows the section-inherited binders — align against
   the source signature. And <code>removableRequires</code> maps a position to the
@@ -494,11 +502,29 @@ plus — when known for that definition — <code>line</code>, <code>access</cod
   "argUsage": {
     "removable": [0, 1, 3],
     "removableRequires": { "0": [1, 3], "1": [3] },
-    "erasable": [], "arity": 4
+    "erasable": [], "arity": 4,
+    "binders": {
+      "0": { "hiding": "implicit", "name": "A.a" },
+      "1": { "hiding": "implicit", "name": "A" },
+      "3": { "hiding": "explicit" }
+    }
   }</code></p>
 <p>— dropping the vector (3) alone is valid; dropping <code>A</code> (1) also forces 3;
   dropping the level <code>a</code> (0) forces both. Index 2 (<code>n</code>) is genuinely used
-  and so is not listed at all.
+  and so is not listed at all.</p>
+<p><strong><code>binders</code></strong> says how each <em>reported</em> position is written, so a report
+  line can read <code>argument 0 ({A : Set})</code> instead of <code>argument 0</code> — the
+  difference between a correct edit and deleting the wrong argument, since
+  most reported positions are implicit or instance rather than explicit.
+  Keyed like <code>removableRequires</code> (position as a decimal string), sparse, and
+  read off the syntactic <code>Pi</code> spine — so <code>hiding</code> is always present
+  (<code>explicit</code> / <code>implicit</code> / <code>instance</code>), <code>name</code> only when the binder has
+  one (<code>Nat → Nat</code> names nothing), and a position whose type only becomes a
+  function after unfolding gets no entry at all. An absent entry carries no
+  information; it is never a default. A name containing a <code>.</code> (<code>A.a</code> above)
+  is a binder Agda <em>inserted</em> by generalising a <code>variable</code> declaration —
+  a written binder name can never contain <code>.</code>, so that is a reliable signal
+  that the position has nothing on the signature line to edit.
 - <strong><code>unsolvedModules</code></strong> (top-level, optional) — module →
   <code>{ "metas": [lines], "constraints": [lines] }</code> rollup of the same split:
   the source lines of each silent unsolved meta (one entry per meta) and of
@@ -511,8 +537,10 @@ plus — when known for that definition — <code>line</code>, <code>access</cod
   <code>--no-positivity-check</code>, <code>--rewriting</code>, …). Read from each module's own
   <code>OPTIONS</code> pragma. Only safety-relevant flags; omitted when none.
 - <strong><code>definitionEdgesProvenance</code></strong> (expanded, optional) — parallel to
-  <code>definitionEdges</code>, tagging each edge <code>signature | body | module-local | with |
-  unknown</code>. Absent falls back to <code>unknown</code>.
+  <code>definitionEdges</code>, tagging each edge <code>signature | body | module-local |
+  unknown</code>. Absent falls back to <code>unknown</code>. There is no <code>with</code> tag: a dependency
+  reached only through a <code>with</code>-abstraction arrives on the parent as <code>body</code>,
+  because the helper's edges are contracted into it.
 - <strong><code>reexports</code></strong> rows (expanded only) — <code>{ "from", "to", "names": [...] }</code>,
   one per <code>open import … public</code>; a row that used <code>renaming</code> also carries a
   <code>"renames"</code> map (<code>alias → canonical name</code>).

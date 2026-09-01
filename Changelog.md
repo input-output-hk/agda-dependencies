@@ -7,6 +7,116 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-08-31 — `agda-deps` — `removable` no longer claims undeletable binders
+
+Soundness fix in `argUsage`. `Unused` + `Nonvariant` is Agda's answer to "does
+the definition's meaning depend on this value" — not to "can this binder be
+deleted", which is what `removable` claims. The two come apart when the argument
+occurs in the type only at an **irrelevant** position: `dependentPolarity` tests
+occurrence with `relevantInIgnoringSortAnn`, whose `RelevantIn` monoid discards
+occurrences under irrelevance, so the position is never demoted to `Invariant`
+and `defArgOccurrences` does not count it either. Deleting the binder then leaves
+the type naming something out of scope.
+
+`Deps.guardDeletable` now filters `removable`: a position is dropped when its
+variable is free in the codomain, or in the domain of a later argument that is
+*not itself being removed*. That is Agda's own `relevantInIgnoringNonvariant`
+condition re-run with relevance-blind `freeIn`. The exemption for other
+surviving-removable domains is what keeps jointly-removable chains
+(`removableRequires`) intact, and the filter iterates to a fixpoint because
+rejecting one position can strand an earlier one.
+
+Three shapes, all present in the standard library: an irrelevant binder (42
+defs); a **relevant** binder whose only occurrence is at a callee's irrelevant
+argument position (5) — invisible to any test on the binder itself, so no
+consumer-side filter could have substituted; and an occurrence **hidden by
+reduction** (20), where e.g. `U : {a} {A : Set a} → Pred A 0ℓ` has `A` in its
+codomain as written, but `Pred A 0ℓ` reduces to `A → Set` and the occurrence
+lands in the domain of a later unused (`Nonvariant`) argument — exactly what
+Agda's rule is meant to discount. The last class is why relevance-blindness alone
+is not enough.
+
+Occurrence is now judged on the syntactic `Pi` spine *and* the reduced one,
+because neither alone is sound: `telView` reduces, which can erase an occurrence
+the source still has (`Irrel n p` ⇝ `Wrap n`), while the syntactic spine stops at
+a type that only becomes a function after unfolding. Either view may veto.
+
+Measured on agda-stdlib 2.4: `removable` findings 145 → **98** defs, 244 → **142**
+positions (47 defs lost every finding, 20 lost some), 0 defs gained anything.
+`erasable` is untouched by design — 5,463 defs / 18,992 positions before and
+after. No measurable cost (whole-stdlib wall clock 30.8s, within run-to-run
+noise of the 30.0–30.6s baselines).
+
+Wire shape unchanged: no schema edit, no `fragmentFormatVersion` bump, no flag.
+Consumers that already decode `argUsage` need no change; they simply stop seeing
+the false positives. Reported by the `agda-graph-explorer` consumer repo, which
+also independently reproduced the round-2 corpus counts exactly (20,384 defs /
+2,275 modules / 5,521 with `argUsage` / 145 `removable`), closing the discrepancy
+flagged in round 2.
+
+## 2026-08-31 — `agda-deps` — match-constant: measured, not shipped
+
+New module `AgdaDeps.MatchConstant`, and deliberately **not** a wire field.
+It finds *match-constant* positions — arguments whose case split could be
+replaced by a wildcard — off the compiled case tree (`funCompiled`), which
+never reaches the wire. Runs only under `AGDA_DEPS_MATCH_CONSTANT=1`, where it
+dumps `MC-CAND` / `MC-HIT` lines to stderr; `graph.json` is byte-identical
+either way.
+
+Requested measure-first by the `agda-graph-explorer` consumer repo, and the
+measurement says no: **1 sound finding in 15,298 stdlib functions with a case
+tree, 0 in 6,795 from an implementation-heavy corpus** — and the one finding is
+`Data.Unit.NonEta.hide`, whose stuck match on non-eta `unit` is the whole point
+of the definition. Phase 1's `removable` finds 145 in the same population.
+
+The interesting part is why the raw number was 102 before it was 1: the
+specified property ("every branch computes the same thing") compares branch
+*bodies*, and in a dependently typed language a match also refines the
+branches' *types*. `not-involutive true = refl; not-involutive false = refl`
+has one identical body and does not survive wildcarding. That shape was 101 of
+the 102 candidates. Reporting now also requires the split variable to be free
+in neither a later domain nor the codomain — a plain occurrence check, so every
+branch shares one goal type.
+
+Also: the analysis reports a position only when *every* split on it in the
+tree is collapsible, not just the one at the root — one argument can be split
+in several subtrees and wildcarding removes them all at once.
+
+Kept as a probe so the yield can be re-measured, pinned by
+`test-matchconstant/` (5 findings, 7 controls) and a CI step, with the rationale
+in [Backlog.md](Backlog.md). No wire field, no schema change, no
+`fragmentFormatVersion` bump. 2.9's `Done` is a pattern synonym over `CCDone`
+with two extra fields, bridged by `Util.ccDone` so the new module needs no CPP.
+
+## 2026-08-31 — `agda-deps` — the `with` edge-provenance tag is gone
+
+`definitionEdgesProvenance` had five values; one of them could never appear.
+`with` was emitted when a dependency equalled the source definition's `funWith`,
+but `funWith` names a with-function's *parent* and is non-empty on **exactly** the
+definitions `ignoreDef` drops — so the branch could only be reached while walking a
+definition that is never emitted, and then only for a *recursive* `with` (the
+helper has to reference its parent). `contractIgnoredEdges` discards inside-chain
+provenance on top of that.
+
+Measured on a probe with a nested `with` and a recursive `with`, on Agda 2.8 and
+2.9: zero `with` edges, and the parent's dependency on a name mentioned only inside
+a with-branch arrives tagged `body`. Removing the value changed no emitted byte —
+the committed golden was unaffected.
+
+Gone with it: the `EWith` constructor, `tagOneWith`'s `withTarget` parameter, and
+`Util.isWithFun'` (its only caller). The numeric slot `3` in `encodeEdgeProv` and
+`Binary EdgeProv` is left as a hole so the packed encoding of the surviving tags
+does not shift. Recovering a *meaningful* with signal would mean tagging at
+contraction time — a wire-content change, logged in [Backlog.md](Backlog.md).
+
+Fragment cache format v9 → v10: a v9 fragment for a module with a recursive `with`
+can contain the retired tag byte, and a fragment that fails to decode is a silent
+miss — for a warm main module, one that never heals (it is not re-cached). The
+header bump makes every stale fragment miss once, predictably.
+
+Reported by the `agda-graph-explorer` consumer repo, which had gone looking for
+"unnecessary `with`-abstraction" and found the tag instead.
+
 ## 2026-08-31 — `agda-deps` — never-used arguments (`argUsage`)
 
 Expanded `graph.json` reports arguments a definition never uses. Additive: no
@@ -21,6 +131,16 @@ Expanded `graph.json` reports arguments a definition never uses. Additive: no
   with it, transitively; omitted when every removal stands alone. Some
   multi-position removals are valid only as a set, others are independent,
   and the relation is directed rather than a partition.
+- **`binders`** says how each *reported* position is written —
+  `{"0": {"hiding": "implicit", "name": "a"}}`, keyed like
+  `removableRequires`, sparse. Without it "argument 0" of
+  `{a : Set} → List a → List a` reads as the first `List` to almost anyone,
+  and it is the `{a : Set}`; on the standard library only 69 of 244
+  `removable` positions are `explicit`. Read off the syntactic `Pi` spine, so
+  `hiding` is always there, `name` only when the binder has one, and a
+  position the spine does not reach gets no entry rather than a guess. Costs
+  nothing measurable: the walk *replaces* the `arity` count the same code
+  already paid (whole-stdlib wall clock 30.0s vs 30.5s before, two runs each).
 
 Read off `defArgOccurrences` + `defPolarity`, which Agda fills in for every
 mutual block during positivity/polarity checking and serialises into the
@@ -45,7 +165,25 @@ and `sigRewriteRules` / `sigInstances` were empty too. Now delegates to Agda's
 `unionSignature`, which merges all four fields with the right per-field
 semantics.
 
-Fragment cache format v7 → v8 (`ADDef` gained `_argUsage`).
+`binders` is re-indexed with the verdict it annotates, so a `where` helper
+reports its own binder name and not the parent's. A name containing a `.`
+(`A.a`) is a binder Agda inserted by generalising a `variable` declaration and
+is passed through as Agda's own printer spells it — a written binder name can
+never contain `.`, so it doubles as the signal that the position has nothing on
+the signature line to edit.
+
+Fragment cache format v7 → v9 (`ADDef` gained `_argUsage`; `ArgUsage` gained
+`auBinders`).
+
+Two Agda 2.9 fixes found while verifying the above against the opt-in 2.9 job,
+which had gone red: `Monad.Signature` no longer exports `unionSignature` (its
+successor `importSignature` is private to `Interaction.Imports`), so 2.9 gets a
+CPP-gated local mirror over the whole `Sig` record; and `test/ArgUsage.agda`'s
+`Vec` was indexed by `Nat`, whose constructors `test/RenamedReexport.agda`
+re-exports — `--with-signatures` then reified `suc` as `Nat.suc` on 2.8 and
+`RenamedReexport.suc` on 2.9, so the golden was reproducible on 2.8 only. The
+fixture now indexes `Vec` by a local `Idx`. 2.8/2.9 golden parity is green
+again.
 
 ## 2026-08-13 — `agda-deps` — silent unsolved metas are first-class
 
