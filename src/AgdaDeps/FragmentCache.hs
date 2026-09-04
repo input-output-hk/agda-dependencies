@@ -50,7 +50,7 @@ import Agda.TypeChecking.Monad ( TCM )
 import Agda.Utils.Hash ( hashString )
 
 import AgdaDeps.Deps
-  ( ADDef, IgnoredEdgeMap, MethodProviderMap, nodeKeyVersion )
+  ( ADDef, IgnoredEdgeMap, MethodProviderMap, UnsaturatedMap, nodeKeyVersion )
 import AgdaDeps.Logging ( info )
 import AgdaDeps.Options ( Options(..) )
 
@@ -64,11 +64,15 @@ data FragmentData = FragmentData
   , fragProviders :: MethodProviderMap
     -- ^ This module's slice of the instance-method providers
     -- side-channel (only binders homed in this module).
+  , fragUnsaturated :: UnsaturatedMap
+    -- ^ This module's slice of the unsaturated-reference side-channel
+    -- (keyed by the referring def, so the slice is exactly this module's
+    -- defs).
   }
 
 instance Binary FragmentData where
-  put (FragmentData a b c) = put a *> put b *> put c
-  get = FragmentData <$> get <*> get <*> get
+  put (FragmentData a b c d) = put a *> put b *> put c *> put d
+  get = FragmentData <$> get <*> get <*> get <*> get
 
 -- | Bump whenever the fragment payload shape (or any encoded field's
 -- meaning) changes. The side-channel slices must be exact before/after
@@ -79,8 +83,11 @@ instance Binary FragmentData where
 --   v8:  ADDef gained '_argUsage'
 --   v9:  ArgUsage gained '_auBinders' (binder names + hiding)
 --   v10: EdgeProv lost the unreachable 'with' tag
+--   v11: ArgUsage gained syntacticArity / occursInBody / partiallyApplied
+--        and ArgBinder a type; NodeRef gained nrArity; FragmentData gained
+--        the unsaturated-reference slice
 fragmentFormatVersion :: Word64
-fragmentFormatVersion = 10
+fragmentFormatVersion = 11
 
 -- | Fingerprint of every option that changes fragment /content/.
 -- Rendering-only options (format, view, colours, externals filtering,

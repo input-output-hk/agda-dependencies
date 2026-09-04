@@ -162,6 +162,9 @@ emit opts moduleFileMap entryModule externals imports sourceFiles allModules = d
         -- @{-# OPTIONS #-}@ tokens ('Precompute.stripBlockComments'
         -- strips them as block comments).
         , giModuleOptionEscapes = []
+        -- Empty for the same reason: the effective option set is Agda's
+        -- answer, not the scanner's.
+        , giModuleEffectiveOptions = []
         -- Empty: without Agda there is no elaboration, hence no metas.
         , giUnsolvedModules = []
         }

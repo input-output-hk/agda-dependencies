@@ -58,6 +58,60 @@ Recipes: [Examples.md](Examples.md). Planned work: [TODO.md](TODO.md).
   and the consumer's baselines — so it wants an explicit request, not a silent fix.
   The consumer repo has been told the tag is gone and is not building on it.
 
+- **`argUsage`: telling an *inserted* instance binder from a written one**
+  (consumer field report, 2026-09-04, ask P6). `Protocol.Jolteon.Block.BlockId`
+  is `BlockId = Hash` — zero written binders — and reports an instance position
+  named `x` that elaboration inserted. Consumer-side it is indistinguishable
+  from a user-written `⦃ x : … ⦄`: the position IS on the syntactic spine (so
+  `syntacticArity` does not exclude it) and the name is not dotted (so the
+  generalisation signal does not either). Reporting `name: null` there would be
+  enough for them. **Blocked on a reproduction, not on a proof of
+  impossibility** — read the measurements below before re-attempting.
+
+  Measured 2026-09-04 with a temporary `DOMPROBE` dump out of `piSpine`
+  (`absName`, `suggestName`, `domName`, its `Origin`, `argInfoOrigin` per Pi
+  domain):
+
+  - **The two `Origin` fields look like the answer and are both useless.**
+    `Dom.domName :: Maybe NamedName` is a `WithOrigin`, and `Origin` even has
+    dedicated `Inserted` and `Generalization` constructors — but a
+    *user-written* `⦃ d : Def Nat ⦄` reports `origin = Just Inserted` too,
+    because `Internal.defaultNamedArgDom` hard-codes `WithOrigin Inserted`
+    when it builds the dom. `argInfoOrigin` is `UserWritten` for everything,
+    including a bare `⦃ Def Nat ⦄` that names nothing. Neither separates
+    written from inserted. Do not re-propose "just read the Origin".
+  - **The plain reading of the ask is already handled.** A written `⦃ _ : T ⦄`,
+    a bare `⦃ T ⦄` and `{_ : Set}` all already emit *no* `name` —
+    `suggestName` maps Agda's `_` placeholder to `Nothing`. So their
+    `name: "x"` comes from a third mechanism, not from "the source says `_`".
+  - **The one live lead is `domName /= absName`.** In every shape reproducible
+    here the two agree (`d`/`d`, `_`/`_`) or `domName` is `Nothing`. Their type
+    prints as `⦃ _ = x : DecEq (⋯) ⦄`, and Agda prints that `n = x` form only
+    when the two *dis*agree — so their binder plausibly carries
+    `domName = "_"` with an invented `absName = "x"`, which a rule "report
+    `name` only when `domName` agrees with the `Abs` name" would catch exactly.
+
+  Not shipped because that rule is unverifiable from here: none of the local
+  shapes (written named / anonymous / bare instance, anonymous instance in a
+  section telescope, an instance-carrying `variable`) reproduces the
+  disagreement, so the rule can only be observed doing nothing.
+  **What would unblock it:** the source of `BlockId` with its enclosing module
+  header, or any self-contained repro whose `--with-signatures` `type` contains
+  `= x :` inside an instance brace. `defGeneralizedParams` is *not* the way in
+  — Agda fills it for data/record signatures only, so it is always `[]` on the
+  `Function` path. 9 instance positions on the reporting corpus, so low volume
+  either way.
+
+- **`argUsage.partiallyApplied` at edge granularity.** Currently a per-def flag
+  on the *target*: "referenced unsaturated somewhere in this graph". That is
+  what the consumer's filter needs, and it is immune to `contractIgnoredEdges`
+  (a partial application inside a with-helper still counts, with no edge to
+  align). Per-*edge* would additionally say *which* caller, which helps a human
+  making the edit — but it means threading a flag through
+  `IgnoredEdgeMap` / `bfsClosure` / `buildIgnoredClosure`'s DP, and an
+  edge-parallel array is the expensive wire shape. Revisit if a consumer asks
+  for the call sites rather than the verdict filter.
+
 ## Refused / out of scope
 
 - **`matchConstant` (phase-2 `argUsage`): measured, rejected for the wire.**

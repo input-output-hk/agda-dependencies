@@ -469,34 +469,51 @@ plus — when known for that definition — <code>line</code>, <code>access</cod
   modules simply fail).</li>
 <li><strong><code>argUsage</code></strong> (per-def, optional, expanded only) — arguments the
   definition never actually uses:
-  <code>{ "removable": [i…], "removableRequires": {…}, "erasable": [i…], "arity": n, "binders": {…} }</code>.
+  <code>{ "removable": [i…], "removableRequires": {…}, "occursInBody": [i…], "erasable": [i…], "arity": n, "syntacticArity": n, "partiallyApplied": true, "binders": {…} }</code>.
   Indices are telescope positions (0-based, implicits included, ascending)
-  over the definition's <em>own</em> binders — the ones on its signature line, not
-  the enclosing section's, which Agda prepends internally. <code>removable</code> means
-  the binder <em>and</em> the argument at every call site can go; <code>erasable</code> means
-  the argument is used only in types, so it is an <code>@0</code> candidate rather than
-  a removal. Not computed for projections, constructors, datatypes, records,
-  postulates or primitives. Omitted entirely when there is nothing to
-  report. Always computed — no flag.</li>
+  over the definition's <em>own</em> binders — not the enclosing section's, which
+  Agda prepends internally. <code>removable</code> means the binder <em>and</em> the argument
+  at every call site can go; <code>erasable</code> means the argument is used only in
+  types, so it is an <code>@0</code> candidate rather than a removal. Not computed for
+  projections, constructors, datatypes, records, postulates or primitives.
+  Omitted entirely when there is nothing to report. Always computed — no
+  flag.</li>
 </ul>
-<p>It is Agda's own positivity/polarity result, so it is <em>interprocedural</em>:
-  an argument passed into a helper that discards it reads unused in the
-  caller too. Deleting a binder changes the definition's type, so on
-  anything exported it is an API change.</p>
-<p><code>removable</code> additionally requires that the binder can <em>actually</em> be deleted:
-  a position whose variable still occurs in the rest of the type is filtered
-  out, even when Agda's verdict calls it unused. That matters for arguments
-  used only at <strong>irrelevant</strong> positions (<code>.(p : A)</code>, or a relevant binder
-  passed to a callee that consumes it irrelevantly) — Agda's own occurrence
-  test ignores those, so without the filter such a binder looks removable and
-  deleting it leaves the type naming something out of scope. <code>erasable</code> is not
-  filtered: it claims an <code>@0</code> candidate, not a removal.</p>
-<p>Two things to get right. The indices do <strong>not</strong> index the sibling <code>type</code>
-  string, which still shows the section-inherited binders — align against
-  the source signature. And <code>removableRequires</code> maps a position to the
+<p><strong>The index space is the definition's own <em>reduced</em> telescope, and it can
+  be longer than the signature line.</strong> A type whose codomain only becomes a
+  function after unfolding contributes positions with no written binder at
+  all — <code>f : (A : Set) → Tracer A</code> with <code>Tracer A = ⋯ → ⋯ → A → A</code> reports
+  <code>arity: 4</code> off one written binder. <strong><code>syntacticArity</code></strong> is how many
+  positions are on the signature line, and is omitted when it equals
+  <code>arity</code>; a position <code>&gt;= syntacticArity</code> has no binder to strike out, and
+  equivalently no <code>binders</code> entry.</p>
+<p>The verdict is <em>interprocedural</em>: an argument passed into a helper that
+  discards it reads unused in the caller too. Deleting a binder changes the
+  definition's type, so on anything exported it is an API change.</p>
+<p><code>removable</code> is filtered to positions whose binder can <em>actually</em> be
+  deleted: a position is dropped when its variable still occurs elsewhere in
+  the type, or when removing it would leave an earlier <strong>hidden</strong> binder
+  unsolvable (<code>typeOf : {A : Set} → A → Set</code> — the unused value argument's
+  domain is the only place <code>A</code> occurs). Both filters only ever shrink the
+  set. <code>erasable</code> is not filtered: it claims an <code>@0</code> candidate, not a
+  removal.</p>
+<p>Three fields qualify a <code>removable</code> verdict rather than producing one.
+  <strong><code>occursInBody</code></strong> lists the positions whose variable the elaborated body
+  still mentions: the value is threaded into a callee that discards it, so
+  the deletion has to reach that callee too, while a <code>removable</code> position
+  <em>absent</em> from it is a purely local edit. An instance argument resolved by
+  instance search counts — pair it with <code>binders[i].hiding == "instance"</code> for
+  the shape that most often breaks a build. <strong><code>partiallyApplied</code></strong> is <code>true</code>
+  when the definition is referenced somewhere in the graph with fewer
+  arguments than it takes: used as a value, so its arity is its interface and
+  no position is really removable. Both are omitted when empty.
+  <strong><code>removableRequires</code></strong> maps a position to the
   others that must be deleted <strong>with</strong> it, since some removals are valid
   only as a set; it is omitted when every removal stands alone, and a
-  position absent from it can be removed by itself. For
+  position absent from it can be removed by itself.</p>
+<p>The indices do <strong>not</strong> index the sibling <code>type</code> string, which still shows
+  the section-inherited binders — align against the source signature, and
+  mind <code>syntacticArity</code>. For
   <code>length : {a} {A : Set a} {n} → Vec A n → ℕ</code>:</p>
 <p><code>json
   "argUsage": {
@@ -520,11 +537,19 @@ plus — when known for that definition — <code>line</code>, <code>access</cod
   read off the syntactic <code>Pi</code> spine — so <code>hiding</code> is always present
   (<code>explicit</code> / <code>implicit</code> / <code>instance</code>), <code>name</code> only when the binder has
   one (<code>Nat → Nat</code> names nothing), and a position whose type only becomes a
-  function after unfolding gets no entry at all. An absent entry carries no
-  information; it is never a default. A name containing a <code>.</code> (<code>A.a</code> above)
-  is a binder Agda <em>inserted</em> by generalising a <code>variable</code> declaration —
-  a written binder name can never contain <code>.</code>, so that is a reliable signal
-  that the position has nothing on the signature line to edit.
+  function after unfolding gets no entry at all. An <em>absent</em> entry means the
+  position is past the signature line (<code>&gt;= syntacticArity</code>); a <em>present</em>
+  entry with no <code>name</code> is a binder that is written, spelled <code>_</code>. Neither is
+  a default. A name containing a <code>.</code> (<code>A.a</code> above) is a binder Agda
+  <em>inserted</em> by generalising a <code>variable</code> declaration — a written binder
+  name can never contain <code>.</code>, so that is a reliable signal that the position
+  has nothing on the signature line to edit.</p>
+<p>Under <code>--with-signatures</code> each entry also carries <strong><code>type</code></strong>: that
+  binder's domain, reified in the context of the binders before it — the
+  slice of the signature at that position, which the per-def <code>type</code> string
+  cannot give you because it is not re-indexed onto the definition's own
+  binders. Often the only usable label, since most reported positions are
+  unnamed.
 - <strong><code>unsolvedModules</code></strong> (top-level, optional) — module →
   <code>{ "metas": [lines], "constraints": [lines] }</code> rollup of the same split:
   the source lines of each silent unsolved meta (one entry per meta) and of
@@ -536,6 +561,14 @@ plus — when known for that definition — <code>line</code>, <code>access</cod
   <code>{-# OPTIONS #-}</code> flags that make <code>agda --safe</code> reject it (<code>--type-in-type</code>,
   <code>--no-positivity-check</code>, <code>--rewriting</code>, …). Read from each module's own
   <code>OPTIONS</code> pragma. Only safety-relevant flags; omitted when none.
+- <strong><code>moduleEffectiveOptions</code></strong> (top-level, optional) — module → the
+  actionability-relevant options actually <em>in force</em>, currently <code>--erasure</code>
+  alone. Read from the interface's effective options, so unlike
+  <code>moduleOptionEscapes</code> it sees the <code>.agda-lib</code> <code>flags:</code> line and the command
+  line — which is where such a flag normally lives. Gate advice on it:
+  without <code>--erasure</code>, <code>@0</code> is <code>[AttributeKindNotEnabled]</code>, so every
+  <code>argUsage.erasable</code> verdict in that module is un-appliable as configured.
+  Omitted when no module enables one.
 - <strong><code>definitionEdgesProvenance</code></strong> (expanded, optional) — parallel to
   <code>definitionEdges</code>, tagging each edge <code>signature | body | module-local |
   unknown</code>. Absent falls back to <code>unknown</code>. There is no <code>with</code> tag: a dependency

@@ -7,6 +7,83 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-09-04 — `agda-deps` — `argUsage`, first field report from a consumer
+
+`agda-unused` ran the `arg-removable` / `arg-erasable` checks over a real proof
+development (Jolteon/FastBFT, 6,185 defs) and reviewed every `arg-removable`
+finding against source. No verdict was wrong — but acting on one class of them
+broke the build, and most of the rest were unactionable for want of context.
+Six changes, one of them a soundness fix.
+
+**Soundness: a removal must not orphan an earlier hidden binder.**
+`guardDeletable` asked only whether the removed position's *own* variable
+survived. A hidden or instance binder is supplied by inference, which needs
+somewhere to read it from: `typeOf : {A : Set} → A → Set` has a genuinely
+unused value argument whose domain is `{A}`'s only occurrence, so deleting it
+leaves `{A}` unsolvable at every call site. `Deps.orphanedHidden` joins
+`deletableRemovable`'s fixpoint as a second rule — a hidden binder not itself
+being removed, whose every occurrence sits inside a removed domain, rejects all
+of those removals. Both spines vote and the reduced one decides, since
+solvability is settled by a unifier that reduces. Cost zero findings on
+`test/`.
+
+**`syntacticArity`, and a docs fix.** The index space was documented as "the
+definition's own binders — the ones on its signature line". It is the own
+*reduced* telescope, which can be **longer**: a type whose codomain only becomes
+a function after unfolding contributes positions with no written binder
+(`noop : (A : Set) → Tracer A` reports arity 4 off one binder) — enough to
+produce two confident false-positive reports downstream. Such positions are
+worth keeping, so they are now *labelled* rather than dropped:
+`syntacticArity` gives the boundary, omitted when it equals `arity`. Every
+`binders` key is below it (asserted in `Wire.validateExpanded`), so an absent
+entry means "past the signature line" and a present entry with no `name` means
+"written, spelled `_`". README, `CLAUDE.md` and the schema description are
+corrected.
+
+**`binders[].type`** (under `--with-signatures`) — each reported binder's domain,
+reified in the context of the binders before it. Most reported positions have no
+binder name at all, leaving "argument 5 of 11" as the whole report line. Never
+normalised: reducing a domain destroys the head symbol that makes it
+recognisable.
+
+**`occursInBody`** — the `removable` positions whose variable the elaborated body
+still mentions, i.e. the value is threaded into a callee that discards it, so the
+deletion has to reach that callee too. A `removable` position *absent* from it is
+a purely local edit. This also answers the "resolved-instance" false positive: an
+instance argument that never appears in the source body but which instance search
+resolves from is a body occurrence at an instance position — pair it with
+`binders[i].hiding`.
+
+**`partiallyApplied`** — `true` when the definition is referenced somewhere in the
+graph with fewer arguments than it takes. Used as a value, its arity is its
+interface and no position is really removable, whatever the polarity says
+(`EagerlyAfterT t = Eager ∩¹ AfterT t`). The one `argUsage` field the producer
+cannot compute per-definition: `Deps.unsaturatedTargets` measures the sites, a
+new per-source side channel carries them, and `postCompileAD` back-fills the
+flag alongside the other whole-corpus rollups. Arity for the test rides on
+`NodeRef` (`nrArity`), off the single `getConstInfo` `mkRef` already pays.
+
+**`moduleEffectiveOptions`** (top-level) — the actionability-relevant options
+actually in force per module, currently `--erasure` alone, read from
+`iOptionsUsed`. Without `--erasure` the `@0` that every `erasable` verdict
+suggests is `[AttributeKindNotEnabled]`, so those verdicts are un-appliable
+however true they are, with nothing on the wire to say so.
+
+Not done: reporting `name: null` for an *inserted* instance binder whose source
+says `_`. The plain case is already handled (a written `⦃ _ : T ⦄` reports no
+`name`), and neither `Origin` field separates written from inserted — a written
+`⦃ d : T ⦄` also reports `Inserted`. The one live lead is a `domName`/`Abs`-name
+disagreement, unverifiable without a reproduction. Logged in
+[Backlog.md](Backlog.md).
+
+No `v` / `nodeKeyVersion` bump: every addition is optional and omitted when it
+has nothing to say, so a corpus with no findings stays byte-identical. Fragment
+cache format v10 → v11. Identical Agda API on 2.8 and 2.9 (no CPP), and both
+emit the same graph. Fixtures:
+`ArgUsage.{typeOf,solvableElsewhere,explicitStaysPassed,konst,konstSaturated,viaInstance,useless2,SecTyped.typed}`.
+
+---
+
 ## 2026-08-31 — `agda-deps` — `removable` no longer claims undeletable binders
 
 Soundness fix in `argUsage`. `Unused` + `Nonvariant` is Agda's answer to "does

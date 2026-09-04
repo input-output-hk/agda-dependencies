@@ -97,7 +97,8 @@ src/AgdaDeps/
                           unknown keys, value type/enum/domain, and coherence
                           between keys. Exit 1 on error (--strict: on warning).
   Deps.hs                 ADDef, compileDefAD, classifyDef, ignoreDef,
-                          ignoredEdgesRef, contractIgnoredEdges.
+                          ignoredEdgesRef, contractIgnoredEdges,
+                          unsaturatedRefsRef (the third side channel).
   MatchConstant.hs        A PROBE, not a feature: match-constant positions
                           (a case split replaceable by a wildcard), off the
                           compiled case tree. Emits nothing to the wire; runs
@@ -165,11 +166,16 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges expands hidden refs int
   expand them, else edges through with-/where-helpers are lost.
 
 - **Node identity is a `NodeRef`, built once at the producer boundary.** `ADDef`
-  and both side-channels are keyed by `NodeRef` — a `Data.Binary`-serialisable
+  and all three side-channels are keyed by `NodeRef` — a
+  `Data.Binary`-serialisable
   bundle (`nodeKey` string + hash + `moduleKey` + line + file + `prettyShow` + a
-  precomputed `ignoreDef` flag), not a live `QName`. `mkRef :: QName -> TCM
-  NodeRef` does the conversion (the only `getConstInfo` folds into `nrIgnorable`,
-  so `contractIgnoredEdges` needs no TCM). The `...OfQ` helpers (`nodeKeyOfQ` /
+  precomputed `ignoreDef` flag + `nrArity`), not a live `QName`. `mkRef :: QName
+  -> TCM NodeRef` does the conversion, and its **single `getConstInfo` is the
+  module's only per-name signature lookup**: both `nrIgnorable` and `nrArity`
+  are read off that one `Definition`, so `contractIgnoredEdges` and the
+  saturation test need no TCM. A third such field goes in `NodeRef` too — never
+  in a second memo beside `nodeRefCacheRef`, which would duplicate both the key
+  set and the lookup. The `...OfQ` helpers (`nodeKeyOfQ` /
   `moduleKeyOfQ`) are the QName-level logic, used only by `mkRef` and producer
   sites that see live interface QNames (dead-private recovery, `collectReExports`).
   This is why the fragment cache is plain `Data.Binary` (no `EmbPrj`/CPP, 2.8-safe).
@@ -322,11 +328,22 @@ postCompileAD     aggregate ADDefs; contractIgnoredEdges expands hidden refs int
   at backend time, so imported modules are cache-independent.
 
 - **`--incremental` fragment invariants.** Fragments must carry the module's
-  `ignoredEdgesRef` + `methodProvidersRef` contributions — a `Skip`ped module never
+  `ignoredEdgesRef` + `methodProvidersRef` + `unsaturatedRefsRef` contributions — a
+  `Skip`ped module never
   runs `compileDef`, so without them `contractIgnoredEdges` loses every edge through
   its with-/where-helpers. The slices must be before/after `ModuleEnv` deltas, not
   name-prefix filters: Agda homes module-instantiation copies at bare
-  `_.…`/prefixless QNames.
+  `_.…`/prefixless QNames. `resetSideChannels` clears all three in one place,
+  so adding a fourth cannot forget the reset half (a silent, in-process-only
+  leak that CI would not catch). **The slice shape is not uniform, and the
+  difference is the point:** `ignoredEdgesRef` and `unsaturatedRefsRef` are
+  keyed by a def *homed in the compiling module*, so `M.difference` on keys is
+  an exact slice; `methodProvidersRef` is keyed by the **method**, which
+  normally lives in the module declaring the class, which is exactly why its
+  slice is `M.differenceWith` on values. A side channel accumulating a flat
+  *target* set could not be sliced either way — whether a target landed in a
+  module's delta would depend on which module saw it first — which is why
+  `partiallyApplied`'s channel is keyed by the referring def.
 
 - **`--packed-analytical` parity is by construction; `access` is 3-valued.** The
   analytical packed arrays (`kinds` / `lines` / `access` / `types` / subterm CSR)
@@ -410,6 +427,23 @@ captured (pinned by `test/OptionEscapes.agda`): per-block declaration pragmas
 `--flat-split`). Omitted when empty. No CPP: `iFilePragmaOptions` is identical in
 2.8 and 2.9.
 
+**Effective options are the opposite reading, and the opposite source.** A finding
+can be true and still un-appliable: without `--erasure` the `@0` that every
+`argUsage.erasable` verdict suggests is `[AttributeKindNotEnabled]`, which was 41%
+of one consumer's total output, unactionable as configured, with nothing on the wire
+to say so. So a second optional top-level `moduleEffectiveOptions :: Map module
+[String]` carries the actionability-relevant options actually *in force*, from
+`Deps.effectiveOptionFlags` (currently `--erasure` alone). Computed in
+`postCompileAD` from **`iOptionsUsed`** — deliberately the source
+`moduleOptionEscapes` rejects, because "can I write `@0` here" is a property of the
+options in force, and that flag almost always lives in the `.agda-lib` `flags:` line
+or on the command line rather than in a file pragma. Read it through Agda's
+`optErasure` accessor, not a token test: `--erase-record-parameters` and an explicit
+`--erased-matches` imply it, and that accessor is where the rule lives. Omitted when
+empty; no CPP (identical on 2.8/2.9). Exercised in CI by re-running the main corpus
+with `--erasure`, so the committed golden stays the no-flag baseline and the field's
+absence there is itself an assertion.
+
 **Never-used arguments are read, not computed.** Agda already runs this analysis
 for positivity/polarity checking (`Rules/Decl.checkPositivity_` → `computePolarity`,
 for *every* mutual block, plain functions included) and serialises both lists into
@@ -418,11 +452,13 @@ reads `defArgOccurrences` + `defPolarity` off the `Definition` already in scope 
 zips them: `Unused` + `Nonvariant` ⇒ **removable** (binder and every call-site
 argument can go), `Unused` + anything else ⇒ **erasable** (used only in types, an
 `@0` candidate). Emitted as the optional per-def `argUsage` object
-(`{removable, removableRequires?, erasable, arity, binders?}`), omitted when there is
+(`{removable, removableRequires?, occursInBody?, erasable, arity,
+syntacticArity?, partiallyApplied?, binders?}`), omitted when there is
 nothing to report — so finding-free corpora stay byte-identical. Always computed, no
-flag. Identical API on 2.8/2.9 — no CPP. Fixture: `test/ArgUsage.agda`.
+flag (`binders[].type` alone is behind `--with-signatures`). Identical API on
+2.8/2.9 — no CPP. Fixture: `test/ArgUsage.agda`.
 
-Seven things not to revert:
+Twelve things not to revert:
 
 - **Indices are over the definition's *own* binders.** Agda prepends the enclosing
   section's telescope to every definition inside it, so the elaborated spine that
@@ -436,6 +472,42 @@ Seven things not to revert:
   *inconsistent* with the sibling `type` string, which still reifies the raw
   elaborated telescope — called out in the schema description; shifting `type` to
   match would be a wire-visible change to `--with-signatures` output.
+- **"Own binders" is the own *reduced* telescope, which can be longer than the
+  signature line — label it, don't renumber it.** `dependentPolarity` walks a
+  reduced spine, so a type whose codomain only becomes a function after unfolding
+  (`noop : (A : Set) → Tracer A`) reports positions no written binder corresponds
+  to. They are real findings — in a proof, "the body never inspects this
+  hypothesis" says the statement could be strengthened — so `auSyntacticArity`
+  (the syntactic `piSpine` length, section prefix subtracted, omitted when it
+  equals `arity`) marks the boundary instead. Its invariant is what makes the
+  consumer's rule sound and is asserted in `Wire.argUsageProblems`: every
+  `binders` key is `< syntacticArity`, so an *absent* entry means "past the
+  signature line" and a *present* entry with no `name` means "written, spelled
+  `_`". The wording is load-bearing: docs that said "the ones on its signature
+  line" produced two confident false-positive reports from a reader checking
+  findings against source. Fixture: `ArgUsage.opaqueArg` (`syntacticArity: 0`).
+- **A removal must not orphan an earlier hidden binder** (`Deps.orphanedHidden`,
+  rule 2 of `deletableRemovable`'s fixpoint). `deletableRemovable` asks whether
+  the removed position's *own* variable survives; that is not the whole question.
+  A hidden or instance binder is supplied by inference, and inference needs
+  somewhere to read it from: `typeOf : {A : Set} → A → Set` has a genuinely unused
+  value argument — Agda is right that the meaning does not depend on it — but that
+  argument's domain is `{A}`'s only occurrence, so deleting it makes `{A}`
+  unsolvable at every call site. The definition exists to drive inference; its
+  arity is its interface. So a hidden binder not itself being removed, whose every
+  occurrence is inside a removed domain, blames *all* of those removals — not a
+  minimal subset, because which occurrence to keep would be arbitrary. It must
+  share the fixpoint with rule 1: rejecting a position resurrects a domain, which
+  can strand an earlier position (rule 1) or re-solve a hidden binder (rule 2).
+  Both spines vote, and the *reduced* one is the one that matters, since solvability
+  is decided by a unifier that reduces (`Repro.Sec.complete`, whose codomain
+  `x ∈ xs` reduces to a term free of `x`, is correctly rejected while
+  `Real.complete`, whose does not, is correctly kept). Necessary, not sufficient:
+  a surviving occurrence does not prove the binder is *inferable* from it. Reported
+  by the consumer repo after an accepted verdict broke a build; cost zero findings
+  on `test/`. Fixtures: `ArgUsage.typeOf` (emits nothing at all),
+  `ArgUsage.solvableElsewhere` + `ArgUsage.explicitStaysPassed` (controls — the
+  guard must filter, not blanket-reject).
 - **`removable` needs the deletability guard; Agda's verdict alone is unsound.**
   `Unused` + `Nonvariant` answers "does the meaning depend on this value", not
   "can the binder be deleted". They differ when the argument occurs in the type
@@ -536,6 +608,67 @@ Seven things not to revert:
   `ArgUsage.chain` (a chain: `{"0": [1,3]}`) and `ArgUsage.indep` (genuinely
   independent: no key at all — the case a symmetric "groups" encoding could not
   express).
+- **`occursInBody` splits a local removal from a multi-definition one, and the
+  positions come off clause *patterns*, not the body directly.** Agda's verdict
+  composes interprocedurally, so a value threaded into a callee that discards it
+  reads `Unused` in the caller (`ArgUsage.f2`) — sound, but that is a different
+  edit from a binder the body never names, and the wire could not tell them
+  apart. This subsumes the consumer's "resolved-instance provenance" ask: an
+  instance argument that never appears in the *source* body but which instance
+  search resolves from is a body occurrence at a `BHInstance` position, which is
+  exactly the shape whose removal breaks a call (`ArgUsage.viaInstance` fires,
+  its callee `ArgUsage.useless2` does not). A clause body is indexed by the
+  *clause* telescope, not the definition's, so position `i`'s variable is
+  whatever `namedClausePats !! i` binds — `VarP` is the only case that can be
+  answered, and everything else is conservatively "occurs" (`ConP`/`LitP` mean
+  the argument is inspected; a `ProjP` copattern shifts the correspondence; past
+  the patterns it is lambda-bound). Only `DotP` is safely `False`. So the field
+  over-reports, and an *absent* position is a real "this is local".
+- **`partiallyApplied` is the one `ArgUsage` field the producer cannot fill in.**
+  A definition referenced with fewer arguments than it takes is being used as a
+  *value*, so its arity is its interface and no position is really removable —
+  but that is a fact about the rest of the corpus, so `argUsageOf` leaves it
+  `False` and `postCompileAD` back-fills it from `partiallyAppliedSet`,
+  alongside the other whole-corpus rollups. Back-fill there and **not** at the
+  wire boundary: patching the record inside `mkWireDef` would leave the field a
+  lie in `ADDef`, in the fragment cache and to `Wire.validateExpanded`, and a
+  second emitter would silently ship `false`. The measurement
+  (`Deps.unsaturatedTargets`) is a `foldTerm` over `definitionTerms`, counting
+  the leading `isProperApplyElim` run of each
+  `Def` head against `nrArity`. Three things to keep: `Con` heads are
+  **excluded** (their elims carry no data parameters, so every constructor would
+  look partial); `nrArity` takes `max` of the syntactic spine and
+  `defArgOccurrences` for the same reason `rawArgUsage` does (a partial
+  application whose last argument arrives through an unfolding must still count);
+  and the side channel is keyed by the *referring* def, because a flat target set
+  has no sound per-module `--incremental` slice — whether a target lands in a
+  module's delta would depend on which module saw it first. Ignored defs record
+  too (a partial application inside a with-helper or pattern lambda lives nowhere
+  else). Fixtures: `ArgUsage.konst` / `konstSaturated`.
+- **`binders[].type` is behind `--with-signatures` and is never normalised.**
+  It costs a `prettyTCM` per reported position, and `erasable` fires on roughly a
+  quarter of all definitions, so it rides the same flag as the sibling `type`
+  field rather than being always-on. `renderPiDomains` walks the syntactic spine
+  with `addContext`, calling `prettyTCM` *outside* the binder's own `addContext`
+  and inside every earlier one — that is the scope the domain is written in, and
+  it is why the strings name earlier binders instead of printing indices.
+  `--show-implicit` is honoured (consistency with `type`); `--normalise-signatures`
+  is deliberately **not**, because reducing a domain destroys the head symbol that
+  makes it recognisable. Both share one `reifyTypeLine`, so the two halves of a
+  signature cannot print in two conventions. Requested by the consumer because 63
+  of 94 mapped `removable` positions on their corpus had no binder name at all —
+  bullet-style premises — so the type is the only usable label.
+
+  **Rendered in raw spine space, before `dropSectionPrefix`.** The strings ride
+  through the shift on the `ArgBinder`s that carry them, exactly as `abName` and
+  `abHiding` do, so the shift keeps its single home. Rendering afterwards would
+  mean adding the prefix size back to an already-shifted index — and where a
+  wrong shift merely *drops* a field on this side, arithmetic on that side
+  attaches the neighbouring binder's type to a reported position: a silently
+  wrong string on a wire artifact the schema calls a contract. Nothing caught
+  that until `ArgUsage.SecTyped.typed`, whose section parameter is an `Idx` while
+  its own binder is a `Nat` — every other section fixture takes a `Nat` and
+  reports a `Nat`, so an off-by-`k` produced a byte-identical golden.
 
 **Phase 2 (`matchConstant`) was measured and rejected — and the reason is a trap
 worth keeping.** `AgdaDeps.MatchConstant` finds positions whose case split could
@@ -571,8 +704,10 @@ All HTML views consume the v2 schema; `--format=json` emits it directly. The
 [`schema/graph-v2-expanded.schema.json`](schema/graph-v2-expanded.schema.json)
 (draft 2020-12). `required` covers the fields present since v2 inception; additive
 fields (`nodeKeyVersion`, `producer`, `definitionEdgesProvenance`,
-`definitionSubterm*`, `externals_summary`, `moduleOptionEscapes`, per-def
-`line`/`access`/`type`/`argUsage` (and within it `binders`)) are optional and
+`definitionSubterm*`, `externals_summary`, `moduleOptionEscapes`,
+`moduleEffectiveOptions`, per-def
+`line`/`access`/`type`/`argUsage` (and within it `binders`, `occursInBody`,
+`syntacticArity`, `partiallyApplied`, and `binders[].type`)) are optional and
 `additionalProperties` is open, so it validates older and forward-compatible
 output too. The `packed` form and `--lazy`
 layout are not schematised.

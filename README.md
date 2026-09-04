@@ -384,36 +384,55 @@ plus — when known for that definition — `line`, `access` (`private` / `publi
   modules simply fail).
 - **`argUsage`** (per-def, optional, expanded only) — arguments the
   definition never actually uses:
-  `{ "removable": [i…], "removableRequires": {…}, "erasable": [i…], "arity": n, "binders": {…} }`.
+  `{ "removable": [i…], "removableRequires": {…}, "occursInBody": [i…], "erasable": [i…], "arity": n, "syntacticArity": n, "partiallyApplied": true, "binders": {…} }`.
   Indices are telescope positions (0-based, implicits included, ascending)
-  over the definition's *own* binders — the ones on its signature line, not
-  the enclosing section's, which Agda prepends internally. `removable` means
-  the binder *and* the argument at every call site can go; `erasable` means
-  the argument is used only in types, so it is an `@0` candidate rather than
-  a removal. Not computed for projections, constructors, datatypes, records,
-  postulates or primitives. Omitted entirely when there is nothing to
-  report. Always computed — no flag.
+  over the definition's *own* binders — not the enclosing section's, which
+  Agda prepends internally. `removable` means the binder *and* the argument
+  at every call site can go; `erasable` means the argument is used only in
+  types, so it is an `@0` candidate rather than a removal. Not computed for
+  projections, constructors, datatypes, records, postulates or primitives.
+  Omitted entirely when there is nothing to report. Always computed — no
+  flag.
 
-  It is Agda's own positivity/polarity result, so it is *interprocedural*:
-  an argument passed into a helper that discards it reads unused in the
-  caller too. Deleting a binder changes the definition's type, so on
-  anything exported it is an API change.
+  **The index space is the definition's own *reduced* telescope, and it can
+  be longer than the signature line.** A type whose codomain only becomes a
+  function after unfolding contributes positions with no written binder at
+  all — `f : (A : Set) → Tracer A` with `Tracer A = ⋯ → ⋯ → A → A` reports
+  `arity: 4` off one written binder. **`syntacticArity`** is how many
+  positions are on the signature line, and is omitted when it equals
+  `arity`; a position `>= syntacticArity` has no binder to strike out, and
+  equivalently no `binders` entry.
 
-  `removable` additionally requires that the binder can *actually* be deleted:
-  a position whose variable still occurs in the rest of the type is filtered
-  out, even when Agda's verdict calls it unused. That matters for arguments
-  used only at **irrelevant** positions (`.(p : A)`, or a relevant binder
-  passed to a callee that consumes it irrelevantly) — Agda's own occurrence
-  test ignores those, so without the filter such a binder looks removable and
-  deleting it leaves the type naming something out of scope. `erasable` is not
-  filtered: it claims an `@0` candidate, not a removal.
+  The verdict is *interprocedural*: an argument passed into a helper that
+  discards it reads unused in the caller too. Deleting a binder changes the
+  definition's type, so on anything exported it is an API change.
 
-  Two things to get right. The indices do **not** index the sibling `type`
-  string, which still shows the section-inherited binders — align against
-  the source signature. And `removableRequires` maps a position to the
+  `removable` is filtered to positions whose binder can *actually* be
+  deleted: a position is dropped when its variable still occurs elsewhere in
+  the type, or when removing it would leave an earlier **hidden** binder
+  unsolvable (`typeOf : {A : Set} → A → Set` — the unused value argument's
+  domain is the only place `A` occurs). Both filters only ever shrink the
+  set. `erasable` is not filtered: it claims an `@0` candidate, not a
+  removal.
+
+  Three fields qualify a `removable` verdict rather than producing one.
+  **`occursInBody`** lists the positions whose variable the elaborated body
+  still mentions: the value is threaded into a callee that discards it, so
+  the deletion has to reach that callee too, while a `removable` position
+  *absent* from it is a purely local edit. An instance argument resolved by
+  instance search counts — pair it with `binders[i].hiding == "instance"` for
+  the shape that most often breaks a build. **`partiallyApplied`** is `true`
+  when the definition is referenced somewhere in the graph with fewer
+  arguments than it takes: used as a value, so its arity is its interface and
+  no position is really removable. Both are omitted when empty.
+  **`removableRequires`** maps a position to the
   others that must be deleted **with** it, since some removals are valid
   only as a set; it is omitted when every removal stands alone, and a
-  position absent from it can be removed by itself. For
+  position absent from it can be removed by itself.
+
+  The indices do **not** index the sibling `type` string, which still shows
+  the section-inherited binders — align against the source signature, and
+  mind `syntacticArity`. For
   `length : {a} {A : Set a} {n} → Vec A n → ℕ`:
 
   ```json
@@ -441,11 +460,20 @@ plus — when known for that definition — `line`, `access` (`private` / `publi
   read off the syntactic `Pi` spine — so `hiding` is always present
   (`explicit` / `implicit` / `instance`), `name` only when the binder has
   one (`Nat → Nat` names nothing), and a position whose type only becomes a
-  function after unfolding gets no entry at all. An absent entry carries no
-  information; it is never a default. A name containing a `.` (`A.a` above)
-  is a binder Agda *inserted* by generalising a `variable` declaration —
-  a written binder name can never contain `.`, so that is a reliable signal
-  that the position has nothing on the signature line to edit.
+  function after unfolding gets no entry at all. An *absent* entry means the
+  position is past the signature line (`>= syntacticArity`); a *present*
+  entry with no `name` is a binder that is written, spelled `_`. Neither is
+  a default. A name containing a `.` (`A.a` above) is a binder Agda
+  *inserted* by generalising a `variable` declaration — a written binder
+  name can never contain `.`, so that is a reliable signal that the position
+  has nothing on the signature line to edit.
+
+  Under `--with-signatures` each entry also carries **`type`**: that
+  binder's domain, reified in the context of the binders before it — the
+  slice of the signature at that position, which the per-def `type` string
+  cannot give you because it is not re-indexed onto the definition's own
+  binders. Often the only usable label, since most reported positions are
+  unnamed.
 - **`unsolvedModules`** (top-level, optional) — module →
   `{ "metas": [lines], "constraints": [lines] }` rollup of the same split:
   the source lines of each silent unsolved meta (one entry per meta) and of
@@ -457,6 +485,14 @@ plus — when known for that definition — `line`, `access` (`private` / `publi
   `{-# OPTIONS #-}` flags that make `agda --safe` reject it (`--type-in-type`,
   `--no-positivity-check`, `--rewriting`, …). Read from each module's own
   `OPTIONS` pragma. Only safety-relevant flags; omitted when none.
+- **`moduleEffectiveOptions`** (top-level, optional) — module → the
+  actionability-relevant options actually *in force*, currently `--erasure`
+  alone. Read from the interface's effective options, so unlike
+  `moduleOptionEscapes` it sees the `.agda-lib` `flags:` line and the command
+  line — which is where such a flag normally lives. Gate advice on it:
+  without `--erasure`, `@0` is `[AttributeKindNotEnabled]`, so every
+  `argUsage.erasable` verdict in that module is un-appliable as configured.
+  Omitted when no module enables one.
 - **`definitionEdgesProvenance`** (expanded, optional) — parallel to
   `definitionEdges`, tagging each edge `signature | body | module-local |
   unknown`. Absent falls back to `unknown`. There is no `with` tag: a dependency

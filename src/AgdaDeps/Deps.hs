@@ -29,6 +29,10 @@ module AgdaDeps.Deps
   , safetyRelevantOptionFlags
   , optionEscapes
 
+    -- * Module-level /effective/ options (actionability, not safety)
+  , actionabilityRelevantOptions
+  , effectiveOptionFlags
+
     -- * Edge provenance
   , EdgeProv(..)
   , provPrec
@@ -73,6 +77,16 @@ module AgdaDeps.Deps
   , expandThroughIgnored
   , contractIgnoredEdges
 
+    -- * Side channels: one reset for all of them
+  , resetSideChannels
+
+    -- * Side-channel: unsaturated (partially applied) references
+  , UnsaturatedMap
+  , unsaturatedRefsRef
+  , readUnsaturatedRefs
+  , mergeUnsaturatedRefs
+  , partiallyAppliedSet
+
     -- * Side-channel: instance-method providers
   , MethodProviderMap
   , methodProvidersRef
@@ -108,13 +122,17 @@ import Agda.Utils.Hash ( hashString )
 import Agda.Utils.Lens ( (^.) )
 
 import Agda.Syntax.Abstract.Name ( QName, nameBindingSite )
-import Agda.Syntax.Common ( unArg, namedThing, Hiding(..), getHiding )
+import Agda.Syntax.Common
+  ( unArg, namedThing, Hiding(..), getHiding, notVisible )
 import Agda.Syntax.Internal
   ( qnameName, qnameModule, MetaId, Clause(..)
-  , Pattern'(..)
-  , Term(Pi), Type, Telescope, telToList, unAbs, unDom, unEl
+  , Pattern'(..), DBPatVar(dbPatVarIndex)
+  , Term(Pi, Def), Type, Telescope, Dom
+  , arity, isProperApplyElim
+  , telToList, unAbs, absName, unDom, unEl
   , Suggest(suggestName)
   )
+import Agda.Syntax.Internal.Generic ( foldTerm )
 import Agda.Syntax.Internal.Names ( namesIn )
 import Agda.Syntax.Internal.MetaVars ( allMetasList )
 import Agda.Syntax.Position ( rStart, posLine, posPos, rangeFile, rangeFilePath )
@@ -167,9 +185,14 @@ import Agda.TypeChecking.Monad.Base
 import Agda.TypeChecking.Monad.Imports ( getVisitedModules )
 import Agda.TypeChecking.Monad.MetaVars
   ( lookupMetaInstantiation, isOpenMeta, getInteractionMetas, getUnsolvedMetas )
+import Agda.TypeChecking.Monad.Context ( addContext )
 import Agda.TypeChecking.Monad.Options ( withShowAllArguments )
 import Agda.TypeChecking.Monad.Signature ( droppedPars, getConstInfo, lookupSection )
 import Agda.TypeChecking.Pretty ( prettyTCM )
+-- @--erasure@ is read off each interface's /effective/ options
+-- ('iOptionsUsed'), which fold in the command line and the @.agda-lib@
+-- @flags:@ — see 'effectiveOptionFlags'. Same accessor on 2.8 and 2.9.
+import Agda.Interaction.Options ( PragmaOptions, optErasure )
 import Agda.TypeChecking.Reduce ( normalise )
 import Agda.TypeChecking.Free ( freeIn )
 import Agda.TypeChecking.Telescope ( telView )
@@ -234,25 +257,54 @@ instance NFData UnsafeTag where
 -- 'argUsageOf'.
 --
 -- Both index lists are ascending /telescope positions, implicits
--- included/, over the definition's __own__ binders — the ones a reader
--- sees on its signature line. See 'argUsageOf' for why that is not the
--- same thing as the elaborated telescope.
+-- included/, over the definition's __own reduced telescope__: the
+-- elaborated spine with the enclosing section's prefix subtracted.
+--
+-- __That is not the signature line, and can be longer than it.__
+-- @dependentPolarity@ walks a /reduced/ spine, so a type whose codomain
+-- only becomes a function after unfolding a definition contributes
+-- positions no binder on the source line corresponds to
+-- (@f : (A : Set) -> Tracer A@ with @Tracer A = ⋯ -> ⋯ -> A -> A@ has
+-- 'auArity' 4 off one written binder). Those positions carry real
+-- information — "the proof never inspects this hypothesis" — so they are
+-- reported, and 'auSyntacticArity' is what /labels/ them rather than
+-- dropping them. See 'argUsageOf' for the section-prefix half of the
+-- story.
 data ArgUsage = ArgUsage
   { auRemovable :: ![Int]
-    -- ^ @Unused@ /and/ 'Nonvariant': the binder and the argument at every
-    -- call site can go.
+    -- ^ @Unused@ /and/ 'Nonvariant', /and/ deletable ('guardDeletable'):
+    -- the binder and the argument at every call site can go.
   , auRemovableRequires :: ![(Int, [Int])]
     -- ^ Which /other/ 'auRemovable' positions must be removed alongside a
     -- given one, transitively. Ascending by key; only positions with a
     -- non-empty requirement appear, so this is empty whenever every
     -- removal stands alone (always, for a single-index verdict). See
     -- 'removableRequiresOf'.
+  , auOccursInBody :: ![Int]
+    -- ^ The 'auRemovable' positions whose variable the /elaborated body/
+    -- still mentions — so deleting the binder is not a local edit. See
+    -- 'occursInBodyOf'. Ascending, a subset of 'auRemovable'.
   , auErasable  :: ![Int]
     -- ^ @Unused@ but not 'Nonvariant': used only in types, so an @\@0@
     -- candidate rather than a removal.
   , auArity     :: !Int
-    -- ^ Telescope positions this verdict ranges over; every index in
-    -- either list is @< auArity@.
+    -- ^ Reduced-telescope positions this verdict ranges over; every index
+    -- in either list is @< auArity@.
+  , auSyntacticArity :: !Int
+    -- ^ How many of those positions are on the __signature line__: the
+    -- length of the syntactic 'Pi' spine ('piSpine'), section prefix
+    -- subtracted. Always @<= auArity@; a position @>= auSyntacticArity@
+    -- exists only after unfolding and has no binder to strike out. This
+    -- is the same boundary an absent 'auBinders' entry marks, stated as a
+    -- number so a consumer need not infer it from a gap.
+  , auPartiallyApplied :: !Bool
+    -- ^ Is this definition referenced somewhere in the graph with fewer
+    -- arguments than its arity? Then its arity /is/ its interface and no
+    -- position is really removable, whatever the polarity says. Unlike
+    -- every other field this is not a property of the definition alone,
+    -- so the producer cannot know it until every module is compiled: it
+    -- is 'False' here and back-filled at emission time from
+    -- 'partiallyAppliedSet'.
   , auBinders   :: ![(Int, ArgBinder)]
     -- ^ How each /reported/ position is written, for a report line that
     -- says @argument 0 ({A : Set})@ rather than @argument 0@. Sparse and
@@ -263,16 +315,18 @@ data ArgUsage = ArgUsage
   } deriving (Show, Eq)
 
 instance NFData ArgUsage where
-  rnf (ArgUsage r q e a b) =
-    rnf r `seq` rnf q `seq` rnf e `seq` rnf a `seq` rnf b
+  rnf (ArgUsage r q o e a s p b) =
+    rnf r `seq` rnf q `seq` rnf o `seq` rnf e `seq` rnf a `seq` rnf s
+      `seq` rnf p `seq` rnf b
 
 -- | Surface facts about one binder, read off the syntactic 'Pi' spine of
 -- the definition's type: enough to name it in a report line without the
 -- consumer re-parsing the source signature.
 --
--- Deliberately not the binder's /type/ — that is the existing
--- @--with-signatures@ @type@ field's job, and unlike this it is not
--- re-indexed onto the definition's own binders.
+-- The sibling @--with-signatures@ @type@ field carries the whole reified
+-- type, but it is /not/ re-indexed onto the definition's own binders, so a
+-- consumer cannot slice a position out of it. 'abType' is that slice, cut
+-- at the right index.
 data ArgBinder = ArgBinder
   { abHiding :: !BinderHiding
     -- ^ Always known: a spine position has an argument info.
@@ -293,10 +347,27 @@ data ArgBinder = ArgBinder
     -- the consumer's only signal. Positions for a generalised variable
     -- that the signature /mentions/ carry its plain name and are
     -- indistinguishable from a written binder here.
+  , abType   :: !(Maybe String)
+    -- ^ The binder's domain, reified to one line by 'prettyTCM' in the
+    -- context of the binders before it — under @--with-signatures@ only,
+    -- 'Nothing' otherwise (see 'attachBinderTypes').
+    --
+    -- The /type/ is what names a binder in a proof development: premises
+    -- are routinely written unnamed (@∙ premise₁@ bullet style), and on
+    -- the corpus this feature was first measured against, 63 of 94 mapped
+    -- @removable@ positions had no name at all. It is also what separates
+    -- a dead /hypothesis/ (the finding a prover cares about) from a dead
+    -- level or datum.
+    --
+    -- Reified internal syntax, not source text: instance and implicit
+    -- arguments Agda solved are shown as it prints them. Never
+    -- normalised — @--normalise-signatures@ governs the whole-type
+    -- @type@ field only, because reducing a domain destroys exactly the
+    -- head symbol that makes it recognisable.
   } deriving (Show, Eq)
 
 instance NFData ArgBinder where
-  rnf (ArgBinder h n) = rnf h `seq` rnf n
+  rnf (ArgBinder h n t) = rnf h `seq` rnf n `seq` rnf t
 
 -- | How a binder is written, hence how a call site passes it. The
 -- distinction a report line cannot omit: \"argument 0\" of
@@ -362,8 +433,8 @@ instance NFData BinderHiding where
 -- which falls back to a @telView@-driven computation for an out-of-range
 -- index; silence is the right answer for a missing entry, and we do not
 -- want that cost here.
-argUsageOf :: Definition -> TCM (Maybe ArgUsage)
-argUsageOf def = do
+argUsageOf :: Options -> Definition -> TCM (Maybe ArgUsage)
+argUsageOf opts def = do
   res <- phase1
   -- Runs for *every* definition, not just those with a phase-1 verdict: a
   -- match-constant position is exactly the case phase 1 says nothing about,
@@ -379,13 +450,22 @@ argUsageOf def = do
       Just au0 | null (auRemovable au0) -> finish au0
                | otherwise -> do
         TelV tel core <- telView (defType def)
-        finish (guardDeletable [piSpineOf (defType def), telSpine tel core] au0)
+        let guarded = guardDeletable [piSpineOf (defType def), telSpine tel core] au0
+            -- Reads clause patterns already in hand; only ever runs for a def
+            -- that survived the guard with a removable position.
+            withBody = guarded
+              { auOccursInBody =
+                  occursInBodyOf (theDef def) (auRemovable guarded) }
+        finish withBody
     -- Nothing survived: report nothing rather than an object of empty lists.
+    -- Binder types are attached in RAW spine space and then ride through the
+    -- shift, so 'dropSectionPrefix' stays the single home of the re-indexing.
     finish au
       | null (auRemovable au) && null (auErasable au) = pure Nothing
       | otherwise = do
-          k <- sectionPrefixSize def
-          pure (dropSectionPrefix k au)
+          typed <- attachBinderTypes opts def au
+          k     <- sectionPrefixSize def
+          pure (dropSectionPrefix k typed)
 
 -- | Phase-2 measurement scaffold, off unless @AGDA_DEPS_MATCH_CONSTANT@ is
 -- set in the environment. Deliberately a stderr dump rather than a wire
@@ -437,7 +517,11 @@ probeMatchConstant def mau =
 -- A position is rejected if /either/ view finds an occurrence, which is the
 -- conservative direction: it can only shrink the removable set.
 data Spine = Spine
-  { spDoms :: !(IM.IntMap Type)  -- ^ domain at each position
+  { spDoms   :: !(IM.IntMap Type)  -- ^ domain at each position
+  , spHidden :: !IS.IntSet
+    -- ^ Positions whose binder is implicit or instance, hence supplied by
+    -- inference rather than by the call site. 'orphanedHidden' is the only
+    -- reader: those are the binders a removal elsewhere can strand.
   , spLen  :: !Int
   , spCore :: Type               -- ^ the codomain, under all 'spLen' binders
   }
@@ -445,12 +529,20 @@ data Spine = Spine
 -- | Build a view from its domains in position order. The one place
 -- @spLen == IM.size spDoms@ is established, so the invariant holds by
 -- construction for both views rather than in two parallel spellings.
-mkSpine :: [Type] -> Type -> Spine
-mkSpine ds core = Spine (IM.fromList (zip [0 ..] ds)) (length ds) core
+mkSpine :: [Dom Type] -> Type -> Spine
+mkSpine ds core = Spine
+  { spDoms   = IM.fromList indexed
+  , spHidden = IS.fromList [ i | (i, d) <- zip [0 ..] ds, notVisible d ]
+  , spLen    = length indexed
+  , spCore   = core
+  }
+  where
+    -- One walk: the length is the indexing's, so the two cannot disagree.
+    indexed = zip [0 ..] (map unDom ds)
 
 -- | The reduced view, from @telView@'s output.
 telSpine :: Telescope -> Type -> Spine
-telSpine tel core = mkSpine (map (snd . unDom) (telToList tel)) core
+telSpine tel core = mkSpine (map (fmap snd) (telToList tel)) core
 
 -- | The syntactic view: walk the @Pi@ spine of the type as stored, without
 -- reducing anything.
@@ -468,7 +560,7 @@ piSpineOf t0 = mkSpine ds core
   where
     (ds, core) = go t0
     go t = case unEl t of
-      Pi d b -> let (rest, c) = go (absBody b) in (unDom d : rest, c)
+      Pi d b -> let (rest, c) = go (absBody b) in (d : rest, c)
       _      -> ([], t)
 
 -- | Is the binder at position @i@ free in the codomain of this view?
@@ -486,6 +578,28 @@ freeInCore sp i
 freeInDomain :: Spine -> Int -> Int -> Bool
 freeInDomain sp i j =
   maybe False (freeIn (j - 1 - i)) (IM.lookup j (spDoms sp))
+
+-- | Is position @i@'s variable free anywhere the removal of @set@ leaves
+-- standing — the codomain, or the domain of a later argument that stays?
+--
+-- The single occurrence question both rules of 'deletableRemovable''s fixpoint
+-- ask; they only differ in what they conclude from the answer. For a position
+-- /being/ removed an occurrence is fatal (its binder is going, so whatever
+-- still mentions it breaks — 'deletableRemovable'). For a hidden position
+-- /not/ being removed it is a reprieve, because inference still has somewhere
+-- to read the binder from ('orphanedHidden'). Sharing one definition is what
+-- keeps them agreeing: they run in the same fixpoint, whose termination
+-- argument assumes they measure the same thing.
+--
+-- Occurrences inside another /removable/ domain do not count: that domain is
+-- going too. Keeping that exemption is what makes rule 1 a filter rather than
+-- a wrecking ball (see 'deletableRemovable'), and rule 2 needs exactly the
+-- same blindness.
+freeOutsideRemoval :: Spine -> IS.IntSet -> Int -> Bool
+freeOutsideRemoval sp set i =
+  freeInCore sp i
+    || any (freeInDomain sp i)
+           [ j | j <- [ i + 1 .. spLen sp - 1 ], not (j `IS.member` set) ]
 
 -- | Drop the @removable@ positions whose binder cannot actually be deleted,
 -- and re-derive everything that depends on the set.
@@ -549,14 +663,60 @@ deletableRemovable removable spines = go (IS.fromList removable)
       | IS.null doomed = IS.toAscList set
       | otherwise      = go (IS.difference set doomed)
       where
-        doomed = IS.fromList [ i | i <- IS.toAscList set, stranded set i ]
-    -- Any view that can see the position may veto it.
-    stranded set i = any veto spines
-      where
-        veto sp =
-          freeInCore sp i
-            || any (freeInDomain sp i)
-                   [ j | j <- [i + 1 .. spLen sp - 1], not (j `IS.member` set) ]
+        -- Every spine votes on both rules. Both shrink @set@, so interleaving
+        -- them in one fixpoint is what makes them agree: rejecting a position
+        -- for either reason resurrects a domain, which can strand an earlier
+        -- position (rule 1) or re-solve a hidden binder (rule 2).
+        doomed = IS.unions
+          [ IS.fromList [ i | i <- IS.toAscList set
+                            , freeOutsideRemoval sp set i ]
+              `IS.union` orphanedHidden sp set
+          | sp <- spines ]
+
+-- | Rule 2 of the fixpoint: the removals that would leave an /earlier/
+-- hidden binder unsolvable.
+--
+-- 'deletableRemovable' asks whether position @i@'s own variable survives the
+-- deletion. That is not the whole question. A hidden or instance binder is
+-- supplied by inference, and inference has to have somewhere to read it
+-- from: @typeOf : {A : Set} -> A -> Set@ has a genuinely unused value
+-- argument, and Agda's verdict on it is right — the /meaning/ does not
+-- depend on it. Delete it anyway and @{A}@ is unsolvable at every call site,
+-- because that argument's domain was its only occurrence. The definition
+-- exists to drive inference; its arity is its interface.
+--
+-- So: for each hidden binder @j@ that is __not itself being removed__, if
+-- every occurrence of @j@'s variable is inside a domain that /is/ being
+-- removed, reject the removals that hold those occurrences. A binder free
+-- nowhere to begin with is left alone (nothing changed for it — a caller was
+-- already passing it explicitly).
+--
+-- Rejecting /every/ position that mentions @j@ is deliberate rather than
+-- minimal: @{A : Set} -> A -> A -> Set@ could keep either occurrence and
+-- drop the other, but which one is arbitrary, and the shape is rare enough
+-- that a rule with no arbitrary choice in it is worth more than the extra
+-- finding. Same conservative direction as the guard it joins: this can only
+-- shrink the removable set.
+--
+-- Necessary, not sufficient: a surviving occurrence does not prove the
+-- binder is /inferable/ from it (that would be a unification question, not
+-- an occurrence one). The consumer repo asked for exactly this filter after
+-- an accepted @removable@ verdict broke a build.
+orphanedHidden :: Spine -> IS.IntSet -> IS.IntSet
+orphanedHidden sp set = IS.unions (map blamed (IS.toAscList (spHidden sp)))
+  where
+    blamed j
+      -- j is going too, so it needs no solution; or it is still readable
+      -- somewhere the deletion leaves standing.
+      | j `IS.member` set             = IS.empty
+      | freeOutsideRemoval sp set j   = IS.empty
+      -- Everything that mentioned j is being removed. Blame all of it — which
+      -- is also 'IS.empty' when j occurred nowhere to begin with, the binder a
+      -- caller was already passing explicitly.
+      | otherwise = IS.fromList
+          [ i | i <- [ j + 1 .. spLen sp - 1 ]
+              , i `IS.member` set
+              , freeInDomain sp j i ]
 
 -- | Which other removable positions must go with each one.
 --
@@ -636,13 +796,16 @@ reportedPositions rm er = IS.fromList rm `IS.union` IS.fromList er
 -- survives, so a @where@ helper that only \"wastes\" its parent's
 -- arguments correctly reports nothing at all.
 dropSectionPrefix :: Int -> ArgUsage -> Maybe ArgUsage
-dropSectionPrefix k au@(ArgUsage rm rq er ar bs)
+dropSectionPrefix k au@(ArgUsage rm rq ob er ar sa pa bs)
   | k <= 0                = Just au
   | null rm' && null er'  = Nothing
-  | otherwise             = Just (ArgUsage rm' rq' er' (max 0 (ar - k)) bs')
+  | otherwise             = Just (ArgUsage rm' rq' ob' er'
+                                           (max 0 (ar - k)) (max 0 (sa - k))
+                                           pa bs')
   where
     shift = shiftOntoOwnBinders k
     rm'   = shift rm
+    ob'   = shift ob
     er'   = shift er
     -- Requirements point forward, so a surviving key's targets all survive
     -- too; a key inside the prefix goes with its binder.
@@ -658,8 +821,11 @@ rawArgUsage :: Definition -> Maybe ArgUsage
 rawArgUsage def@Defn{..}
   | not analysable                  = Nothing
   | null removable && null erasable = Nothing
-  -- Requirements need a reducing 'telView'; 'argUsageOf' fills them in.
-  | otherwise = Just (ArgUsage removable [] erasable telArity binders)
+  -- Requirements need a reducing 'telView', body occurrences need the
+  -- guarded set, binder types need a context, and 'auPartiallyApplied' needs
+  -- the whole corpus; 'argUsageOf' and the emitter fill those in.
+  | otherwise = Just (ArgUsage removable [] [] erasable
+                               telArity synArity False binders)
   where
     analysable = case theDef of
       Function{} -> droppedPars def == 0
@@ -680,7 +846,8 @@ rawArgUsage def@Defn{..}
     -- the stored lists can outrun the unreduced one. The 'max' keeps
     -- @index < auArity@ true without paying for a reduction here.
     spine    = piSpine defType
-    telArity = max (length spine) analysed
+    synArity = length spine
+    telArity = max synArity analysed
     -- Reported positions only, in one pass over the spine we already walk
     -- for 'telArity' — so names cost what the count costs. Positions past
     -- the end of the spine (the outrun case above) simply get no entry.
@@ -705,7 +872,10 @@ rawArgUsage def@Defn{..}
 piSpine :: Type -> [ArgBinder]
 piSpine = go . unEl
   where
-    go (Pi d b) = ArgBinder (hidingOf (getHiding d)) (suggestName b)
+    -- 'abType' is left 'Nothing' here: rendering a domain needs the context
+    -- of the binders before it, hence TCM. 'attachBinderTypes' fills it in
+    -- for the surviving positions under @--with-signatures@.
+    go (Pi d b) = ArgBinder (hidingOf (getHiding d)) (suggestName b) Nothing
                     : go (unEl (unAbs b))
     go _        = []
     hidingOf Hidden     = BHImplicit
@@ -714,6 +884,154 @@ piSpine = go . unEl
     -- 'suggestName' is Agda's own placeholder-aware accessor: it maps the
     -- @"_"@ a nameless domain (@Nat -> Nat@) carries to 'Nothing', so we
     -- never report a name Agda invented.
+
+-- | Which of @removable@'s positions the /elaborated body/ still mentions.
+--
+-- Agda's verdict composes interprocedurally: an argument threaded into a
+-- callee that discards it reads @Unused@ in the caller too (that is what
+-- @f2@ in @test\/ArgUsage.agda@ pins). Sound — but it means the reported
+-- positions are two different edits wearing one label. If the body never
+-- names the binder, deleting it is a local edit. If it does, the value is
+-- being passed somewhere, and the deletion is a multi-definition change
+-- that has to reach the callee too.
+--
+-- The distinction is invisible from the wire without this field, and it is
+-- the one the consumer repo hit as a false positive: an instance argument
+-- that never appears syntactically in the source body, but which /instance
+-- search/ resolves from — the elaborated body holds the binder's variable
+-- as the callee's instance argument, so the verdict is @Unused@ (the callee
+-- discards it) while the removal breaks the call. Instance resolution needs
+-- no special case here: it is exactly a body occurrence at a position whose
+-- 'abHiding' is 'BHInstance'.
+--
+-- Positions are read off each clause's patterns, because a clause body is
+-- indexed by the /clause/ telescope, not the definition's: position @i@'s
+-- variable is whatever @namedClausePats !! i@ binds. Conservative wherever
+-- that mapping is not a plain variable — an argument matched on ('ConP',
+-- 'LitP') is being inspected, so its binder cannot go; a copattern clause
+-- ('ProjP') shifts the correspondence, so nothing is claimed about it; a
+-- position past the patterns is bound by a lambda we would have to follow.
+-- Only a dot pattern is safely 'False': it binds nothing and the body
+-- cannot name it. So the field over-reports rather than under-reports, and
+-- a position /absent/ from it is a real "this is a local edit".
+occursInBodyOf :: Defn -> [Int] -> [Int]
+occursInBodyOf Function{ funClauses = cls } removable =
+  [ i | i <- removable, any (`mentions` i) analysed ]
+  where
+    -- Per-clause facts, computed once per clause rather than once per
+    -- (clause, position): whether a copattern shifts the correspondence, and
+    -- the patterns to index into.
+    analysed = [ (any isProjP pats, pats, clauseBody cl)
+               | cl <- cls, let pats = namedClausePats cl ]
+    mentions (hasProj, pats, body) i
+      | hasProj   = True
+      | otherwise = case drop i pats of
+          []      -> True
+          (p : _) -> case namedThing (unArg p) of
+            VarP _ v -> maybe False (freeIn (dbPatVarIndex v)) body
+            DotP{}   -> False
+            _        -> True
+    isProjP p = case namedThing (unArg p) of
+      ProjP{} -> True
+      _       -> False
+occursInBodyOf _ _ = []
+
+-- | Fill in 'abType' for the reported positions, under @--with-signatures@
+-- only (it costs a 'prettyTCM' per reported position, and the sibling @type@
+-- field is behind the same flag).
+--
+-- __Runs before 'dropSectionPrefix', in raw spine space.__ The strings then
+-- ride through the shift on the 'ArgBinder's that carry them, re-keyed with
+-- the verdict they annotate — exactly how 'abName' and 'abHiding' stay
+-- aligned. Rendering afterwards would mean adding the prefix size back to
+-- an already-shifted index, giving the section shift a second home: and
+-- where a wrong shift merely /drops/ a field here, arithmetic there would
+-- attach the neighbouring binder's type to a reported position — a silently
+-- wrong string on a wire artifact the schema calls a contract.
+--
+-- Only 'auBinders' keys are rendered, and 'auBinders' only ever holds
+-- positions the syntactic spine reaches, so every key resolves.
+attachBinderTypes :: Options -> Definition -> ArgUsage -> TCM ArgUsage
+attachBinderTypes opts def au
+  | not (optWithSignatures opts) = pure au
+  | null (auBinders au)          = pure au
+  | otherwise = do
+      let wanted = IS.fromList (map fst (auBinders au))
+      tys <- renderPiDomains opts wanted (defType def)
+      pure au { auBinders = [ (i, b { abType = IM.lookup i tys })
+                            | (i, b) <- auBinders au ] }
+
+-- | Reify the domains at @wanted@ positions of a type's syntactic 'Pi'
+-- spine, each in the context of the binders before it.
+--
+-- The context is what makes the strings readable: a domain mentioning an
+-- earlier binder prints that binder's name rather than a de Bruijn index.
+-- The 'prettyTCM' call sits /outside/ the 'addContext' for its own binder
+-- and inside every earlier one, which is exactly the scope the domain is
+-- written in. Descent is by 'absBody' for the reason 'piSpineOf' documents.
+renderPiDomains :: Options -> IS.IntSet -> Type -> TCM (IM.IntMap String)
+renderPiDomains opts wanted = go 0
+  where
+    go :: Int -> Type -> TCM (IM.IntMap String)
+    go !i t = case unEl t of
+      Pi d b -> do
+        rest <- addContext (absName b, d) (go (i + 1) (absBody b))
+        if i `IS.member` wanted
+          then do
+            s <- reifyTypeLine opts (unDom d)
+            pure (IM.insert i s rest)
+          else pure rest
+      _ -> pure IM.empty
+
+-- | Reify a type to a single line, honouring @--show-implicit@.
+--
+-- The one home of that recipe: the per-def @type@ field and each
+-- 'ArgBinder''s @type@ must agree on how implicits are shown and on the
+-- whitespace collapse, or two halves of the same signature print in two
+-- conventions. @--normalise-signatures@ stays at the call site — it applies
+-- to the whole-type field only, deliberately (reducing a domain destroys the
+-- head symbol that makes a binder recognisable).
+reifyTypeLine :: Options -> Type -> TCM String
+reifyTypeLine opts ty = do
+  doc <- (if optShowImplicit opts then withShowAllArguments else id)
+           (prettyTCM ty)
+  pure (unwords (words (render doc)))
+
+-- | Effective-option flags worth reporting per module. Not a safety
+-- question (that is 'safetyRelevantOptionFlags') but an /actionability/
+-- one: whether the advice a finding carries can be taken at all.
+--
+-- @--erasure@ is the whole list. Without it @\@0@ is a syntax error
+-- (@[AttributeKindNotEnabled]@), so every @erasable@ verdict in that module
+-- is un-appliable however true it is — 41% of one consumer's total output,
+-- unactionable as configured, with nothing on the wire to say so.
+--
+-- __The table, not a mirror of one.__ 'effectiveOptionFlags' folds over this
+-- list, so adding a flag is one tuple here rather than an edit in two places
+-- that have to agree — the same discipline as 'safetyRelevantOptionFlags',
+-- which 'optionEscapes' intersects against.
+--
+-- Each entry pairs the wire spelling with Agda's own accessor rather than a
+-- token test: @--erase-record-parameters@ and an explicit @--erased-matches@
+-- both imply @optErasure@, and that accessor is where the implication lives.
+actionabilityRelevantOptions :: [(String, PragmaOptions -> Bool)]
+actionabilityRelevantOptions = [ ("--erasure", optErasure) ]
+
+-- | The 'actionabilityRelevantOptionFlags' a module's __effective__ options
+-- enable, ascending. Empty for a module that enables none.
+--
+-- Read from 'iOptionsUsed', NOT 'iFilePragmaOptions': the opposite of the
+-- rule 'optionEscapes' follows, and deliberately. A file @OPTIONS@ pragma is
+-- a property /of the file/, so attributing it needs the file's own tokens;
+-- \"can I write @\@0@ here\" is a property of the options actually in force,
+-- which is mostly where the flag really lives — a @flags:@ line in the
+-- @.agda-lib@, or the command line.
+--
+-- Derived from 'actionabilityRelevantOptions', which is where a second flag
+-- goes.
+effectiveOptionFlags :: PragmaOptions -> [String]
+effectiveOptionFlags po =
+  [ flag | (flag, enabled) <- actionabilityRelevantOptions, enabled po ]
 
 -- | File-level @{-# OPTIONS ⋯ #-}@ flags that make @agda --safe@ reject a
 -- whole module — the module-level analogue of 'UnsafeTag'. The
@@ -941,13 +1259,19 @@ instance Binary ADDef where
     pure (ADDef n (M.keysSet dp) dp s k l a sh sd sg u um au)
 
 instance Binary ArgUsage where
-  put (ArgUsage r q e a b) =
-    B.put r *> B.put q *> B.put e *> B.put a *> B.put b
-  get = ArgUsage <$> B.get <*> B.get <*> B.get <*> B.get <*> B.get
+  -- 'auPartiallyApplied' is always 'False' on this side of the wire (it is
+  -- back-filled at emission from the whole corpus), so it round-trips
+  -- exactly; it is written rather than assumed so the instance stays a
+  -- total mirror of the record.
+  put (ArgUsage r q o e a s p b) =
+    B.put r *> B.put q *> B.put o *> B.put e *> B.put a *> B.put s
+      *> B.put p *> B.put b
+  get = ArgUsage <$> B.get <*> B.get <*> B.get <*> B.get <*> B.get <*> B.get
+                 <*> B.get <*> B.get
 
 instance Binary ArgBinder where
-  put (ArgBinder h n) = B.put h *> B.put n
-  get = ArgBinder <$> B.get <*> B.get
+  put (ArgBinder h n t) = B.put h *> B.put n *> B.put t
+  get = ArgBinder <$> B.get <*> B.get <*> B.get
 
 instance Binary BinderHiding where
   put = B.putWord8 . \case
@@ -974,6 +1298,17 @@ data NodeRef = NodeRef
   , nrShort     :: !String            -- ^ unqualified display name: last @.@-segment of @prettyShow@
   , nrIgnorable :: !Bool              -- ^ precomputed @ignoreDef@, so
                                       --   'contractIgnoredEdges' needs no TCM on cached defs
+  , nrArity     :: !Int
+    -- ^ Arity for the saturation test ('unsaturatedTargets'): @max@ of the
+    -- syntactic @Pi@ spine and the stored occurrence list, for the same
+    -- reason 'rawArgUsage' takes that @max@ — a partial application whose
+    -- last argument only appears after an unfolding must still count.
+    --
+    -- Rides along here rather than in a memo of its own because it comes
+    -- off the very 'getConstInfo' this bundle already pays for, and every
+    -- name the saturation test asks about is a dependency that gets a
+    -- 'NodeRef' anyway. Same rationale as 'nrIgnorable': precompute the
+    -- one signature lookup so nothing downstream needs TCM.
   , nrWhereHelper :: !Bool            -- ^ @"._." `isInfixOf` prettyShow@ — the
                                       --   module-local (where/anon-module) marker.
                                       --   Serialised: not derivable from 'nrKey' (has @._.@ stripped).
@@ -991,19 +1326,22 @@ instance Show NodeRef where
 instance Pretty NodeRef where
   pretty = pretty . nrKey
 instance NFData NodeRef where
-  rnf (NodeRef a b c d e f g h) =
+  rnf (NodeRef a b c d e f g h i) =
     rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` rnf e `seq` rnf f
-      `seq` rnf g `seq` rnf h
+      `seq` rnf g `seq` rnf h `seq` rnf i
 instance Binary NodeRef where
   -- 'nrHash' is derived (@hashString nrKey@) and rebuilt on 'get'.
   -- 'nrWhereHelper' (h) IS serialised: 'nrKey' has the @._.@ marker
-  -- stripped by 'liftAnonSegments', so it can't be recovered.
-  put (NodeRef a _ c d e f g h) =
+  -- stripped by 'liftAnonSegments', so it can't be recovered. So is
+  -- 'nrArity' (i): it comes from the signature, which a cache hit never
+  -- consults.
+  put (NodeRef a _ c d e f g h i) =
     B.put a >> B.put c >> B.put d >> B.put e >> B.put f >> B.put g >> B.put h
+      >> B.put i
   get = do
     a <- B.get; c <- B.get; d <- B.get; e <- B.get; f <- B.get; g <- B.get
-    h <- B.get
-    pure (NodeRef a (hashString a) c d e f g h)
+    h <- B.get; i <- B.get
+    pure (NodeRef a (hashString a) c d e f g h i)
 
 -- ** QName-level identity logic (producer boundary only)
 
@@ -1051,17 +1389,23 @@ srcLocOfQ qn = do
 
 -- | Build the precomputed 'NodeRef' for a 'QName', memoised per 'QName'.
 -- A 'NodeRef' is a deterministic function of its 'QName' (its one impure
--- input, @getConstInfo@ via 'ignoreDependency', is process-stable), so the
--- bundle is built once per distinct name regardless of edge count. The
--- cache is process-lived: 'QName' identity is stable, nothing to reset.
+-- input, the @getConstInfo@ below, is process-stable), so the bundle is built
+-- once per distinct name regardless of edge count. The cache is
+-- process-lived: 'QName' identity is stable, nothing to reset.
+--
+-- That single 'getConstInfo' is the module's only per-name signature lookup:
+-- both 'nrIgnorable' and 'nrArity' are read off the same 'Definition'. Don't
+-- add a second memo for a third such field — put it here.
 mkRef :: QName -> TCM NodeRef
 mkRef qn = do
   cache <- liftIO (readIORef nodeRefCacheRef)
   case M.lookup qn cache of
     Just r  -> return r
     Nothing -> do
-      ign <- ignoreDependency qn
-      let !raw   = prettyShow qn
+      d <- getConstInfo qn
+      let !ign   = ignoreDef d
+          !ar    = max (arity (defType d)) (length (defArgOccurrences d))
+          !raw   = prettyShow qn
           !mbLn  = bindingLineOfQ qn
           !key   = nodeKeyFromPretty raw mbLn
           !short = (reverse . takeWhile (/= '.') . reverse) raw
@@ -1074,6 +1418,7 @@ mkRef qn = do
             , nrFile      = fst <$> srcLocOfQ qn
             , nrShort     = short
             , nrIgnorable = ign
+            , nrArity     = ar
             , nrWhereHelper = isWH
             }
       liftIO $ modifyIORef' nodeRefCacheRef (M.insert qn r)
@@ -1163,11 +1508,9 @@ computeDefAD opts def@Defn{..} = do
   -- implicit/irrelevant arguments.
   sigStr <- if optWithSignatures opts
               then do
-                ty  <- if optNormaliseSignatures opts then normalise defType
-                                                      else pure defType
-                doc <- (if optShowImplicit opts then withShowAllArguments else id)
-                         (prettyTCM ty)
-                pure (Just (unwords (words (render doc))))
+                ty <- if optNormaliseSignatures opts then normalise defType
+                                                     else pure defType
+                Just <$> reifyTypeLine opts ty
               else pure Nothing
   -- Soundness escapes, computed from data already in hand (no extra
   -- term traversals): the termination-pragma marker on 'theDef' plus a
@@ -1179,7 +1522,7 @@ computeDefAD opts def@Defn{..} = do
       !unsafeTags = termTag ++ [ UTrustMe | usesTrustMe ]
   -- Never-used arguments, read off Agda's positivity/polarity analysis.
   -- The state read inside only fires for a def that has a finding.
-  argUsage <- argUsageOf def
+  argUsage <- argUsageOf opts def
   -- Convert to 'NodeRef' at the producer boundary: everything downstream
   -- is identity-as-data.
   nameRef  <- mkRef defName
@@ -1258,6 +1601,10 @@ bindingLineOfQ qn =
 compileDefAD :: Options -> env -> IsMain -> Definition -> TCM (Maybe ADDef)
 compileDefAD opts _ _ def@Defn{..}
   | ignoreDef def = do
+      -- Recorded for ignored defs too: a partial application inside a
+      -- with-helper or a pattern lambda is still a partial application of
+      -- its target, and those bodies live nowhere else.
+      recordUnsaturatedOf def
       -- Record raw out-edges without applying 'ignoreDependency' (refs to
       -- other ignored defs are kept so the closure pass can chain through).
       -- Module-exclusion still applies.
@@ -1278,9 +1625,20 @@ compileDefAD opts _ _ def@Defn{..}
   | isExcludedModule excludes (moduleKeyOfQ defName) = return Nothing
   | otherwise = do
       recordInstanceMethods def
+      recordUnsaturatedOf def
       Just <$> computeDefAD opts def
   where
     excludes = optExcludeModules opts
+
+-- | Record this definition's unsaturated references ('unsaturatedTargets')
+-- into the side channel, keyed by the definition itself. No entry is written
+-- for a definition with none, so the map stays sparse.
+recordUnsaturatedOf :: Definition -> TCM ()
+recordUnsaturatedOf def = do
+  tgts <- unsaturatedTargets def
+  unless (S.null tgts) $ do
+    srcRef <- mkRef (defName def)
+    liftIO $ modifyIORef' unsaturatedRefsRef (M.insertWith S.union srcRef tgts)
 
 -- | If @def@ looks like an instance binder, record it as a provider for
 -- every projection method it dispatches. Two signals:
@@ -1349,6 +1707,89 @@ mergeIgnoredEdges :: MonadIO m => IgnoredEdgeMap -> m ()
 mergeIgnoredEdges extra =
   liftIO $ modifyIORef' ignoredEdgesRef (`M.union` extra)
 
+-- ** Side-channel: unsaturated (partially applied) references
+--
+-- Which definitions are referenced somewhere with fewer arguments than
+-- their arity. A definition used as a /value/ has its arity as its
+-- interface — @EagerlyAfterT t = Eager ∩¹ AfterT t@ needs @AfterT t@ to be
+-- a unary predicate — so no argument of it is removable however dead the
+-- polarity analysis finds it. Consumed as the per-def
+-- 'auPartiallyApplied' flag.
+
+-- | Source definition -> the targets it references unsaturated.
+--
+-- Keyed by /source/ rather than accumulated as a flat target set for one
+-- reason: @--incremental@. A fragment must carry exactly the module's own
+-- contribution, and a def belongs to exactly one module, so the key set is
+-- a sound per-module slice. A flat set's per-module delta would depend on
+-- which module happened to see a target first, and would go stale the run
+-- after that module stopped contributing.
+type UnsaturatedMap = Map NodeRef (Set NodeRef)
+
+{-# NOINLINE unsaturatedRefsRef #-}
+unsaturatedRefsRef :: IORef UnsaturatedMap
+unsaturatedRefsRef = unsafePerformIO $ newIORef M.empty
+
+-- | Clear the side-channel map, for the same reason 'resetIgnoredEdges'
+-- does: repeated in-process invocations must stay independent.
+resetUnsaturatedRefs :: MonadIO m => m ()
+resetUnsaturatedRefs = liftIO $ writeIORef unsaturatedRefsRef M.empty
+
+-- | Read the map, for the fragment cache's write path.
+readUnsaturatedRefs :: MonadIO m => m UnsaturatedMap
+readUnsaturatedRefs = liftIO $ readIORef unsaturatedRefsRef
+
+-- | Union a cached module's slice back in (fragment cache hit: the
+-- module's @compileDef@ hooks never ran).
+mergeUnsaturatedRefs :: MonadIO m => UnsaturatedMap -> m ()
+mergeUnsaturatedRefs extra =
+  liftIO $ modifyIORef' unsaturatedRefsRef (M.unionWith S.union extra)
+
+-- | Flatten to the target side: every definition referenced unsaturated
+-- anywhere in the compiled corpus. Sources drop out — the flag is a
+-- property of the definition being referenced.
+partiallyAppliedSet :: UnsaturatedMap -> Set NodeRef
+partiallyAppliedSet = M.foldl' S.union S.empty
+
+-- | The definitions this one references with fewer arguments than they
+-- take. Walks the same terms 'definitionTerms' collects for fingerprinting
+-- — the type plus every clause body — with Agda's own generic fold.
+--
+-- Only @Def@ heads are measured. A @Con@ application carries no data
+-- parameters in its elims, so comparing its length against the
+-- constructor's type arity would report every constructor as partial.
+--
+-- The applied count is the leading run of @Apply@ elims — Agda's
+-- 'isProperApplyElim', which excludes @IApply@ deliberately: a @Proj@
+-- eliminates the /result/, so nothing past it is an argument of this head,
+-- and undercounting a cubical path application errs towards reporting a
+-- partial application, which is the direction that withholds a finding
+-- rather than offering an unsafe one.
+--
+-- Arity comes off 'nrArity', so the signature lookup is the one 'mkRef'
+-- already memoises: every name asked about here is a dependency of this
+-- definition, hence gets a 'NodeRef' regardless.
+unsaturatedTargets :: Definition -> TCM (Set NodeRef)
+unsaturatedTargets def =
+  S.fromList . mapMaybe id <$> mapM shortOfArity (M.toAscList minApplied)
+  where
+    -- One 'mkRef' per distinct target: only the fewest arguments any site
+    -- passes can be short of the arity. Single-use, so the site list streams
+    -- into the map instead of being retained beside it.
+    minApplied :: Map QName Int
+    minApplied = M.fromListWith min (foldTerm one (definitionTerms def))
+      where
+        one (Def f es) = [(f, countApply 0 es)]
+        one _          = []
+        -- Counted, not materialised: this runs at every 'Def' node of every
+        -- definition, and a 'takeWhile' would allocate a cell per argument
+        -- only to measure the list's length.
+        countApply !n (e : es) | isProperApplyElim e = countApply (n + 1) es
+        countApply !n _                              = n
+    shortOfArity (f, n) = do
+      r <- mkRef f
+      pure $! if n < nrArity r then Just r else Nothing
+
 -- ** Side-channel: instance-method providers
 --
 -- Records (method -> [binders]) for each instance binder checked, so
@@ -1368,6 +1809,20 @@ methodProvidersRef = unsafePerformIO $ newIORef M.empty
 -- in-process invocations stay independent.
 resetMethodProviders :: MonadIO m => m ()
 resetMethodProviders = liftIO $ writeIORef methodProvidersRef M.empty
+
+-- | Clear every per-run side channel, so repeated in-process invocations
+-- stay independent. One place, so adding a fourth channel cannot forget the
+-- reset half — the failure mode is silent (state from the previous run leaks
+-- into this graph) and only reachable in-process, hence not caught by CI.
+--
+-- The per-'QName' memos ('nodeRefCacheRef', 'silentSpansCacheRef') are
+-- deliberately NOT here: they cache deterministic functions of a name, which
+-- no run invalidates.
+resetSideChannels :: MonadIO m => m ()
+resetSideChannels = do
+  resetIgnoredEdges
+  resetMethodProviders
+  resetUnsaturatedRefs
 
 -- | Read the providers map. Used by 'Backend.postCompileAD'.
 readMethodProviders :: MonadIO m => m MethodProviderMap

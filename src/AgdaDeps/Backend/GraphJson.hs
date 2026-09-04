@@ -171,6 +171,12 @@ data GraphInput = GraphInput
     -- with an escape appear. Emitted as the optional top-level
     -- @moduleOptionEscapes@ object (packed / expanded / lazy); omitted
     -- when empty so escape-free corpora stay byte-identical.
+  , giModuleEffectiveOptions :: ![(String, [String])]
+    -- ^ Per module, the actionability-relevant options actually in force
+    -- ('AgdaDeps.Deps.effectiveOptionFlags' — currently @--erasure@),
+    -- ascending by module; only modules enabling one appear. Emitted as
+    -- the optional top-level @moduleEffectiveOptions@ object (packed /
+    -- expanded / lazy); omitted when empty.
   , giUnsolvedModules :: ![(String, ([Int], [Int]))]
     -- ^ Per top-level module, @(silent unsolved-meta lines,
     -- unsolved-constraint lines)@ under @--allow-unsolved-metas@
@@ -573,6 +579,13 @@ buildGraphJson GraphInput{..} =
         | otherwise = ",\"moduleOptionEscapes\":"
                    ++ jStrArrMap giModuleOptionEscapes
 
+      -- Optional module-level effective options (currently @--erasure@);
+      -- omitted when empty, same encoder as the escapes above.
+      moduleEffectiveOptionsField
+        | null giModuleEffectiveOptions = ""
+        | otherwise = ",\"moduleEffectiveOptions\":"
+                   ++ jStrArrMap giModuleEffectiveOptions
+
       -- Optional module-level silent-unsolved-meta / unsolved-constraint
       -- rollup; omitted when empty (same encoder as the expanded form).
       unsolvedModulesField
@@ -608,6 +621,7 @@ buildGraphJson GraphInput{..} =
         ++ ",\"searchIndex\":" ++ searchIndexJson searchNames searchKinds searchBigrams
         ++ externalsSummaryField
         ++ moduleOptionEscapesField
+        ++ moduleEffectiveOptionsField
         ++ unsolvedModulesField
         ++ "}"
 
@@ -1518,6 +1532,7 @@ toExpandedGraph GraphInput{..} =
        , egSourceFiles    = giSourceFiles
        , egReExports      = giReExports
        , egModuleOptionEscapes = giModuleOptionEscapes
+       , egModuleEffectiveOptions = giModuleEffectiveOptions
        , egUnsolvedModules = giUnsolvedModules
        , egSubtermHashes  =
            if M.null defHashesByQ then Nothing

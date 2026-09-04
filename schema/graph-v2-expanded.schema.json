@@ -106,6 +106,11 @@
       "additionalProperties": { "type": "array", "items": { "type": "string" } },
       "description": "Optional (R15). Per module, the file-level `{-# OPTIONS #-}` soundness escapes (`--type-in-type`, `--no-positivity-check`, `--rewriting`, …) that make `agda --safe` reject it. Only modules with at least one escape appear; omitted entirely when none does, so escape-free corpora stay byte-identical. Module-level, orthogonal to per-def `unsafe`. Per-block declaration pragmas (`{-# NO_POSITIVITY_CHECK #-}`) are NOT OPTIONS pragmas and never appear here."
     },
+    "moduleEffectiveOptions": {
+      "type": "object",
+      "additionalProperties": { "type": "array", "items": { "type": "string" } },
+      "description": "Optional. Per module, the actionability-relevant Agda options actually IN FORCE — currently `--erasure` only. Read from the interface's EFFECTIVE options, so unlike `moduleOptionEscapes` (deliberately the file's own `{-# OPTIONS #-}` tokens) it covers the `.agda-lib` `flags:` line and the command line, which is where such a flag normally lives. Only modules enabling one appear; omitted entirely when none does. Use it to gate advice: without `--erasure`, `@0` is a syntax error (`[AttributeKindNotEnabled]`), so every `argUsage.erasable` verdict in that module is un-appliable as configured however true it is."
+    },
     "unsolvedModules": {
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/unsolvedModule" },
@@ -188,9 +193,13 @@
         "name": {
           "type": "string",
           "description": "Additive/optional. The binder name as Agda spells it. Omitted when the spine binds no name (`Nat → Nat`), so absence means \"unnamed\", not \"unknown\". A name containing a `.` (e.g. `P.A`) is NOT a source binder: it is one Agda inserted by generalising a `variable` declaration (a dependency of the variable the signature mentions), and since a written binder name can never contain `.`, that is a sound test for \"this position has no binder on the signature line to edit\". Reported as-is because it is the name Agda's own printer uses — the sibling `type` string shows it too."
+        },
+        "type": {
+          "type": "string",
+          "description": "Additive/optional (--with-signatures). This binder's domain, reified to one line in the context of the binders before it — the slice of the signature at THIS position, which the sibling per-def `type` string cannot provide because it is not re-indexed onto the definition's own binders. Present only under `--with-signatures`; absence there means the flag was off, not that the binder has no type. Reified internal syntax, not source text: implicit and instance arguments Agda solved are printed as it prints them, and `--show-implicit` makes that more verbose. Never normalised (`--normalise-signatures` governs the per-def `type` only), because reducing a domain destroys the head symbol that makes it recognisable. This is what names a binder in a proof development, where premises are routinely written unnamed."
         }
       },
-      "description": "One reported argument as written: its hiding, and its name when it has one."
+      "description": "One reported argument as written: its hiding, its name when it has one, and its type under --with-signatures."
     },
     "unsolvedModule": {
       "type": "object",
@@ -228,6 +237,11 @@
           },
           "description": "Additive/optional. Positions that cannot be removed on their own: maps a `removable` position (as a decimal string key) to the other `removable` positions that must be deleted along with it, transitively and ascending. A position absent from this map — and the whole map, absent whenever every removal stands alone, which includes every single-entry `removable` — can be removed by itself. Requirements always point FORWARD (every value is greater than its key), since the only thing that can still mention a removable binder's variable is the domain of a later removable argument. Example: `{\"0\": [1, 3]}` on `removable: [0,1,3]` means deleting 0 also forces 1 and 3, while 1 and 3 each stand alone."
         },
+        "occursInBody": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "description": "Additive/optional. The subset of `removable` whose variable the ELABORATED BODY still mentions — the value is passed on to a callee that discards it, so the deletion is a multi-definition edit rather than a local one (the callee's parameter and every call site have to go too). A `removable` position ABSENT from this array is a local edit: strike the binder and the arguments, nothing else changes. Omitted when no position qualifies, so absence reads as \"all local\". The instance case is worth calling out: an instance argument that never appears syntactically in the source body but which INSTANCE SEARCH resolves from is a body occurrence here, and is exactly the shape that makes a removal break a call — filter on it together with `binders[i].hiding == \"instance\"`. Conservative: a position matched on (a constructor or literal pattern), a position in a copattern clause, and a position past the clause's patterns are all reported as occurring."
+        },
         "erasable": {
           "type": "array",
           "items": { "type": "integer", "minimum": 0 },
@@ -236,15 +250,24 @@
         "arity": {
           "type": "integer",
           "minimum": 0,
-          "description": "Number of telescope positions the verdict ranges over; every index in either array is `< arity`."
+          "description": "Number of telescope positions the verdict ranges over; every index in either array is `< arity`. THE INDEX SPACE IS THE DEFINITION'S OWN *REDUCED* TELESCOPE — elaborated, with any inherited section telescope subtracted — and it MAY EXCEED THE SIGNATURE LINE, because Agda derives the underlying analysis from a reduced spine: a type whose codomain only becomes a function after unfolding a definition (`f : (A : Set) → Tracer A` with `Tracer A = ⋯ → ⋯ → A → A`) contributes positions with no written binder at all. Do not read these indices against the sibling `type` string, and do not assume `arity` counts binders on the source line — use `syntacticArity` for that boundary."
+        },
+        "syntacticArity": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Additive/optional. How many of the `arity` positions are ON THE SIGNATURE LINE: the length of the definition's syntactic `Pi` spine, section prefix subtracted. Always `<= arity`; OMITTED when the two are equal, so absence means \"every position is a written binder\". A position `>= syntacticArity` exists only after a type in the signature is unfolded and has no binder to strike out — but it is still a real finding worth reporting (\"the proof never inspects this hypothesis\", i.e. the statement could be strengthened), so it is labelled rather than dropped. This is the same boundary an absent `binders` entry marks, stated as a number: `binders` keys are always `< syntacticArity`."
+        },
+        "partiallyApplied": {
+          "type": "boolean",
+          "description": "Additive/optional. `true` when this definition is referenced somewhere IN THIS GRAPH with fewer arguments than it takes — used as a value rather than fully applied (`EagerlyAfterT t = Eager ∩¹ AfterT t` needs `AfterT t` to be a unary predicate). Its arity is then part of its interface and NO position is really removable, however dead the polarity analysis finds it. Omitted when false. Corpus-scoped, so it is only as complete as the modules compiled: an unsaturated reference from a module outside the graph cannot be seen. Measured on `Def` heads only — constructor applications carry no data parameters in their elaborated spine and would all look partial."
         },
         "binders": {
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/argBinder" },
-          "description": "Additive/optional. How the reported positions are *written*, so a report line can say `argument 0 ({A : Set})` instead of `argument 0`. Keyed like `removableRequires` (position as a decimal string) and SPARSE: only positions listed in `removable` or `erasable`, and only those the definition's syntactic `Pi` spine reaches. An absent position carries NO information — it is not a claim that the binder is explicit or unnamed. Absent entirely when no reported position has an entry (a definition whose type only becomes a function after unfolding). Read against the definition's own source signature line, never against the sibling `type` string: like the index arrays, these are re-indexed past any inherited section telescope."
+          "description": "Additive/optional. How the reported positions are *written*, so a report line can say `argument 0 ({A : Set})` instead of `argument 0`. Keyed like `removableRequires` (position as a decimal string) and SPARSE: only positions listed in `removable` or `erasable`, and only those the definition's syntactic `Pi` spine reaches — equivalently, only positions `< syntacticArity`. An absent position carries NO information — it is not a claim that the binder is explicit or unnamed; it means the position is past the signature line. A PRESENT entry with no `name` is a binder that IS written, spelled `_`. Absent entirely when no reported position has an entry (a definition whose type only becomes a function after unfolding). Read against the definition's own source signature line, never against the sibling `type` string: like the index arrays, these are re-indexed past any inherited section telescope."
         }
       },
-      "description": "One definition's never-used-argument verdict."
+      "description": "One definition's never-used-argument verdict. INDICES ARE THE DEFINITION'S OWN REDUCED TELESCOPE (section prefix subtracted) and may exceed the signature line — see `arity` and `syntacticArity`."
     },
     "definition": {
       "type": "object",

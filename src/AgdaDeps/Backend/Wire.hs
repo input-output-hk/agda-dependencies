@@ -73,6 +73,13 @@ data ExpandedGraph = ExpandedGraph
     -- ('AgdaDeps.Deps.optionEscapes'), ascending by module; only modules
     -- with an escape appear. Emitted as the optional @moduleOptionEscapes@
     -- object; omitted when empty so escape-free corpora stay byte-identical.
+  , egModuleEffectiveOptions :: [(String, [String])]
+    -- ^ Per module, the actionability-relevant options actually in force
+    -- ('AgdaDeps.Deps.effectiveOptionFlags'), ascending by module; only
+    -- modules enabling one appear. Read off @iOptionsUsed@, so it covers
+    -- the @.agda-lib@ @flags:@ and the command line — unlike
+    -- 'egModuleOptionEscapes', which is deliberately the file's own tokens.
+    -- Omitted when empty.
   , egUnsolvedModules :: [(String, ([Int], [Int]))]
     -- ^ Per top-level module, @(silent unsolved-meta lines, unsolved-
     -- constraint lines)@ (see 'AgdaDeps.Deps.unsolvedInterfaceLines'),
@@ -155,6 +162,7 @@ data SchemaDoc
   | SArray SchemaDoc (Maybe Int) (Maybe Int)   -- ^ items, minItems, maxItems
   | SMap SchemaDoc                             -- ^ object, additionalProperties = schema
   | SString (Maybe [String])                   -- ^ optional enum
+  | SBool
   | SInteger (Maybe Int)                       -- ^ optional minimum
   | SConstInt Int
   | SConstStr String
@@ -238,14 +246,24 @@ unsolvedModulesJson rows =
       ++ ",\"constraints\":" ++ jArray show cs ++ "}"
 
 -- | The per-def @argUsage@ object (@$defs/argUsage@):
--- @{removable, removableRequires?, erasable, arity, binders?}@.
+-- @{removable, removableRequires?, occursInBody?, erasable, arity,
+-- syntacticArity?, partiallyApplied?, binders?}@.
+--
+-- __The index space is the definition's own /reduced/ telescope__ —
+-- elaborated, enclosing-section prefix subtracted — and it can be __longer
+-- than the signature line__, because Agda derives the underlying analysis
+-- from a reduced spine. @syntacticArity@ is the boundary: positions below it
+-- are on the signature line, positions at or above it exist only after a
+-- type in the signature is unfolded, and have no binder to strike out.
+-- Reading the indices against the sibling @type@ string is what a first
+-- consumer did, and it produced two confident false-positive reports.
 --
 -- Both index arrays are always present (either may be empty — the /object/
 -- is what gets omitted when there is nothing to report), so a consumer never
--- has to distinguish an absent array from an empty one. @removableRequires@
--- is the exception: it is omitted when every removal stands alone, which
--- includes every single-index verdict, so absent reads as \"no position
--- requires another\", not \"unknown\".
+-- has to distinguish an absent array from an empty one. The optional ones
+-- are omitted when they have nothing to say, and each absence reads as a
+-- statement, not as \"unknown\": no position requires another; the body
+-- mentions none of them; @syntacticArity == arity@; not partially applied.
 --
 -- @binders@ is keyed like @removableRequires@ (decimal-string position) and
 -- is /sparse/: it annotates the reported positions only, and only those the
@@ -258,8 +276,15 @@ argUsageFields =
   , Optional "removableRequires" (SMap (arrOf nat))
       (omitEmpty auRemovableRequires
                  (\rq -> jobj [ (show i, jArray show js) | (i, js) <- rq ]))
+  , Optional "occursInBody"      (arrOf nat)
+      (omitEmpty auOccursInBody (jArray show))
   , Required "erasable"          (arrOf nat) (jArray show . auErasable)
   , Required "arity"             nat         (show . auArity)
+  , Optional "syntacticArity"    nat
+      (\au -> if auSyntacticArity au >= auArity au then Nothing
+              else Just (show (auSyntacticArity au)))
+  , Optional "partiallyApplied"  SBool
+      (\au -> if auPartiallyApplied au then Just (jbool True) else Nothing)
   , Optional "binders"           (SMap (SRef "argBinder"))
       (omitEmpty auBinders
                  (\bs -> jobj [ (show i, encodeObject argBinderFields b)
@@ -272,11 +297,15 @@ argUsageFields =
 --
 -- @hiding@ is always present (a spine position always has an argument
 -- info); @name@ is omitted when the binder has none to report — a nameless
--- domain (@Nat -> Nat@), never a name Agda invented.
+-- domain (@Nat -> Nat@), never a name Agda invented. @type@ is the binder's
+-- domain reified to one line, present under @--with-signatures@ only; it is
+-- what names an unnamed premise, which in a proof development is most of
+-- them.
 argBinderFields :: [Field ArgBinder]
 argBinderFields =
   [ Required "hiding" (SRef "hiding") (jsString . wireHiding . abHiding)
   , Optional "name"   (SString Nothing) (fmap jsString . abName)
+  , Optional "type"   (SString Nothing) (fmap jsString . abType)
   ]
 
 -- * The field tables
@@ -303,6 +332,8 @@ expandedFields =
   , Required "reexports"                 (arrOf (SRef "reexport")) (jArray (encodeObject reexportFields) . egReExports)
   , Optional "moduleOptionEscapes"       (SMap (arrOf (SString Nothing)))
       (omitEmpty egModuleOptionEscapes jStrArrMap)
+  , Optional "moduleEffectiveOptions"    (SMap (arrOf (SString Nothing)))
+      (omitEmpty egModuleEffectiveOptions jStrArrMap)
   , Optional "unsolvedModules"           (SMap (SRef "unsolvedModule"))
       (omitEmpty egUnsolvedModules unsolvedModulesJson)
   , Optional "definitionSubtermHashes"   (arrOf nats)             (fmap (jArray natArr) . egSubtermHashes)
@@ -426,6 +457,7 @@ renderSchema sd = case sd of
   SString Nothing   -> jobj [ ("type", jsString "string") ]
   SString (Just es) -> jobj [ ("type", jsString "string")
                             , ("enum", jarr (map jsString es)) ]
+  SBool             -> jobj [ ("type", jsString "boolean") ]
   SInteger Nothing  -> jobj [ ("type", jsString "integer") ]
   SInteger (Just m) -> jobj [ ("type", jsString "integer"), ("minimum", show m) ]
   SConstInt n       -> jobj [ ("const", show n) ]
@@ -500,9 +532,19 @@ argUsageProblems au = concat
     | or [ j <= i | (i, js) <- rq, j <- js ] ]
   , [ "binders key is not a reported position"
     | any (`notElem` (rm ++ auErasable au)) (map fst (auBinders au)) ]
+  , [ "occursInBody is not a subset of removable"
+    | any (`notElem` rm) (auOccursInBody au) ]
+  , [ "syntacticArity exceeds arity"
+    | auSyntacticArity au > auArity au ]
+    -- The rule a consumer is told to rely on: a position on the syntactic
+    -- spine is exactly one that can carry a 'binders' entry. If a key ever
+    -- appeared at or past 'syntacticArity', "absent entry = not on the
+    -- signature line" would silently stop holding.
+  , [ "binders key at or past syntacticArity"
+    | any (>= auSyntacticArity au) (map fst (auBinders au)) ]
   ]
   where
     rm = auRemovable au
     rq = auRemovableRequires au
     allIdx = rm ++ auErasable au ++ map fst rq ++ concatMap snd rq
-               ++ map fst (auBinders au)
+               ++ map fst (auBinders au) ++ auOccursInBody au

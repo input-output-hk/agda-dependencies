@@ -74,7 +74,7 @@ import Agda.TypeChecking.Monad.Base
   ( iImportedModules, miInterface, Interface
   , iScope, iModuleName, iTopLevelModuleName
   , iSignature, sigDefinitions, iFullHash
-  , iFilePragmaOptions
+  , iFilePragmaOptions, iOptionsUsed
   )
 -- 'pragmaStrings' + 'iFilePragmaOptions' live here on both 2.8 and 2.9
 -- (module has no export list) — no CPP for the file-OPTIONS scan.
@@ -97,10 +97,14 @@ import AgdaDeps.Deps
   , mkRef, nodeKeyOfQ, moduleKeyOfQ, nrSrcLoc
   , optionEscapes
   , unsolvedInterfaceLines, liveSilentMetaLines
-  , resetIgnoredEdges, contractIgnoredEdges
-  , resetMethodProviders, addInstanceMethodEdges
+  , contractIgnoredEdges
+  , addInstanceMethodEdges
   , IgnoredEdgeMap, readIgnoredEdges, mergeIgnoredEdges
-  , MethodProviderMap, readMethodProviders, mergeMethodProviders )
+  , MethodProviderMap, readMethodProviders, mergeMethodProviders
+  , UnsaturatedMap, readUnsaturatedRefs
+  , mergeUnsaturatedRefs, partiallyAppliedSet
+  , resetSideChannels
+  , ArgUsage(..), effectiveOptionFlags )
 import AgdaDeps.FragmentCache
   ( FragmentData(..)
   , optionsFingerprint, fragmentFileFor, readFragment, writeFragment
@@ -147,6 +151,7 @@ data ModuleEnv = ModuleEnv
   { namesInScope       :: Set QName
   , envIgnoredBefore   :: IgnoredEdgeMap
   , envProvidersBefore :: MethodProviderMap
+  , envUnsatBefore     :: UnsaturatedMap
   }
 
 -- | @--theme=NAME@ parser. Sets the four 'optColor*' slots; individual
@@ -261,8 +266,7 @@ backendWithSeed seed = Backend'
 -- @--incremental@ + @--keep-going@.
 preCompileAD :: Options -> TCM Options
 preCompileAD opts = do
-  resetIgnoredEdges
-  resetMethodProviders
+  resetSideChannels
   liftIO $ writeIORef recompiledRef False
   -- Compute the run's fragment fingerprint once (constant across modules).
   liftIO $ writeIORef optsFingerprintRef (optionsFingerprint opts)
@@ -334,6 +338,7 @@ moduleSetup opts isMain tlmn _ = do
       -- ignored helpers) and the entry-module capture postModuleAD would do.
       mergeIgnoredEdges (fragIgnored frag)
       mergeMethodProviders (fragProviders frag)
+      mergeUnsaturatedRefs (fragUnsaturated frag)
       case isMain of
         IsMain -> do
           iface <- curIF
@@ -349,7 +354,9 @@ moduleSetup opts isMain tlmn _ = do
       allNamesInScope <- nsInScope . allThingsInScope <$> liftTCM getCurrentScope
       ignoredBefore   <- readIgnoredEdges
       providersBefore <- readMethodProviders
-      return $ Recompile (ModuleEnv allNamesInScope ignoredBefore providersBefore)
+      unsatBefore     <- readUnsaturatedRefs
+      return $ Recompile
+        (ModuleEnv allNamesInScope ignoredBefore providersBefore unsatBefore)
 
 {-# NOINLINE mainModuleRef #-}
 mainModuleRef :: IORef (Maybe (TopLevelModuleName, [TopLevelModuleName]))
@@ -427,6 +434,7 @@ postModuleAD opts env isMain tlmn defs = do
     when cacheable $ do
       ignoredAll   <- readIgnoredEdges
       providersAll <- readMethodProviders
+      unsatAll     <- readUnsaturatedRefs
       -- This module's contributions = the delta since 'moduleSetup'
       -- snapshotted the side-channels. Delta, not name-prefix slice (see
       -- 'ModuleEnv').
@@ -439,10 +447,13 @@ postModuleAD opts env isMain tlmn defs = do
                             xs -> Just xs)
             providersAll
             (envProvidersBefore env)
+          -- Keyed by the referring def, so the key delta IS this module's
+          -- defs; a def only ever grows its own entry.
+          unsatFrag = M.difference unsatAll (envUnsatBefore env)
           path = fragmentFileFor (cacheDirFor opts) (prettyShow tlmn)
       fp <- curOptsFingerprint
       writeFragment path fp (iFullHash iface)
-        (FragmentData (catMaybes result) ignoredFrag providersFrag)
+        (FragmentData (catMaybes result) ignoredFrag providersFrag unsatFrag)
 
   return result
 
@@ -526,7 +537,19 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
   privRanges <- liftIO $
     fmap M.fromList $
       mapM (\fp -> (,) fp <$> findPrivateRanges fp) filesToScan
-  let defs0 = map (backfillAccess privRanges) defsWithInstances
+  -- Back-fill 'auPartiallyApplied', the one 'ArgUsage' field that is not a
+  -- property of its own definition: "referenced somewhere with fewer
+  -- arguments than it takes" is a fact about the rest of the corpus, so
+  -- 'argUsageOf' cannot know it and leaves it 'False'. Done HERE, with the
+  -- other whole-corpus rollups, rather than at the wire boundary — so every
+  -- renderer and every invariant check sees an internally consistent record
+  -- instead of one patched behind the emitter's back.
+  partiallyApplied <- partiallyAppliedSet <$> readUnsaturatedRefs
+  let markPartial d = case _argUsage d of
+        Just au | S.member (_name d) partiallyApplied ->
+          d { _argUsage = Just au { auPartiallyApplied = True } }
+        _ -> d
+      defs0 = map (markPartial . backfillAccess privRanges) defsWithInstances
 
   let allQNames0 :: [NodeRef]
       allQNames0 = collectAllQNames defs0
@@ -629,26 +652,41 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
            | ((h, t), ns) <- M.toAscList grouped
            ]
 
-      -- File-level @{-# OPTIONS #-}@ soundness escapes per visited module.
-      -- Read 'iFilePragmaOptions' (the file's OWN OPTIONS), NOT
-      -- 'iOptionsUsed' (folds in CLI + library opts, would misattribute
-      -- e.g. @--lenient-imports@ to every module). 'optionEscapes' keeps
-      -- only safety-relevant flags; 'keep' applies the
-      -- @--exclude@/@--no-externals@ filter; 'sortOn fst' orders the
-      -- hash-keyed survivors; 'not (null esc)' drops escape-free modules.
-      -- Per-block @NO_POSITIVITY_CHECK@ etc. are declaration pragmas, not
-      -- OPTIONS, so never appear here.
-      moduleOptionEscapes :: [(String, [String])]
-      moduleOptionEscapes = sortOn fst
-        [ (m, esc)
+      -- Per-module flag rollups. One traversal shape for both: the module
+      -- naming, the @--exclude@/@--no-externals@ 'keep' filter, the ordering
+      -- of the hash-keyed survivors and the drop-empty-rows rule are stated
+      -- once, so a third such field cannot diverge from these two on any of
+      -- them. Only the extractor differs — which puts the two deliberately
+      -- different SOURCES side by side, one line each.
+      moduleFlagsBy :: (Interface -> [String]) -> [(String, [String])]
+      moduleFlagsBy extract = sortOn fst
+        [ (m, flags)
         | mi <- M.elems visited
         , let iface = miInterface mi
               m     = prettyShow (iTopLevelModuleName iface)
         , keep m
-        , let esc = optionEscapes
-                      (concatMap pragmaStrings (iFilePragmaOptions iface))
-        , not (null esc)
+        , let flags = extract iface
+        , not (null flags)
         ]
+
+      -- File-level @{-# OPTIONS #-}@ soundness escapes per visited module.
+      -- 'iFilePragmaOptions' (the file's OWN OPTIONS), NOT 'iOptionsUsed'
+      -- (folds in CLI + library opts, would misattribute e.g.
+      -- @--lenient-imports@ to every module). 'optionEscapes' keeps only
+      -- safety-relevant flags. Per-block @NO_POSITIVITY_CHECK@ etc. are
+      -- declaration pragmas, not OPTIONS, so never appear here.
+      moduleOptionEscapes :: [(String, [String])]
+      moduleOptionEscapes =
+        moduleFlagsBy (optionEscapes . concatMap pragmaStrings
+                                     . iFilePragmaOptions)
+
+      -- The actionability-relevant options actually IN FORCE. 'iOptionsUsed',
+      -- the opposite source to 'moduleOptionEscapes' and deliberately so:
+      -- @--erasure@ is almost always set in the @.agda-lib@ @flags:@ or on
+      -- the command line, and a consumer needs to know whether the @\@0@ its
+      -- `erasable` verdicts suggest is even legal here.
+      moduleEffectiveOptions :: [(String, [String])]
+      moduleEffectiveOptions = moduleFlagsBy (effectiveOptionFlags . iOptionsUsed)
 
   let precomputedImportEdges =
         [ (s, t)
@@ -736,6 +774,7 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
         , giExternalsSummary = externalsSummary
         , giPackedAnalytical = False
         , giModuleOptionEscapes = moduleOptionEscapes
+        , giModuleEffectiveOptions = moduleEffectiveOptions
         , giUnsolvedModules  = unsolvedModules
         }
 

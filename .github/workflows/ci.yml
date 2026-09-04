@@ -188,11 +188,15 @@ jobs:
         # `binders` is shifted with the verdict it annotates, so the same
         # assertion pins the names too: the parent's binder IS named (`n`,
         # visible in `type`) while the helper's own is not, so an unshifted
-        # read would show {"hiding": "explicit", "name": "n"} here.
+        # read would show {"hiding": "explicit", "name": "n"} here. The
+        # binder's `type` comes from --with-signatures and is rendered in
+        # the context of the binders before it, which the partial pass's
+        # rebuilt import state has to supply too.
         helper = next(d for n, d in defs.items() if n.startswith("Good.helper@"))
         assert helper.get("argUsage") == {
             "removable": [0], "erasable": [], "arity": 1,
-            "binders": {"0": {"hiding": "explicit"}},
+            "binders": {"0": {"hiding": "explicit",
+                              "type": "Agda.Builtin.Nat.Nat"}},
         }, f"section telescope lost in the partial pass: {helper.get('argUsage')}"
         print("keep-going fixture OK")
         EOF
@@ -228,6 +232,34 @@ jobs:
         markers = [d for n, d in defs.items() if "unsolved#meta." in n]
         assert len(markers) == 1 and markers[0].get("unsolvedMetas") == 1, markers
         print("unsolved-metas fixture OK")
+        EOF
+
+    - name: effective options are reported per module (--erasure)
+      # `moduleEffectiveOptions` answers "can the advice in this module's
+      # argUsage.erasable verdicts actually be taken": without --erasure,
+      # `@0` is [AttributeKindNotEnabled] and every one of them is
+      # un-appliable. It is read from the interface's EFFECTIVE options
+      # (iOptionsUsed), not the file's own OPTIONS tokens, precisely so a
+      # flag set on the command line or in the .agda-lib is seen — which is
+      # what this step exercises. Run on the main corpus with the flag
+      # added, so the committed golden (no --erasure) stays the no-flag
+      # baseline and the field's absence there is itself an assertion.
+      run: |
+        rm -rf test/*.agdai test/_build
+        cabal run -v0 agda-deps -- --erasure --format=json \
+          --json-mode=expanded -i test/ -o ci-out/erasure test/Test.agda
+        python3 - <<'EOF'
+        import json
+        on = json.load(open("ci-out/erasure/deps.json"))
+        off = json.load(open("ci-out/expanded/deps.json"))
+        meo = on.get("moduleEffectiveOptions")
+        assert meo, "moduleEffectiveOptions missing under --erasure"
+        assert meo.get("ArgUsage") == ["--erasure"], meo.get("ArgUsage")
+        # Every module the graph knows must be answered, not just some.
+        assert set(meo) >= {"Test", "ArgUsage", "Nat"}, sorted(meo)
+        # …and the field must be OMITTED, not empty, without the flag.
+        assert "moduleEffectiveOptions" not in off, "emitted with no flag"
+        print("effective-options fixture OK")
         EOF
 
     - name: match-constant probe (unshipped analysis) still behaves

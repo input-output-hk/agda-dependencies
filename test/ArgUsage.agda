@@ -99,6 +99,16 @@ module Section (k : Nat) where
   named : (m : Nat) → (p : Nat) → Nat
   named _ p = k + p
 
+-- A section prefix whose binder has a DIFFERENT type from the definition's
+-- own. Every other section fixture here takes a `Nat` parameter and reports a
+-- `Nat` binder, so an off-by-one-telescope error in the rendered
+-- `binders[].type` would produce byte-identical output; this one cannot.
+-- Expect removable [0] with type "Nat" -- the own binder -- never "Idx".
+module SecTyped (i : Idx) where
+
+  typed : Nat → Nat → Nat
+  typed _ b = b
+
 -- A `where` helper that wastes ONLY its parent's arguments and uses every
 -- binder of its own. After the section prefix is dropped nothing is left,
 -- so `wasteful`'s helper must emit NO argUsage key.
@@ -205,3 +215,66 @@ relAtIrrelevantPosition n p = wrap
 -- not blanket-reject irrelevance. Expect removable [1].
 irrUnmentioned : (n : Nat) → .(p : Nat) → Nat
 irrUnmentioned n _ = n
+
+-- ORPHANED HIDDEN BINDERS: the second half of the deletability guard
+-- (`Deps.orphanedHidden`). `deletableRemovable` asks whether the removed
+-- position's OWN variable survives; that is not the whole question. A hidden
+-- binder is supplied by inference, and inference needs somewhere to read it
+-- from. Reported by the consumer repo after an accepted `removable` verdict
+-- broke a build.
+
+-- The pure inference driver: the value argument is genuinely unused and Agda
+-- is right that the meaning does not depend on it, but `{A}` occurs NOWHERE
+-- ELSE, so deleting it makes `{A}` unsolvable at every call site. The whole
+-- point of the definition is to infer `A` from the argument's type. Must emit
+-- NO argUsage key -- position 1 was the only finding.
+typeOf : {A : Set} → A → Set
+typeOf {A = A} _ = A
+
+-- Control: same shape, but `{A}` is ALSO readable from a surviving argument,
+-- so the removal leaves it solvable and must still be reported.
+-- Expect removable [1] (and nothing about `{A}` or the kept `Box A`).
+solvableElsewhere : {A : Set} → A → Box A → Nat
+solvableElsewhere _ b = unusedTag b
+
+-- Control: the same shape with an EXPLICIT leading binder. Nothing infers it,
+-- so nothing can be orphaned -- call sites keep passing it, or drop it along
+-- with the other. Expect the ordinary joint verdict: removable [0,1] with
+-- removableRequires {"0": [1]}, exactly as if the guard did not exist.
+explicitStaysPassed : (A : Set) → A → Nat
+explicitStaysPassed _ _ = zero
+
+-- PARTIAL APPLICATION (`argUsage.partiallyApplied`). `konst` has a genuinely
+-- dead first argument, but it is referenced below as a VALUE -- so its arity
+-- is its interface and the "removal" would break the call. The verdict is
+-- still emitted; the flag is what lets a consumer withhold it.
+konst : Nat → Nat → Nat
+konst _ b = b
+
+applyTo : (Nat → Nat) → Nat
+applyTo f = f zero
+
+-- The unsaturated reference: `konst zero` passes 1 of 2 arguments.
+usesKonstPartially : Nat
+usesKonstPartially = applyTo (konst zero)
+
+-- Control: same dead argument, always fully applied, so NO
+-- partiallyApplied key. Expect removable [0] and nothing else.
+konstSaturated : Nat → Nat → Nat
+konstSaturated _ b = b
+
+usesKonstSaturated : Nat
+usesKonstSaturated = konstSaturated zero zero
+
+-- INSTANCE RESOLUTION (`argUsage.occursInBody`). `viaInstance` never mentions
+-- `d` in its source body -- instance search does, resolving the callee's
+-- `⦃ Def Nat ⦄` from this very binder. The elaborated body therefore holds
+-- the binder's variable, while the verdict stays `Unused` because the callee
+-- discards it. Deleting the binder breaks the call, so the position must be
+-- reported in occursInBody as well as removable: the pair
+-- (occursInBody, binders.hiding = instance) is what identifies this class.
+useless2 : ⦃ d : Def Nat ⦄ → Nat → Nat
+useless2 b = b
+
+viaInstance : ⦃ d : Def Nat ⦄ → Nat → Nat
+viaInstance b = useless2 b
