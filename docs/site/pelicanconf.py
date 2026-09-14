@@ -4,7 +4,7 @@
 The site is built from the project's own Markdown (README, Examples, Changelog,
 …), staged into ``content/`` by ``stage.py``, and rendered with the ``paper``
 theme under ``themes/paper``. The page-level content lives here as plain data
-(``STATES`` / ``FORMATS`` / ``MODES`` / ``VIEW_HIGHLIGHTS`` / ``DOC_PAGES``);
+(``STATES`` / ``FORMATS`` / ``MODES`` / ``CONSUMERS`` / ``DOC_PAGES``);
 the templates iterate over it.
 
 Every ALL-CAPS name in this file is copied into the Jinja template context by
@@ -21,7 +21,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))   # docs/site
 SITENAME = "agda-deps"
 SITE_TAGLINE = "An Agda dependency graph generator."
 GITHUB_URL = "https://github.com/input-output-hk/agda-dependencies"
-GALLERY = "views/index.html"
+PLOTTER_URL = "https://github.com/input-output-hk/agda-plotter"
+EXPLORER_URL = "https://github.com/input-output-hk/agda-graph-explorer"
 
 SITEURL = ""
 PATH = os.path.join(_HERE, "content")
@@ -32,12 +33,12 @@ TIMEZONE = "UTC"
 DEFAULT_LANG = "en"
 
 # --- content layout --------------------------------------------------------
-# Pages come from content/pages; the view gallery is copied verbatim as static
-# files; there are no blog articles, so point ARTICLE_PATHS at an empty dir.
+# Pages come from content/pages; there are no blog articles, so point
+# ARTICLE_PATHS at an empty dir and stage no static assets of our own.
 
 PAGE_PATHS = ["pages"]
 ARTICLE_PATHS = ["articles"]          # intentionally empty (no blog)
-STATIC_PATHS = ["views"]
+STATIC_PATHS = []
 PAGE_URL = "{slug}.html"
 PAGE_SAVE_AS = "{slug}.html"
 
@@ -97,7 +98,6 @@ TOP_NAV = [
     ("index.html", "Home"),
     ("guide.html", "Guide"),
     ("examples.html", "Examples"),
-    (GALLERY, "Views ↗"),
     # ("changelog.html", "Changelog"),
     (GITHUB_URL, "GitHub ↗"),
 ]
@@ -115,36 +115,31 @@ STATES = [
 FORMATS = [
     ("DOT", "A <code>.dot</code> graph you can pipe into Graphviz "
      "(<code>dot -Tsvg</code>) or any DOT-aware tool. The default format."),
-    ("HTML", "A self-contained page in one of 14 views — from module DAGs to "
-     "source-linked reading order. <code>--lazy</code> splits files for very "
-     "large corpora."),
     ("JSON", "A stable artifact for downstream tooling: <code>packed</code> "
      "(base64 CSR) or <code>expanded</code> (arrays of records) &mdash; a "
      "versioned wire contract consumers can pin to."),
+]
+
+# (name, url, description) — the tools that read the JSON. Neither links Agda.
+CONSUMERS = [
+    ("agda-plotter", PLOTTER_URL,
+     "Renders the graph as an interactive HTML page — 14 views, from module "
+     "DAGs to definition-level browsing. <code>--lazy</code> keeps the page "
+     "small on very large corpora."),
+    ("agda-graph-explorer", EXPLORER_URL,
+     "Unused-import and dead-code analysis, 18 graph-level analyses, and an "
+     "MCP server that answers point queries for coding agents."),
 ]
 
 # (flag, description)
 MODES = [
     ("--keep-going", "Survive type-check errors; the failing module is tagged <code>F</code>."),
     ("--skip-agda", "Module-level graph straight from a source scan — no elaboration, milliseconds at any scale."),
-    ("--with-source", "Attach the source snippet to every definition (with <code>--lazy</code>); powers the reading / IDE views."),
-    ("--lazy", "Split HTML across files so 100k-node projects stay responsive (needs an HTTP server)."),
+    ("--lazy", "Split the JSON into a module skeleton plus per-module detail files, so 100k-node projects stay responsive."),
     ("--no-externals", "Drop everything outside the project root — stdlib and all — from the graph."),
     ("--resolve-deps", "Pin Agda's search path to the <code>.agda-lib</code> <code>depend:</code> closure."),
     ("--with-term-hashes", "Emit a canonicalised <code>Word64</code> fingerprint per definition subterm into the JSON."),
     ("--theme / --config", "Colour presets and a kebab-case YAML mirror of every CLI flag."),
-]
-
-# (slug, name, description) — a curated slice of the view gallery.
-VIEW_HIGHLIGHTS = [
-    ("module-dag-pods", "Module DAG pods", "Default. Expandable module pods, dagre layout."),
-    ("cytoscape", "Cytoscape compound", "Force-directed modules-as-boxes with a rich sidebar."),
-    ("sigma", "Sigma (WebGL)", "WebGL renderer — the largest-scale option."),
-    ("progress-dashboard", "Progress dashboard", "KPI board: completeness %, hole debt, hot modules."),
-    ("critical-path-holes", "Critical-path holes", "Kanban of proof obligations upstream of the goal."),
-    ("sunburst-hierarchy", "Sunburst hierarchy", "D3 sunburst over the dotted-module tree."),
-    ("source-centric", "Source-centric", "Code-first reading view with a minimap."),
-    ("cartographic-atlas", "Cartographic atlas", "A topographic map of the whole project."),
 ]
 
 # Markdown source -> rendered page. Order defines the footer + "Documentation"
@@ -152,24 +147,26 @@ VIEW_HIGHLIGHTS = [
 DOC_PAGES = [
     dict(src="README.md", out="guide.html", slug="guide", nav="Guide",
          title="User Guide",
-         blurb="Install, flags, views, YAML config, and the v2 JSON schema."),
+         blurb="Install, flags, YAML config, and the v2 JSON schema."),
     dict(src="Examples.md", out="examples.html", slug="examples", nav="Examples",
          title="Examples",
          blurb="One runnable command per feature."),
     dict(src="TODO.md", out="roadmap.html", slug="roadmap", nav="Roadmap",
          title="Roadmap",
          blurb="Forward-looking work that's actively planned."),
-]
-
-# Staged only with `stage.py --internal`.
-INTERNAL_PAGES = [
-    dict(src="CLAUDE.md", out="internals.html", slug="internals", nav="Internals",
-         title="Architecture & internals",
-         blurb="Module map, backend pipeline, and hard-won gotchas."),
     dict(src="Backlog.md", out="backlog.html", slug="backlog", nav="Backlog",
          title="Backlog",
          blurb="Ideas parked for later, plus approaches consciously set aside."),
     dict(src="Changelog.md", out="changelog.html", slug="changelog", nav="Changelog",
          title="Changelog",
          blurb="Everything shipped, newest first."),
+]
+
+# Staged only with `stage.py --internal`. These are not published: a plain
+# `make html` must still rebuild every page under docs/, or a committed page
+# goes stale while the rest of the site moves on.
+INTERNAL_PAGES = [
+    dict(src="AGENTS.md", out="internals.html", slug="internals", nav="Internals",
+         title="Contributor guide",
+         blurb="Repository map, validation workflow, and change invariants."),
 ]

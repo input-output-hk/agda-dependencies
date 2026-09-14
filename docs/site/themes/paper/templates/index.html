@@ -17,11 +17,12 @@
     <h2>Getting a graph</h2>
     <pre><span class="c"># install once</span>
 cabal install exe:agda-deps</pre>
-    <pre><span class="c"># emit an interactive HTML view</span>
-agda-deps --format=html --view=module-dag-pods \
-          --with-source -i test/ -o out/ test/Test.agda</pre>
+    <pre><span class="c"># emit the JSON graph</span>
+agda-deps --format=json -i test/ -o out/ test/Test.agda</pre>
+    <pre><span class="c"># render it as an interactive page</span>
+agda-plotter --view=module-dag-pods -o out/</pre>
     <p class="fine">With no <code>--format</code>, the output is Graphviz DOT; a
-      <code>.html</code> or <code>.json</code> path after <code>-o</code> infers
+      <code>.json</code> or <code>.dot</code> path after <code>-o</code> infers
       the format.</p>
   </section>
 
@@ -35,7 +36,7 @@ agda-deps --format=html --view=module-dag-pods \
   </section>
 
   <section>
-    <h2>Three outputs</h2>
+    <h2>Two outputs</h2>
     <dl>
     {% for name, desc in FORMATS %}
       <div class="item"><dt>{{ name }}</dt><dd>{{ desc | safe }}</dd></div>
@@ -54,12 +55,12 @@ agda-deps --format=html --view=module-dag-pods \
   </section>
 
   <section>
-    <h2>The views</h2>
-    <p class="fine">Several HTML views, each answering a different question.
-      A slice below &mdash; or the <a href="{{ GALLERY }}">full gallery</a>.</p>
+    <h2>What reads the graph</h2>
+    <p class="fine">The JSON is the product. These read it, and neither links
+      Agda &mdash; so both build in minutes.</p>
     <div class="rows">
-    {% for slug, name, desc in VIEW_HIGHLIGHTS %}
-      <a class="linkrow" href="views/{{ slug }}/deps.html"><span class="rk">{{ name }}<span class="slug">--view={{ slug }}</span></span><span class="rd">{{ desc | safe }}</span></a>
+    {% for name, url, desc in CONSUMERS %}
+      <a class="linkrow" href="{{ url }}"><span class="rk">{{ name }} &#8599;</span><span class="rd">{{ desc | safe }}</span></a>
     {% endfor %}
     </div>
   </section>

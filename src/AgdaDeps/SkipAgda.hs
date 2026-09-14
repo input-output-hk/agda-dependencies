@@ -6,11 +6,12 @@
 -- into the v2 graph.json schema and emits DOT \/ HTML \/ JSON.
 --
 -- Output covers module-level edges and names only — no
--- definition-level data, no state classification, no snippets.
+-- definition-level data and no state classification.
 -- \"External\" classification is best-effort: a module is external if
 -- its scanned source file lives outside the working directory, or if
--- it appears only as an import target with no source file. Module-DAG
--- views render normally; definition-level views render an empty canvas.
+-- it appears only as an import target with no source file. A graph from
+-- here drives @agda-plotter@'s module-level views normally; its
+-- definition-level views render an empty canvas.
 --
 -- Key functions: 'wantsSkipAgda', 'runSkipAgda'.
 module AgdaDeps.SkipAgda
@@ -18,7 +19,7 @@ module AgdaDeps.SkipAgda
   , runSkipAgda
   ) where
 
-import Control.Monad ( foldM, when )
+import Control.Monad ( foldM )
 import Data.List ( find, isPrefixOf )
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -30,23 +31,19 @@ import System.Exit ( exitFailure )
 import System.FilePath ( (</>), normalise )
 import System.IO ( hPutStrLn, stderr )
 
-import qualified Codec.Compression.GZip as GZip
-import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Lazy.Char8 as BLC
-
 import Agda.Compiler.Backend ( commandLineFlags )
 import Agda.Interaction.Options ( runOptM )
 import Agda.Utils.GetOpt ( ArgOrder(Permute), getOpt' )
 
-import AgdaDeps.Backend ( backend )
+import AgdaDeps.Backend
+  ( backend, checkOutputFlags, writeLazyTree, noSerialiseCtx )
 import AgdaDeps.Logging ( info )
 import AgdaDeps.Backend.GraphJson
   ( GraphInput(..), GraphJsonOutput(..)
   , buildGraphJson, buildExpandedJson )
-import AgdaDeps.Backend.Html ( renderHtmlFromInput )
 import AgdaDeps.Options
   ( Options(..), OutputFormat(..), JsonMode(..)
-  , isExcludedModule )
+  , lazyTreeOutput, isExcludedModule )
 import AgdaDeps.Precompute ( PrecomputedGraph(..) )
 import AgdaDeps.Util       ( jsString, looksLikeAgdaSource )
 
@@ -69,6 +66,11 @@ runSkipAgda seed precomputed argv = do
       hPutStrLn stderr $ "agda-deps: --skip-agda: " ++ err
       exitFailure
     Right v -> return v
+
+  -- Options resolved, no work done. This path never reaches
+  -- 'preCompileAD', so it runs the shared check itself; a local copy
+  -- would be free to accept a combination the Agda path rejects.
+  checkOutputFlags opts
 
   let entrySource  = find looksLikeAgdaSource positionals
       excludes     = optExcludeModules opts
@@ -151,9 +153,7 @@ emit opts moduleFileMap entryModule externals imports sourceFiles allModules = d
         , giExternalModules = externals
         , giFailedModules   = S.empty
         , giPositions       = M.empty
-        , giWithSource      = False
-        , giSnippetModules  = []
-        , giLazy            = False
+        , giLazy            = lazyTreeOutput opts
         , giExtraModules    = allModules
         , giReExports       = []
         , giExternalsSummary = Nothing
@@ -170,33 +170,32 @@ emit opts moduleFileMap entryModule externals imports sourceFiles allModules = d
         }
       gjo = buildGraphJson gi
 
-  case optFormat opts of
-    FmtDot ->
+  -- Same scrutiny as 'Backend.postCompileAD'. '--lazy' without '-o' was
+  -- already fatal in 'checkOutputFlags', above, so the lazy arm can take
+  -- the directory as given.
+  case (optFormat opts, lazyTreeOutput opts, optOutDir opts) of
+    (FmtDot, _, mDir) ->
       let dotText = renderModuleDot allModules externals imports entryModule
-      in case optOutDir opts of
+      in case mDir of
            Just dir -> TL.writeFile (dir </> "deps.dot") dotText
            Nothing  -> TL.putStrLn dotText
 
-    FmtJson ->
+    -- The shared writer, with the cache disabled: nothing is
+    -- type-checked here, so there is nothing to cache against and every
+    -- file is written. Sharing it keeps the gz convention and the
+    -- modules/ layout single-owner.
+    (FmtJson, True, Just dir) -> writeLazyTree dir opts noSerialiseCtx gjo
+
+    (FmtJson, _, mDir) ->
       let jsonText = case optJsonMode opts of
             JsonPacked   -> gjoGraphJson gjo
             JsonExpanded -> buildExpandedJson gi
-      in case optOutDir opts of
+      in case mDir of
+           -- Plain 'writeFile', not 'writeJsonMaybeGz': --gzip documents
+           -- itself as affecting the lazy path's files only, and the
+           -- full pipeline's monolithic deps.json is not gzipped either.
            Just dir -> writeFile (dir </> "deps.json") jsonText
-           Nothing  -> putStrLn   jsonText
-
-    FmtHtml -> case optOutDir opts of
-      Nothing -> do
-        hPutStrLn stderr "agda-deps: --skip-agda --format=html requires -o/--out-dir."
-        exitFailure
-      Just dir -> do
-        -- Reuse the full pipeline's view templates. Def-level views
-        -- render empty pods; module-DAG views render normally.
-        let html = renderHtmlFromInput (optView opts) (optColors opts)
-                                       (optGzip opts) (optAgdaHtmlDir opts) gi
-        writeFile (dir </> "deps.html") html
-        when (optGzip opts) $
-          BL.writeFile (dir </> "deps.html.gz") (GZip.compress (BLC.pack html))
+           Nothing  -> putStrLn jsonText
 
 -- | DOT renderer for the module-only graph: one node per module, one
 -- edge per import. The entry module gets a red border, externals

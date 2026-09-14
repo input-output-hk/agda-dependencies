@@ -12,16 +12,12 @@ module AgdaDeps.Options
   , jsonModeSlug
   , allJsonModes
 
-    -- * HTML view
-  , View(..)
-  , viewSlug
-  , allViews
-
     -- * Slug tables
   , parseSlug
 
     -- * Definition state
   , DefState(..)
+  , defStateCode
   , colorFor
 
     -- * Colour palette
@@ -31,18 +27,14 @@ module AgdaDeps.Options
     -- * Options
   , Options(..)
   , defaultOptions
+  , lazyTreeOutput
 
     -- * CLI option parsers
   , outdirOpt
   , formatOpt
-  , viewOpt
-  , withSourceOpt
-  , agdaHtmlDirOpt
   , lazyOpt
   , colorOpt
   , excludeOpt
-  , noSourceForOpt
-  , maxSnippetBytesOpt
   , gzipOpt
   , keepGoingOpt
   , skipAgdaOpt
@@ -68,11 +60,13 @@ import Control.Monad.Except ( MonadError(throwError) )
 import Data.Binary ( Binary(..) )
 import qualified Data.Binary as B
 import Data.List ( intercalate, isPrefixOf )
+import Data.Word ( Word8 )
 
 import AgdaDeps.Util ( isValidHexColor )
 
--- | DOT, HTML, or JSON output.
-data OutputFormat = FmtDot | FmtHtml | FmtJson
+-- | DOT or JSON output. HTML rendering lives in @agda-plotter@, which
+-- reads the @graph.json@ this emits.
+data OutputFormat = FmtDot | FmtJson
   deriving (Show, Eq)
 
 -- | How @--format=json@ emits the v2 graph. Packed: CSR adjacency +
@@ -87,13 +81,11 @@ instance NFData JsonMode where
 
 instance NFData OutputFormat where
   rnf FmtDot  = ()
-  rnf FmtHtml = ()
   rnf FmtJson = ()
 
 -- | Canonical CLI slug for an 'OutputFormat'.
 formatSlug :: OutputFormat -> String
 formatSlug FmtDot  = "dot"
-formatSlug FmtHtml = "html"
 formatSlug FmtJson = "json"
 
 -- | Every 'OutputFormat', in the order accepted values are listed to the
@@ -101,7 +93,7 @@ formatSlug FmtJson = "json"
 -- @--format@ \/ @format:@ — CLI parser, YAML parser, and @doctor@ all
 -- derive their accepted set from it.
 allFormats :: [OutputFormat]
-allFormats = [FmtDot, FmtHtml, FmtJson]
+allFormats = [FmtDot, FmtJson]
 
 -- | Canonical CLI slug for a 'JsonMode'.
 jsonModeSlug :: JsonMode -> String
@@ -122,73 +114,6 @@ parseSlug what slug vals s = case [ v | v <- vals, slug v == s ] of
   []    -> Left $ "Unknown " ++ what ++ " value: " ++ show s
                ++ ". Expected one of: " ++ intercalate ", " (map slug vals) ++ "."
 
--- | HTML view variant. Selects which JS app the @--format=html@ output
--- ships. All views consume the same v2 @graph.json@ payload built by
--- "AgdaDeps.Backend.GraphJson"; only the template differs.
-data View
-  = ViewCytoscape       -- ^ Original cytoscape-compound-graph viewer.
-  | ViewIdeThreePane    -- ^ Concept 01: file tree + focused subgraph + source.
-  | ViewModuleDagPods   -- ^ Concept 02: top-down DAG of expandable module pods.
-  | ViewSourceCentric   -- ^ Concept 06: code-first with minimap.
-  | ViewNotionDoc       -- ^ Concept 09: scrollable cross-linked document.
-  | ViewWikiBacklinks   -- ^ Concept 10: single-page focus with depends-on / used-by.
-  | ViewSigma           -- ^ WebGL module-level renderer via sigma.js + graphology.
-  | ViewBigModuleDagPods
-    -- ^ Scaling variant of 'ViewModuleDagPods': pre-computed module-DAG
-    -- layout (Haskell-side, see 'buildModuleDagLayout') + viewport
-    -- virtualisation in the browser. Targets ~100k modules.
-  | ViewCriticalPathHoles      -- ^ Concept 12: kanban of proof obligations.
-  | ViewProgressDashboard      -- ^ Concept 14: Grafana-style KPI board.
-  | ViewCartographicAtlas      -- ^ Concept 15: topographic map metaphor.
-  | ViewSunburstHierarchy      -- ^ Concept 16: D3 sunburst over dotted-module tree.
-  | ViewReadingOrderNarrative  -- ^ Concept 17: textbook-style topo-ordered scroll.
-  | ViewPixelGridOverview      -- ^ Concept 20: every def is a colored tile.
-  deriving (Show, Eq)
-
-instance NFData View where
-  rnf ViewCytoscape              = ()
-  rnf ViewIdeThreePane           = ()
-  rnf ViewModuleDagPods          = ()
-  rnf ViewSourceCentric          = ()
-  rnf ViewNotionDoc              = ()
-  rnf ViewWikiBacklinks          = ()
-  rnf ViewSigma                  = ()
-  rnf ViewBigModuleDagPods       = ()
-  rnf ViewCriticalPathHoles      = ()
-  rnf ViewProgressDashboard      = ()
-  rnf ViewCartographicAtlas      = ()
-  rnf ViewSunburstHierarchy      = ()
-  rnf ViewReadingOrderNarrative  = ()
-  rnf ViewPixelGridOverview      = ()
-
--- | Every 'View', in the order accepted values are listed to the user.
--- See 'allFormats'.
-allViews :: [View]
-allViews =
-  [ ViewCytoscape, ViewIdeThreePane, ViewModuleDagPods, ViewSourceCentric
-  , ViewNotionDoc, ViewWikiBacklinks, ViewSigma, ViewBigModuleDagPods
-  , ViewCriticalPathHoles, ViewProgressDashboard, ViewCartographicAtlas
-  , ViewSunburstHierarchy, ViewReadingOrderNarrative, ViewPixelGridOverview
-  ]
-
--- | Canonical CLI slug for a 'View'.
-viewSlug :: View -> String
-viewSlug ViewCytoscape        = "cytoscape"
-viewSlug ViewIdeThreePane     = "ide-three-pane"
-viewSlug ViewModuleDagPods    = "module-dag-pods"
-viewSlug ViewSourceCentric    = "source-centric"
-viewSlug ViewNotionDoc        = "notion-doc"
-viewSlug ViewWikiBacklinks    = "wiki-backlinks"
-viewSlug ViewSigma            = "sigma"
-viewSlug ViewBigModuleDagPods       = "big-module-dag-pods"
-viewSlug ViewCriticalPathHoles      = "critical-path-holes"
-viewSlug ViewProgressDashboard      = "progress-dashboard"
-viewSlug ViewCartographicAtlas      = "cartographic-atlas"
-viewSlug ViewSunburstHierarchy      = "sunburst-hierarchy"
-viewSlug ViewReadingOrderNarrative  = "reading-order-narrative"
-viewSlug ViewPixelGridOverview      = "pixel-grid-overview"
-
-
 -- | The state of a definition for the purpose of node colouring.
 --
 -- 'Failed' is synthetic: there is no real 'Definition' behind it. It
@@ -203,12 +128,16 @@ instance NFData DefState where
   rnf Hole      = ()
   rnf Failed    = ()
 
+-- | Stable numeric code shared by packed output and the fragment cache.
+defStateCode :: DefState -> Word8
+defStateCode Defined   = 0
+defStateCode Postulate = 1
+defStateCode Hole      = 2
+defStateCode Failed    = 3
+
 -- | Tagged 'Word8' encoding for the @--incremental@ fragment cache.
 instance Binary DefState where
-  put Defined   = B.putWord8 0
-  put Postulate = B.putWord8 1
-  put Hole      = B.putWord8 2
-  put Failed    = B.putWord8 3
+  put = B.putWord8 . defStateCode
   get = B.getWord8 >>= \w -> case w of
     0 -> pure Defined
     1 -> pure Postulate
@@ -246,13 +175,13 @@ colorFor p Failed    = colorFailed    p
 data Options = Options
   { optOutDir     :: Maybe FilePath
   , optFormat     :: OutputFormat
-  , optView       :: View
   , optColors     :: ColorPalette
-  , optWithSource :: Bool
   , optLazy       :: Bool
+    -- ^ @--lazy@: split @--format=json@ output into a module-level
+    -- @graph.json@ plus per-module @modules\/\<Module\>.json@ detail
+    -- files, instead of one monolithic @deps.json@. Consumed by
+    -- @agda-plotter@'s page shell, which fetches them on demand.
   , optExcludeModules :: [String]
-  , optNoSourceFor :: [String]
-  , optMaxSnippetBytes :: Maybe Int
   , optGzip :: Bool
   , optKeepGoing :: Bool
   , optSkipAgda :: Bool
@@ -292,34 +221,25 @@ data Options = Options
     -- (kind\/line\/access\/type\/subterm hashes) to the packed @defs@
     -- object, so packed carries what expanded does. Off by default
     -- (packed stays byte-identical); only affects @--json-mode=packed@.
-  , optAgdaHtmlDir    :: Maybe FilePath
-    -- ^ @--agda-html-dir=DIR@: @agda --html@ pages location, resolved by
-    -- the browser relative to the generated HTML. When 'Just', views add
-    -- an "Open source" link to @DIR\/\<Module.Name\>.html@ (the
-    -- @AGDA_HTML_BASE@ prelude var). 'Nothing' disables it.
   }
 
 instance NFData Options where
-  rnf (Options d f v c s l e ns ms g k sa q ne jm li wth mtd wsig nsig simp inc cd pa ahd) =
-        rnf d  `seq` rnf f  `seq` rnf v  `seq` rnf c  `seq` rnf s
-    `seq` rnf l  `seq` rnf e  `seq` rnf ns `seq` rnf ms
+  rnf (Options d f c l e g k sa q ne jm li wth mtd wsig nsig simp inc cd pa) =
+        rnf d  `seq` rnf f  `seq` rnf c
+    `seq` rnf l  `seq` rnf e
     `seq` rnf g  `seq` rnf k  `seq` rnf sa
     `seq` rnf q  `seq` rnf ne `seq` rnf jm `seq` rnf li
     `seq` rnf wth `seq` rnf mtd `seq` rnf wsig
-    `seq` rnf nsig `seq` rnf simp `seq` rnf inc `seq` rnf cd `seq` rnf pa `seq` rnf ahd
+    `seq` rnf nsig `seq` rnf simp `seq` rnf inc `seq` rnf cd `seq` rnf pa
     `seq` ()
 
 defaultOptions :: Options
 defaultOptions = Options
   { optOutDir          = Nothing
   , optFormat          = FmtDot
-  , optView            = ViewModuleDagPods
   , optColors          = defaultPalette
-  , optWithSource      = False
   , optLazy            = False
   , optExcludeModules  = []
-  , optNoSourceFor     = []
-  , optMaxSnippetBytes = Just 1000000
   , optGzip            = False
   , optKeepGoing       = False
   , optSkipAgda        = False
@@ -335,8 +255,19 @@ defaultOptions = Options
   , optIncremental     = False
   , optCacheDir        = Nothing
   , optPackedAnalytical = False
-  , optAgdaHtmlDir     = Nothing
   }
+
+-- | Whether this run writes the @--lazy@ output /tree/ — a module-level
+-- @graph.json@ plus per-module @modules\/\<Module\>.json@ detail files —
+-- rather than one monolithic file.
+--
+-- @--lazy@ only splits the packed form; 'AgdaDeps.Backend.GraphJson'
+-- @buildExpandedJson@ has no such split, so the flag is inert under
+-- @--json-mode=expanded@. Single source of truth: the graph emitter, the
+-- output writer, the no-op skip and the @--skip-agda@ path all ask this
+-- one question, and a second copy would be free to drift.
+lazyTreeOutput :: Options -> Bool
+lazyTreeOutput opts = optLazy opts && optJsonMode opts == JsonPacked
 
 -- | True when the given module name matches any of the configured
 -- exclusion prefixes.
@@ -350,30 +281,11 @@ isExcludedModule excludes m = any matches excludes
 outdirOpt :: Monad m => FilePath -> Options -> m Options
 outdirOpt dir opts = return opts{ optOutDir = Just dir }
 
-withSourceOpt :: Monad m => Options -> m Options
-withSourceOpt opts = return opts{ optWithSource = True }
-
--- | @--agda-html-dir=DIR@. Stored verbatim; the browser interprets it
--- relative to the generated HTML file, so a relative path is expected.
-agdaHtmlDirOpt :: Monad m => String -> Options -> m Options
-agdaHtmlDirOpt dir opts = return opts{ optAgdaHtmlDir = Just dir }
-
 lazyOpt :: Monad m => Options -> m Options
 lazyOpt opts = return opts{ optLazy = True }
 
 excludeOpt :: Monad m => String -> Options -> m Options
 excludeOpt p opts = return opts{ optExcludeModules = p : optExcludeModules opts }
-
-noSourceForOpt :: Monad m => String -> Options -> m Options
-noSourceForOpt p opts = return opts{ optNoSourceFor = p : optNoSourceFor opts }
-
-maxSnippetBytesOpt :: MonadError String m => String -> Options -> m Options
-maxSnippetBytesOpt s opts = case reads s :: [(Int, String)] of
-  [(n, "")] | n == 0 -> return opts{ optMaxSnippetBytes = Nothing }
-            | n >  0 -> return opts{ optMaxSnippetBytes = Just n }
-  _ -> throwError $
-    "Invalid value for --max-snippet-bytes: " ++ show s
-      ++ ". Expected a non-negative integer (0 disables the cap)."
 
 gzipOpt :: Monad m => Options -> m Options
 gzipOpt opts = return opts{ optGzip = True }
@@ -455,11 +367,6 @@ minTermDepthOpt s opts = case reads s :: [(Int, String)] of
 formatOpt :: MonadError String m => String -> Options -> m Options
 formatOpt s opts = case parseSlug "--format" formatSlug allFormats s of
   Right f -> return opts{ optFormat = f }
-  Left e  -> throwError e
-
-viewOpt :: MonadError String m => String -> Options -> m Options
-viewOpt s opts = case parseSlug "--view" viewSlug allViews s of
-  Right v -> return opts{ optView = v }
   Left e  -> throwError e
 
 -- | Build a CLI option parser that updates a single slot of 'optColors',

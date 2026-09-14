@@ -13,7 +13,6 @@
 <a href="index.html" class="active">Home</a>
 <a href="guide.html">Guide</a>
 <a href="examples.html">Examples</a>
-<a href="views/index.html">Views ↗</a>
 <a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a>
 </nav>
 </div></header>
@@ -32,11 +31,12 @@
     <h2>Getting a graph</h2>
     <pre><span class="c"># install once</span>
 cabal install exe:agda-deps</pre>
-    <pre><span class="c"># emit an interactive HTML view</span>
-agda-deps --format=html --view=module-dag-pods \
-          --with-source -i test/ -o out/ test/Test.agda</pre>
+    <pre><span class="c"># emit the JSON graph</span>
+agda-deps --format=json -i test/ -o out/ test/Test.agda</pre>
+    <pre><span class="c"># render it as an interactive page</span>
+agda-plotter --view=module-dag-pods -o out/</pre>
     <p class="fine">With no <code>--format</code>, the output is Graphviz DOT; a
-      <code>.html</code> or <code>.json</code> path after <code>-o</code> infers
+      <code>.json</code> or <code>.dot</code> path after <code>-o</code> infers
       the format.</p>
   </section>
 
@@ -51,10 +51,9 @@ agda-deps --format=html --view=module-dag-pods \
   </section>
 
   <section>
-    <h2>Three outputs</h2>
+    <h2>Two outputs</h2>
     <dl>
       <div class="item"><dt>DOT</dt><dd>A <code>.dot</code> graph you can pipe into Graphviz (<code>dot -Tsvg</code>) or any DOT-aware tool. The default format.</dd></div>
-      <div class="item"><dt>HTML</dt><dd>A self-contained page in one of 14 views — from module DAGs to source-linked reading order. <code>--lazy</code> splits files for very large corpora.</dd></div>
       <div class="item"><dt>JSON</dt><dd>A stable artifact for downstream tooling: <code>packed</code> (base64 CSR) or <code>expanded</code> (arrays of records) &mdash; a versioned wire contract consumers can pin to.</dd></div>
     </dl>
   </section>
@@ -64,8 +63,7 @@ agda-deps --format=html --view=module-dag-pods \
     <dl>
       <div class="item"><dt><span class="mono">--keep-going</span></dt><dd>Survive type-check errors; the failing module is tagged <code>F</code>.</dd></div>
       <div class="item"><dt><span class="mono">--skip-agda</span></dt><dd>Module-level graph straight from a source scan — no elaboration, milliseconds at any scale.</dd></div>
-      <div class="item"><dt><span class="mono">--with-source</span></dt><dd>Attach the source snippet to every definition (with <code>--lazy</code>); powers the reading / IDE views.</dd></div>
-      <div class="item"><dt><span class="mono">--lazy</span></dt><dd>Split HTML across files so 100k-node projects stay responsive (needs an HTTP server).</dd></div>
+      <div class="item"><dt><span class="mono">--lazy</span></dt><dd>Split the JSON into a module skeleton plus per-module detail files, so 100k-node projects stay responsive.</dd></div>
       <div class="item"><dt><span class="mono">--no-externals</span></dt><dd>Drop everything outside the project root — stdlib and all — from the graph.</dd></div>
       <div class="item"><dt><span class="mono">--resolve-deps</span></dt><dd>Pin Agda's search path to the <code>.agda-lib</code> <code>depend:</code> closure.</dd></div>
       <div class="item"><dt><span class="mono">--with-term-hashes</span></dt><dd>Emit a canonicalised <code>Word64</code> fingerprint per definition subterm into the JSON.</dd></div>
@@ -75,27 +73,23 @@ agda-deps --format=html --view=module-dag-pods \
   </section>
 
   <section>
-    <h2>The views</h2>
-    <p class="fine">Several HTML views, each answering a different question.
-      A slice below &mdash; or the <a href="views/index.html">full gallery</a>.</p>
+    <h2>What reads the graph</h2>
+    <p class="fine">The JSON is the product. These read it, and neither links
+      Agda &mdash; so both build in minutes.</p>
     <div class="rows">
-      <a class="linkrow" href="views/module-dag-pods/deps.html"><span class="rk">Module DAG pods<span class="slug">--view=module-dag-pods</span></span><span class="rd">Default. Expandable module pods, dagre layout.</span></a>
-      <a class="linkrow" href="views/cytoscape/deps.html"><span class="rk">Cytoscape compound<span class="slug">--view=cytoscape</span></span><span class="rd">Force-directed modules-as-boxes with a rich sidebar.</span></a>
-      <a class="linkrow" href="views/sigma/deps.html"><span class="rk">Sigma (WebGL)<span class="slug">--view=sigma</span></span><span class="rd">WebGL renderer — the largest-scale option.</span></a>
-      <a class="linkrow" href="views/progress-dashboard/deps.html"><span class="rk">Progress dashboard<span class="slug">--view=progress-dashboard</span></span><span class="rd">KPI board: completeness %, hole debt, hot modules.</span></a>
-      <a class="linkrow" href="views/critical-path-holes/deps.html"><span class="rk">Critical-path holes<span class="slug">--view=critical-path-holes</span></span><span class="rd">Kanban of proof obligations upstream of the goal.</span></a>
-      <a class="linkrow" href="views/sunburst-hierarchy/deps.html"><span class="rk">Sunburst hierarchy<span class="slug">--view=sunburst-hierarchy</span></span><span class="rd">D3 sunburst over the dotted-module tree.</span></a>
-      <a class="linkrow" href="views/source-centric/deps.html"><span class="rk">Source-centric<span class="slug">--view=source-centric</span></span><span class="rd">Code-first reading view with a minimap.</span></a>
-      <a class="linkrow" href="views/cartographic-atlas/deps.html"><span class="rk">Cartographic atlas<span class="slug">--view=cartographic-atlas</span></span><span class="rd">A topographic map of the whole project.</span></a>
+      <a class="linkrow" href="https://github.com/input-output-hk/agda-plotter"><span class="rk">agda-plotter &#8599;</span><span class="rd">Renders the graph as an interactive HTML page — 14 views, from module DAGs to definition-level browsing. <code>--lazy</code> keeps the page small on very large corpora.</span></a>
+      <a class="linkrow" href="https://github.com/input-output-hk/agda-graph-explorer"><span class="rk">agda-graph-explorer &#8599;</span><span class="rd">Unused-import and dead-code analysis, 18 graph-level analyses, and an MCP server that answers point queries for coding agents.</span></a>
     </div>
   </section>
 
   <section>
     <h2>Documentation</h2>
     <div class="rows">
-      <a class="linkrow" href="guide.html"><span class="rk">Guide</span><span class="rd">Install, flags, views, YAML config, and the v2 JSON schema.</span></a>
+      <a class="linkrow" href="guide.html"><span class="rk">Guide</span><span class="rd">Install, flags, YAML config, and the v2 JSON schema.</span></a>
       <a class="linkrow" href="examples.html"><span class="rk">Examples</span><span class="rd">One runnable command per feature.</span></a>
       <a class="linkrow" href="roadmap.html"><span class="rk">Roadmap</span><span class="rd">Forward-looking work that's actively planned.</span></a>
+      <a class="linkrow" href="backlog.html"><span class="rk">Backlog</span><span class="rd">Ideas parked for later, plus approaches consciously set aside.</span></a>
+      <a class="linkrow" href="changelog.html"><span class="rk">Changelog</span><span class="rd">Everything shipped, newest first.</span></a>
     </div>
   </section>
 </div>
@@ -103,7 +97,7 @@ agda-deps --format=html --view=module-dag-pods \
 </main>
 <footer class="site-footer"><div class="wrap">
 <div>
-<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="roadmap.html">Roadmap</a></div>
+<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a> · <a href="changelog.html">Changelog</a></div>
 <div class="muted">Built with
 <a href="https://getpelican.com">Pelican</a>.
 <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div>

@@ -13,7 +13,6 @@
 <a href="index.html">Home</a>
 <a href="guide.html">Guide</a>
 <a href="examples.html">Examples</a>
-<a href="views/index.html">Views ↗</a>
 <a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a>
 </nav>
 </div></header>
@@ -23,14 +22,15 @@
 <nav><a class="lvl2" href="#deferred-useful-no-current-push">Deferred — useful, no current push</a><a class="lvl2" href="#refused-out-of-scope">Refused / out of scope</a></nav>
 </div></aside>
 <div class="prose"><h1 id="backlog">Backlog</h1>
-<p>Deferred and refused ideas. Shipped work: <a href="Changelog.md">Changelog.md</a>.
+<p>Deferred and refused ideas. Shipped work: <a href="changelog.html">Changelog.md</a>.
 Recipes: <a href="examples.html">Examples.md</a>. Planned work: <a href="roadmap.html">TODO.md</a>.</p>
 <hr>
 <h2 id="deferred-useful-no-current-push">Deferred — useful, no current push</h2>
 <ul>
 <li>
-<p><strong>Bump the <code>cabal.project</code> Agda pin to Hackage</strong> once Agda 2.9 releases (it
-  currently points at an upstream commit).</p>
+<p><strong>Bump the <code>cabal.project.agda29</code> Agda pin to Hackage</strong> once Agda 2.9
+  releases (it currently points at an upstream <code>agda/agda</code> commit). The default
+  <code>cabal.project</code> already tracks Hackage, pinned at Agda 2.8.0.</p>
 </li>
 <li>
 <p><strong>Multicore for the post-Agda passes.</strong> Agda's <code>TCM</code> and the <code>Backend'</code> hooks
@@ -45,19 +45,9 @@ Recipes: <a href="examples.html">Examples.md</a>. Planned work: <a href="roadmap
   that cross-command reuse would touch.</p>
 </li>
 <li>
-<p><strong>Snippet hashing for the <code>--skip-agda</code> drawer.</strong> <code>big-module-dag-pods</code> keys defs
-  by a Murmur-on-<code>prettyShow</code> hash that <code>SkipAgda</code> doesn't reimplement, so it shows
-  a fallback. Add a JS-side hash for a future <code>--skip-agda --with-source</code> mode.</p>
-</li>
-<li>
 <p><strong>Sub-modules in the source scan.</strong> <code>Precompute.parseHeader</code> reads only the first
   <code>module …</code> per file; nested <code>module Foo.Inner where</code> blocks are missed. Fine for
   <code>--skip-agda</code> today.</p>
-</li>
-<li>
-<p><strong>Scale validation at 100k modules.</strong> <code>big-module-dag-pods</code> has the right shape
-  but is untested at that size; tune <code>BUCKET_SIZE</code> / <code>EDGE_BUDGET</code> / <code>VIEWPORT_PAD</code>
-  against a real corpus.</p>
 </li>
 <li>
 <p><strong>External-module heuristic for <code>--skip-agda</code>.</strong> Currently: external iff the
@@ -76,8 +66,127 @@ Recipes: <a href="examples.html">Examples.md</a>. Planned work: <a href="roadmap
   entry module's defs). Main-module-only; mitigated because the golden is a cold
   run and <code>--incremental</code> serves the complete fragment.</p>
 </li>
+<li>
+<p><strong>A <code>with</code>-provenance tag that actually fires.</strong> The old <code>with</code> value in
+  <code>definitionEdgesProvenance</code> was removed on 2026-08-31 as unreachable (see
+  <a href="src/AgdaDeps/Deps.hs">the <code>EdgeProv</code> rationale</a> — <code>funWith</code> is non-empty on
+  exactly the defs <code>ignoreDef</code> drops). A dependency reached <em>only</em> through a
+  <code>with</code>-abstraction is a real and useful distinction, but the only place left to
+  recover it is <code>contractIgnoredEdges</code>: when the hidden intermediary was a
+  with-function, tag the contracted edge instead of inheriting the source's tag.
+  That is a wire-<em>content</em> change — edges currently tagged <code>body</code> would become
+  <code>with</code>, re-goldening this repo and the consumer's baselines — so it wants an
+  explicit request, not a silent fix. The consumer repo has been told the tag is
+  gone and is not building on it.</p>
+</li>
+<li>
+<p><strong><code>argUsage</code>: telling an <em>inserted</em> instance binder from a written one</strong>
+  (consumer field report, 2026-09-04, ask P6). <code>Protocol.Jolteon.Block.BlockId</code>
+  is <code>BlockId = Hash</code> — zero written binders — and reports an instance position
+  named <code>x</code> that elaboration inserted. Consumer-side it is indistinguishable
+  from a user-written <code>⦃ x : … ⦄</code>: the position IS on the syntactic spine (so
+  <code>syntacticArity</code> does not exclude it) and the name is not dotted (so the
+  generalisation signal does not either). Reporting <code>name: null</code> there would be
+  enough for them. <strong>Blocked on a reproduction, not on a proof of
+  impossibility</strong> — read the measurements below before re-attempting.</p>
+</li>
+</ul>
+<p>Measured 2026-09-04 with a temporary <code>DOMPROBE</code> dump out of <code>piSpine</code>
+  (<code>absName</code>, <code>suggestName</code>, <code>domName</code>, its <code>Origin</code>, <code>argInfoOrigin</code> per Pi
+  domain):</p>
+<ul>
+<li><strong>The two <code>Origin</code> fields look like the answer and are both useless.</strong>
+    <code>Dom.domName :: Maybe NamedName</code> is a <code>WithOrigin</code>, and <code>Origin</code> even has
+    dedicated <code>Inserted</code> and <code>Generalization</code> constructors — but a
+    <em>user-written</em> <code>⦃ d : Def Nat ⦄</code> reports <code>origin = Just Inserted</code> too,
+    because <code>Internal.defaultNamedArgDom</code> hard-codes <code>WithOrigin Inserted</code>
+    when it builds the dom. <code>argInfoOrigin</code> is <code>UserWritten</code> for everything,
+    including a bare <code>⦃ Def Nat ⦄</code> that names nothing. Neither separates
+    written from inserted. Do not re-propose "just read the Origin".</li>
+<li><strong>The plain reading of the ask is already handled.</strong> A written <code>⦃ _ : T ⦄</code>,
+    a bare <code>⦃ T ⦄</code> and <code>{_ : Set}</code> all already emit <em>no</em> <code>name</code> —
+    <code>suggestName</code> maps Agda's <code>_</code> placeholder to <code>Nothing</code>. So their
+    <code>name: "x"</code> comes from a third mechanism, not from "the source says <code>_</code>".</li>
+<li><strong>The one live lead is <code>domName /= absName</code>.</strong> In every shape reproducible
+    here the two agree (<code>d</code>/<code>d</code>, <code>_</code>/<code>_</code>) or <code>domName</code> is <code>Nothing</code>. Their type
+    prints as <code>⦃ _ = x : DecEq (⋯) ⦄</code>, and Agda prints that <code>n = x</code> form only
+    when the two <em>dis</em>agree — so their binder plausibly carries
+    <code>domName = "_"</code> with an invented <code>absName = "x"</code>, which a rule "report
+    <code>name</code> only when <code>domName</code> agrees with the <code>Abs</code> name" would catch exactly.</li>
+</ul>
+<p>Not shipped because that rule is unverifiable from here: none of the local
+  shapes (written named / anonymous / bare instance, anonymous instance in a
+  section telescope, an instance-carrying <code>variable</code>) reproduces the
+  disagreement, so the rule can only be observed doing nothing.
+  <strong>What would unblock it:</strong> the source of <code>BlockId</code> with its enclosing module
+  header, or any self-contained repro whose <code>--with-signatures</code> <code>type</code> contains
+  <code>= x :</code> inside an instance brace. <code>defGeneralizedParams</code> is <em>not</em> the way in
+  — Agda fills it for data/record signatures only, so it is always <code>[]</code> on the
+  <code>Function</code> path. 9 instance positions on the reporting corpus, so low volume
+  either way.</p>
+<ul>
+<li><strong><code>argUsage.partiallyApplied</code> at edge granularity.</strong> Currently a per-def flag
+  on the <em>target</em>: "referenced unsaturated somewhere in this graph". That is
+  what the consumer's filter needs, and it is immune to <code>contractIgnoredEdges</code>
+  (a partial application inside a with-helper still counts, with no edge to
+  align). Per-<em>edge</em> would additionally say <em>which</em> caller, which helps a human
+  making the edit — but it means threading a flag through
+  <code>IgnoredEdgeMap</code> / <code>bfsClosure</code> / <code>buildIgnoredClosure</code>'s DP, and an
+  edge-parallel array is the expensive wire shape. Revisit if a consumer asks
+  for the call sites rather than the verdict filter.</li>
 </ul>
 <h2 id="refused-out-of-scope">Refused / out of scope</h2>
+<ul>
+<li><strong><code>matchConstant</code> (phase-2 <code>argUsage</code>): measured, rejected for the wire.</strong>
+  Positions whose case split could be replaced by a wildcard. Built as
+  <code>AgdaDeps.MatchConstant</code> and measured under <code>AGDA_DEPS_MATCH_CONSTANT=1</code>
+  (2026-08-31); the analysis is kept as a probe, emits nothing to the wire,
+  and costs nothing unless the variable is set.</li>
+</ul>
+<p><strong>The design note's property is unsound in a dependently typed setting.</strong>
+  "Every branch computes the same thing" compares branch <em>bodies</em>, but a match
+  also refines the branches' <em>types</em>. <code>not-involutive true = refl;
+  not-involutive false = refl</code> has the identical body in both branches (a
+  constructor's parameters are dropped in internal syntax, so <code>refl</code> is
+  literally nullary) and yet <code>not-involutive _ = refl</code> is rejected with
+  <code>[UnequalTerms]</code> — the split is load-bearing for type-checking. On the
+  standard library that shape was <strong>101 of 102</strong> raw candidates. The fix is a
+  plain occurrence check, not a re-implementation of <code>dependentPolarity</code>: report
+  a position only when its variable is free in neither a later domain nor the
+  codomain, so every branch shares one goal type.</p>
+<p>Yield after the fix, on two corpora:</p>
+<table>
+<thead>
+<tr>
+<th>corpus</th>
+<th>functions with a case tree</th>
+<th>sound findings</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>agda-stdlib 2.4 (<code>Everything</code>)</td>
+<td>15,298</td>
+<td><strong>1</strong></td>
+</tr>
+<tr>
+<td>Jolteon-FastBFT (implementation-heavy)</td>
+<td>6,795</td>
+<td><strong>0</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Phase 1's <code>removable</code> finds 98 defs in the same stdlib population, so this
+  is ~98× below it — two orders of magnitude under the consumer's stated
+  threshold. And the single finding is <code>Data.Unit.NonEta.hide</code>, whose match on
+  a non-eta <code>unit</code> exists <em>precisely</em> to keep <code>hide f x</code> stuck: wildcarding it
+  would defeat the definition's purpose. So the honest count of actionable
+  findings across ~22k functions is zero.</p>
+<p>Kept so the number can be re-measured on any corpus (a proof-heavy library
+  is the worst case for it; a programming-heavy one turned out no better).
+  Pinned by <code>test-matchconstant/</code> + a CI step. <strong>If it ever breaks on an Agda
+  bump, delete it rather than fix it</strong> — the measurement is done and the answer
+  is recorded here.</p>
 <ul>
 <li>
 <p><strong>Stable <code>def_id</code> across runs.</strong> Belongs in a history/diff tool. Content/signature
@@ -103,7 +212,7 @@ Recipes: <a href="examples.html">Examples.md</a>. Planned work: <a href="roadmap
 </main>
 <footer class="site-footer"><div class="wrap">
 <div>
-<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a></div>
+<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a> · <a href="changelog.html">Changelog</a></div>
 <div class="muted">Built with
 <a href="https://getpelican.com">Pelican</a>.
 <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div>

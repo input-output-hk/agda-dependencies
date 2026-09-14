@@ -10,7 +10,7 @@
 -- The `⇝ twice` call edges are gone from the elaborated internal syntax
 -- and cannot be recovered producer-side. Drop the `{-# INLINE #-}`
 -- pragma and all three edges to `twice` reappear. See Backlog.md (#3 /
--- "Inliner gap") and the funInline gotcha in CLAUDE.md.
+-- "Inliner gap") and the AgdaDeps.Deps.ignoreDef rationale.
 module InlineGap where
 
 open import Nat using (Nat; zero; suc; _+_)

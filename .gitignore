@@ -8,9 +8,7 @@ dist-agda29
 *.o
 *.bak
 Res.dot
-test/source/
 test/deps.dot
-test/deps.html
 
 # agda-explore daemon's generated graph (default --out-dir)
 .agda-explore/

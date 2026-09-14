@@ -60,13 +60,21 @@ jobs:
       # Agda 2.8.0 from Hackage; first run builds it, then cache hits.
       run: cabal build
 
-    - name: Run agda-deps on the bundled test corpus (all four formats)
+    - name: Run agda-deps on the bundled test corpus (every output shape)
       run: |
         mkdir -p ci-out
         cabal run agda-deps -- --format=dot  -i test/ -o ci-out/ test/Test.agda
-        cabal run agda-deps -- --format=html -i test/ -o ci-out/ test/Test.agda
-        cabal run agda-deps -- --format=html --lazy -i test/ -o ci-out/ test/Test.agda
         cabal run agda-deps -- --format=json -i test/ -o ci-out/ test/Test.agda
+        # --lazy: a module-level graph.json plus per-module detail files.
+        cabal run agda-deps -- --format=json --lazy -i test/ -o ci-out/lazy test/Test.agda
+        test -f ci-out/lazy/graph.json
+        test -d ci-out/lazy/modules
+        # The skeleton must carry the detail-file manifest and drop the
+        # inline defs/edges blobs; that split is what the lazy page needs.
+        grep -q '"moduleFiles"' ci-out/lazy/graph.json
+        if grep -q '"defs"' ci-out/lazy/graph.json; then
+          echo "lazy graph.json still inlines defs" >&2; exit 1
+        fi
         # Expanded JSON, exercising the optional --with-* fields, for schema
         # validation and the golden check. MUST run on a cold .agdai cache:
         # a warm-loaded main module skips the dead-private recovery and
@@ -350,10 +358,10 @@ jobs:
         test ! -f ci-out/inc/.agda-deps-cache/Zombie-deadbeefdeadbeef.frag
         # (4) lazy: no module-file rewrites on a no-op rebuild
         rm -rf test/*.agdai test/_build ci-out/lazyinc
-        cabal run -v0 agda-deps -- --incremental --format=html --lazy \
+        cabal run -v0 agda-deps -- --incremental --format=json --lazy \
           -i test/ -o ci-out/lazyinc test/Test.agda >/dev/null 2>&1
         find ci-out/lazyinc/modules -name '*.json' -printf '%T@ %p\n' | sort > ci-out/mt.before
-        cabal run -v0 agda-deps -- --incremental --format=html --lazy \
+        cabal run -v0 agda-deps -- --incremental --format=json --lazy \
           -i test/ -o ci-out/lazyinc test/Test.agda >/dev/null 2>&1
         find ci-out/lazyinc/modules -name '*.json' -printf '%T@ %p\n' | sort > ci-out/mt.after
         diff ci-out/mt.before ci-out/mt.after

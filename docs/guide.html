@@ -13,26 +13,45 @@
 <a href="index.html">Home</a>
 <a href="guide.html" class="active">Guide</a>
 <a href="examples.html">Examples</a>
-<a href="views/index.html">Views ↗</a>
 <a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a>
 </nav>
 </div></header>
 <main><div class="layout">
 <aside class="toc"><div class="toc-inner">
 <div class="toc-title">On this page</div>
-<nav><a class="lvl2" href="#prerequisites">Prerequisites</a><a class="lvl2" href="#build">Build</a><a class="lvl2" href="#quick-start">Quick start</a><a class="lvl2" href="#backend-flags">Backend flags</a><a class="lvl2" href="#views">Views</a><a class="lvl2" href="#yaml-config">YAML config</a><a class="lvl3" href="#checking-a-config-agda-deps-doctor">Checking a config: agda-deps doctor</a><a class="lvl2" href="#linking-to-source">Linking to source</a><a class="lvl2" href="#large-projects-lazy-output">Large projects: lazy output</a><a class="lvl2" href="#consuming-the-json-output">Consuming the JSON output</a><a class="lvl3" href="#expanded-top-level-fields">Expanded top-level fields</a><a class="lvl2" href="#what-gets-filtered-out">What gets filtered out</a><a class="lvl2" href="#ai-disclaimer">AI disclaimer</a></nav>
+<nav><a class="lvl2" href="#prerequisites">Prerequisites</a><a class="lvl2" href="#build">Build</a><a class="lvl2" href="#quick-start">Quick start</a><a class="lvl2" href="#rendering-the-graph">Rendering the graph</a><a class="lvl2" href="#backend-flags">Backend flags</a><a class="lvl2" href="#node-colours">Node colours</a><a class="lvl2" href="#yaml-config">YAML config</a><a class="lvl3" href="#checking-a-config-agda-deps-doctor">Checking a config: agda-deps doctor</a><a class="lvl2" href="#large-projects-lazy-output">Large projects: lazy output</a><a class="lvl2" href="#consuming-the-json-output">Consuming the JSON output</a><a class="lvl3" href="#expanded-top-level-fields">Expanded top-level fields</a><a class="lvl2" href="#what-gets-filtered-out">What gets filtered out</a><a class="lvl2" href="#ai-disclaimer">AI disclaimer</a></nav>
 </div></aside>
-<div class="prose"><h1 id="agda-deps-an-agda-dependency-graph-generator-plus-visualisations">agda-deps: an Agda dependency graph generator plus visualisations</h1>
+<div class="prose"><h1 id="agda-deps-an-agda-dependency-graph-generator">agda-deps: an Agda dependency graph generator</h1>
 <p><code>agda-deps</code> is an Agda compiler backend that emits a dependency graph relating
 definitions, postulates, and incomplete definitions/expressions — a quick
 overview of the state of a library.</p>
-<p>There are two visual outcomes:</p>
+<p>It writes two things:</p>
 <ul>
-<li>a Graphviz <strong>DOT</strong> file,</li>
-<li>an interactive <strong>HTML</strong> page, here we have several backends (see <a href="#views">views</a>),</li>
+<li>a stable <strong>JSON</strong> artifact, the v2 <code>graph.json</code> (see
+  <a href="#consuming-the-json-output">Consuming the JSON output</a>),</li>
+<li>a Graphviz <strong>DOT</strong> file, for a quick static picture.</li>
 </ul>
-<p>All outcomes are generated from a stable <strong>JSON</strong> artifact (see the v2
-<code>graph.json</code> schema).</p>
+<p>Everything else reads the JSON:</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://github.com/input-output-hk/agda-plotter"><code>agda-plotter</code></a></td>
+<td>Renders the graph as an interactive HTML page — fourteen views, from module-DAG overviews to definition-level browsers.</td>
+</tr>
+<tr>
+<td><a href="https://github.com/input-output-hk/agda-graph-explorer"><code>agda-graph-explorer</code></a></td>
+<td>Unused-import analysis, graph-level optimisation analyses, and an MCP server for coding agents.</td>
+</tr>
+</tbody>
+</table>
+<p>Neither links Agda, so both build from Hackage in minutes. For an interactive
+page, see <a href="#rendering-the-graph">Rendering the graph</a>.</p>
 <p>Each node is coloured by the state of its definition:</p>
 <table>
 <thead>
@@ -76,26 +95,35 @@ overview of the state of a library.</p>
 cabal build --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps   # Agda 2.9.0
 </code></pre>
 <h2 id="quick-start">Quick start</h2>
-<p>For DOT generation:</p>
+<p>For the JSON graph:</p>
+<pre><code>cabal run agda-deps -- --format=json -i test/ -o test/ test/Test.agda
+# -&gt; test/deps.json
+</code></pre>
+<p>For DOT:</p>
 <pre><code>cabal run agda-deps -- --format=dot -i test/ -o test/ test/Test.agda
 dot -Tsvg test/deps.dot -o deps.svg
 </code></pre>
-<p>For HTML generation:</p>
-<pre><code>cabal run agda-deps -- --format=html -i test/ -o test/ test/Test.agda
-xdg-open test/deps.html
+<p>Run on your own code by pointing <code>-i</code> at the include path that resolves your
+imports (repeat <code>-i</code> for the standard library) and passing the top module:</p>
+<pre><code>cabal run agda-deps -- --format=json -i src/ -i /path/to/agda-stdlib/src -o out/ src/MyMain.agda
+</code></pre>
+<h2 id="rendering-the-graph">Rendering the graph</h2>
+<p>HTML output lives in <a href="https://github.com/input-output-hk/agda-plotter"><code>agda-plotter</code></a>,
+a separate executable that reads the JSON emitted above. It does not link Agda,
+so it builds from Hackage in minutes.</p>
+<pre><code>agda-deps   --format=json -i src/ -o out/ src/MyMain.agda    # produce
+agda-plotter --view=module-dag-pods -o out/                  # render -&gt; out/deps.html
+xdg-open out/deps.html
 </code></pre>
 <p>The default view is interactive: pan &amp; zoom, expand/collapse module pods,
 click a definition for a detail drawer, search modules and definitions,
 re-layout, and an <strong>Externals: on/off</strong> toggle that hides everything outside
-the project root (stdlib, <code>Agda.Builtin.*</code>, <code>depend:</code> libraries). Other views
-add their own controls — a file/module tree in <code>ide-three-pane</code> and
-<code>notion-doc</code>, a transitive-edge filter in <code>sigma</code>.</p>
-<p>Module pods start collapsed either way; under <code>--lazy</code> expanding one <em>fetches</em>
-that module's definitions instead of reading them from the inlined graph.</p>
-<p>Run on your own code by pointing <code>-i</code> at the include path that resolves your
-imports (repeat <code>-i</code> for the standard library) and passing the top module:</p>
-<pre><code>cabal run agda-deps -- --format=html -i src/ -i /path/to/agda-stdlib/src -o out/ src/MyMain.agda
-</code></pre>
+the project root (stdlib, <code>Agda.Builtin.*</code>, <code>depend:</code> libraries). Thirteen
+other views cover module-DAG overviews, definition-level browsing, and
+proof-progress dashboards; <code>agda-plotter --list-views</code> names them, and its
+README documents each one.</p>
+<p>For projects large enough that inlining the whole graph makes the page slow to
+open, see <a href="#large-projects-lazy-output">Large projects: lazy output</a>.</p>
 <h2 id="backend-flags">Backend flags</h2>
 <p>Everything after <code>--</code> is forwarded to the backend and to Agda's CLI. Standard
 Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</code>,
@@ -104,24 +132,25 @@ Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</co
 <p>There is one subcommand, <code>agda-deps doctor</code>, which checks the YAML config file
 and exits — see <a href="#checking-a-config-agda-deps-doctor">Checking a config</a>.</p>
 <ul>
-<li><code>-o DIR</code> / <code>--out-dir=DIR</code> — output directory (<code>deps.dot|html|json</code>). Without
-  it, DOT and JSON go to stdout; HTML requires it. A value ending in
-  <code>.html</code>/<code>.json</code>/<code>.dot</code> also sets the format unless <code>--format</code> is given.</li>
-<li><code>--format=dot|html|json</code> — output format (default <code>dot</code>).</li>
-<li><code>--view=VIEW</code> — HTML view. See <a href="#views">Views</a>.</li>
+<li><code>-o DIR</code> / <code>--out-dir=DIR</code> — output directory (<code>deps.dot|json</code>). Without it,
+  output goes to stdout; <code>--lazy</code> requires it. A value ending in
+  <code>.json</code>/<code>.dot</code> also sets the format unless <code>--format</code> is given.</li>
+<li><code>--format=dot|json</code> — output format (default <code>dot</code>).</li>
 <li><code>--config=PATH</code> — load a YAML config. See <a href="#yaml-config">YAML config</a>.</li>
 <li><code>--theme=default|light|dark|colorblind</code> — palette preset for the four state
-  colours. <code>default</code>/<code>light</code> is the standard palette; <code>dark</code> is
+  colours in DOT output. <code>default</code>/<code>light</code> is the standard palette; <code>dark</code> is
   <code>#81c784</code>/<code>#ef5350</code>/<code>#ba68c8</code>/<code>#ffb74d</code>; <code>colorblind</code> is
-  <code>#1b9e77</code>/<code>#d95f02</code>/<code>#7570b3</code>/<code>#e7298a</code>. Explicit <code>--color-*</code> flags win.</li>
+  <code>#1b9e77</code>/<code>#d95f02</code>/<code>#7570b3</code>/<code>#e7298a</code>. Explicit <code>--color-*</code> flags win.
+  <code>agda-plotter</code> takes the same flags with the same defaults, so a DOT and an
+  HTML rendering of one project can be made to agree.</li>
 <li><code>--color-defined|postulate|hole|failed=#RRGGBB</code> — override a state colour
   (defaults <code>#4caf50</code> / <code>#f44336</code> / <code>#9c27b0</code> / <code>#ff9800</code>).</li>
 <li><code>--keep-going</code> — don't abort on a type-check error: tag the failing module
   <code>failed</code> and emit whatever loaded, with def-level data for every module that
   elaborated.</li>
-<li><code>--skip-agda</code> — don't invoke Agda; render a module-level graph from a source
-  scan (<code>module</code> / <code>import</code> lines). No definition graph, no
-  D/P/H states, no snippets — module-DAG views only.</li>
+<li><code>--skip-agda</code> — don't invoke Agda; emit a module-level graph from a source
+  scan (<code>module</code> / <code>import</code> lines). No definition graph and no D/P/H states, so
+  only module-level views have anything to draw.</li>
 <li><code>--lenient-imports</code> — forward <code>--allow-unsolved-metas</code> to Agda, for projects
   that deliberately commit <code>?</code> holes; combine with <code>--keep-going</code>. Under this
   flag a module with unsolved metas <em>succeeds</em> (they become <code>unsolved#meta.*</code>
@@ -162,107 +191,29 @@ and exits — see <a href="#checking-a-config-agda-deps-doctor">Checking a confi
   at its default, commented out) and exit. Seed a config with
   <code>agda-deps --show-defaults &gt; .agda-deps.yml</code>. See <a href="#yaml-config">YAML config</a>.</li>
 </ul>
-<p>HTML / source flags:</p>
+<p>Output-shape flags:</p>
 <ul>
-<li><code>--with-source</code> — embed each definition's source snippet; clicking a leaf
-  opens it in a side drawer. Requires <code>--lazy</code>.</li>
-<li><code>--agda-html-dir=DIR</code> — link the views to existing <code>agda --html</code> pages at
-  <code>DIR/&lt;Module.Name&gt;.html</code> (path relative to the generated HTML). Wired into the
-  <code>sunburst-hierarchy</code> view.</li>
-<li><code>--lazy</code> — HTML only: emit a small <code>deps.html</code> shell plus a sibling
-  <code>graph.json</code> and per-module JSON loaded via <code>fetch()</code> (needs HTTP serving).
-  See <a href="#large-projects-lazy-output">Large projects</a>.</li>
 <li><code>--exclude=PREFIX</code> — repeatable. Drop modules named <code>PREFIX</code> or <code>PREFIX.*</code>
   and their edges (e.g. <code>--exclude=Agda.Builtin</code>).</li>
-<li><code>--no-source-for=PREFIX</code> — repeatable. Skip snippets for matching modules;
-  they still appear in the graph.</li>
-<li><code>--max-snippet-bytes=N</code> — per-module snippet cap (default <code>1000000</code>; <code>0</code>
-  disables).</li>
+<li><code>--lazy</code> — JSON only: emit a module-level <code>graph.json</code> plus per-module
+  <code>modules/&lt;Module&gt;.json</code> detail files instead of one <code>deps.json</code>. Requires
+  <code>-o</code>. See <a href="#large-projects-lazy-output">Large projects</a>.</li>
 <li><code>--gzip</code> — <code>--lazy</code> only: also write a <code>.gz</code> next to every emitted JSON file
-  (the page still fetches the plain <code>.json</code>).</li>
+  (the plain <code>.json</code> is still written).</li>
 </ul>
 <p>Every run also scans sources for <code>module</code> / <code>import</code> declarations and unions
 that module-level graph into the output, so modules that never type-checked
 (under <code>--keep-going</code>) still appear with their import wiring.</p>
-<h2 id="views">Views</h2>
-<p>Pick one with <code>--view=VIEW</code>. All views consume the same <code>graph.json</code>; only
-the JS app and styling differ.</p>
-<table>
-<thead>
-<tr>
-<th>View</th>
-<th>What it does</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>module-dag-pods</code> <em>(default)</em></td>
-<td>Top-down DAG of expandable module "pods". Best for ≤ ~5k modules; dagre layout in-browser.</td>
-</tr>
-<tr>
-<td><code>cytoscape</code></td>
-<td>Force-directed compound-node viewer (modules as boxes, defs inside), rich sidebar.</td>
-</tr>
-<tr>
-<td><code>sigma</code></td>
-<td>WebGL module-level renderer (sigma.js + graphology + dagre), with a transitive-edge filter. The largest-scale option.</td>
-</tr>
-<tr>
-<td><code>big-module-dag-pods</code></td>
-<td>Viewport-virtualised <code>module-dag-pods</code>; layout precomputed Haskell-side, minimap. Targets ~100k modules.</td>
-</tr>
-<tr>
-<td><code>ide-three-pane</code></td>
-<td>File/module tree + focused subgraph + source pane. Definition-level.</td>
-</tr>
-<tr>
-<td><code>source-centric</code></td>
-<td>Code-first with a minimap. Definition-level.</td>
-</tr>
-<tr>
-<td><code>notion-doc</code></td>
-<td>Scrollable cross-linked document. Definition-level.</td>
-</tr>
-<tr>
-<td><code>wiki-backlinks</code></td>
-<td>Single-page focus with depends-on / used-by lists. Definition-level.</td>
-</tr>
-<tr>
-<td><code>progress-dashboard</code></td>
-<td>KPI board: completeness %, D/P/H/F donut, hot-modules table, most-blocking defs, hole-density heatmap.</td>
-</tr>
-<tr>
-<td><code>critical-path-holes</code></td>
-<td>Kanban of proof obligations upstream of the entry theorem, with dep chains.</td>
-</tr>
-<tr>
-<td><code>sunburst-hierarchy</code></td>
-<td>D3 sunburst over the dotted-module tree; arc fill = state mix, import chords, A→B trail finder.</td>
-</tr>
-<tr>
-<td><code>pixel-grid-overview</code></td>
-<td>Every def a coloured tile in per-module bands; sort/heatmap modes, minimap. Inline mode only.</td>
-</tr>
-<tr>
-<td><code>reading-order-narrative</code></td>
-<td>Topological scroll with a sticky margin mini-graph. Pairs with <code>--with-source</code>.</td>
-</tr>
-<tr>
-<td><code>cartographic-atlas</code></td>
-<td>Topographic-map metaphor: continents (prefixes), elevation (depth), glyphs for holes/postulates.</td>
-</tr>
-</tbody>
-</table>
-<p>For very large projects start with <code>big-module-dag-pods</code> or <code>sigma</code>; for broken
-projects combine any module-level view with <code>--skip-agda</code>; for proof-progress
-tracking use <code>progress-dashboard</code> or <code>critical-path-holes</code>.</p>
-<pre><code>cabal run agda-deps -- --format=html --view=sigma -i src/ -o out/ src/Main.agda
-</code></pre>
-<p>Override any state colour (DOT and HTML honour the same flags):</p>
-<pre><code>cabal run agda-deps -- --format=html \
+<h2 id="node-colours">Node colours</h2>
+<p>The four state colours apply to DOT output here, and to HTML output in
+<code>agda-plotter</code>, which takes the same flag names and the same defaults:</p>
+<pre><code>cabal run agda-deps -- --format=dot \
   --color-defined=#0288d1 --color-postulate=#d32f2f --color-hole=#fbc02d \
   -i test/ -o test/ test/Test.agda
 </code></pre>
+<p>They are not carried in <code>graph.json</code> — each renderer keeps its own copy — so
+changing one here does not change what <code>agda-plotter</code> draws. Pass the same
+flags to both, or set them once in a shared <code>.agda-deps.yml</code>.</p>
 <h2 id="yaml-config">YAML config</h2>
 <p><code>agda-deps</code> reads an optional YAML config. Keys mirror the CLI flags in
 kebab-case (<code>--no-externals</code> ↔ <code>no-externals</code>). Merge order is
@@ -276,21 +227,20 @@ option at its default with a one-line comment — and edit it:</p>
 <p>The generated file is entirely commented out, so it reproduces the defaults
 as-is; uncomment only the keys you want to change.</p>
 <pre><code class="language-yaml">out-dir: build/deps
-format: html
-view: module-dag-pods
+format: json
+json-mode: packed
 theme: dark
 color-defined: &quot;#4caf50&quot;   # quote colours: bare #… is a YAML comment
 lazy: true
-with-source: true
 no-externals: true
 incremental: true
 exclude:
   - Agda.Builtin
   - Data
 </code></pre>
-<p>Repeatable flags (<code>exclude</code>, <code>no-source-for</code>) take YAML lists. Explicit
-<code>--color-*</code> CLI flags still win over <code>theme:</code>. Run <code>agda-deps doctor</code> to check
-a file before relying on it.</p>
+<p>Repeatable flags (<code>exclude</code>) take YAML lists. Explicit <code>--color-*</code> CLI flags
+still win over <code>theme:</code>. Run <code>agda-deps doctor</code> to check a file before relying
+on it.</p>
 <h3 id="checking-a-config-agda-deps-doctor">Checking a config: <code>agda-deps doctor</code></h3>
 <pre><code>agda-deps doctor [--config=PATH] [--strict]
 </code></pre>
@@ -300,13 +250,14 @@ a file before relying on it.</p>
 <ul>
 <li><strong>Unknown keys.</strong> A misspelled key is ignored by the parser, so the setting
   just never applies. <code>doctor</code> names it and suggests the closest real key.</li>
-<li><strong>Bad values.</strong> A colour that isn't <code>#RRGGBB</code>, an unrecognised <code>view:</code> slug
+<li><strong>Bad values.</strong> A colour that isn't <code>#RRGGBB</code>, an unrecognised <code>format:</code> slug
   (with a did-you-mean), <code>exclude: Data</code> where a list was meant, a quoted
-  <code>"true"</code>, a negative <code>max-snippet-bytes</code>. Also the YAML trap of an unquoted
+  <code>"true"</code>, a non-positive <code>min-term-depth</code>. Also the YAML trap of an unquoted
   <code>color-hole: #9c27b0</code>, which YAML reads as a comment, leaving the key null.</li>
-<li><strong>Combinations that do nothing.</strong> <code>with-source</code> without <code>lazy</code>, <code>cache-dir</code>
-  without <code>incremental</code>, <code>min-term-depth</code> without <code>with-term-hashes</code>, a <code>view:</code>
-  under <code>format: dot</code>, <code>incremental</code> together with <code>keep-going</code>, and the rest.</li>
+<li><strong>Combinations that do nothing.</strong> <code>lazy</code> under <code>format: dot</code>, <code>cache-dir</code>
+  without <code>incremental</code>, <code>min-term-depth</code> without <code>with-term-hashes</code>,
+  <code>json-mode</code> under <code>format: dot</code>, <code>incremental</code> together with <code>keep-going</code>,
+  and the rest.</li>
 </ul>
 <pre><code>$ agda-deps doctor
 agda-deps doctor
@@ -315,8 +266,8 @@ agda-deps doctor
   origin     found in the nearest ancestor with a *.agda-lib (/home/me/proj)
   keys       6 set
 
-  error    view: &quot;sigmaa&quot; is not a recognised value
-           fix: did you mean `sigma`? one of: cytoscape, ide-three-pane, …
+  error    format: &quot;jsonn&quot; is not a recognised value
+           fix: did you mean `json`? one of: dot, json
   warning  cache-dir: only locates the incremental cache, which is off
            fix: add incremental: true, or drop cache-dir
 
@@ -325,38 +276,26 @@ Summary: 1 error, 1 warning
 <p>Exit status is 1 when there is any error, 0 otherwise; <code>--strict</code> fails on
 warnings too, for use as a CI gate. Warnings assume the config stands alone —
 a CLI flag layered on top can legitimately rescue any of them.</p>
-<h2 id="linking-to-source">Linking to source</h2>
-<p><code>--with-source</code> (with <code>--lazy</code>) runs Agda's HTML highlighter on every loaded
-module, slices each definition's highlighted span into a per-module
-<code>snippets/&lt;Module&gt;.json</code>, and fetches it on demand when a leaf is clicked. It
-requires <code>--lazy</code> because <code>fetch()</code> needs HTTP serving:</p>
-<pre><code>cabal run agda-deps -- --format=html --with-source --lazy -i test/ -o test/ test/Test.agda
-cd test &amp;&amp; python3 -m http.server 8000   # open http://localhost:8000/deps.html
-</code></pre>
-<p>Names whose source isn't reachable (some builtins/synthetics) get a placeholder.
-Passing <code>--with-source</code> without <code>--lazy</code> warns and renders without snippets.</p>
-<p><code>--agda-html-dir=DIR</code> instead <em>links out</em> to whole <code>agda --html</code> module pages
-you have already generated (<code>DIR/&lt;Module.Name&gt;.html</code>, path relative to the
-generated HTML); the views grow an <strong>Open source</strong> link. Wired into the
-<code>sunburst-hierarchy</code> view.</p>
 <h2 id="large-projects-lazy-output">Large projects: lazy output</h2>
-<p><code>--lazy</code> splits the output into a small page shell plus on-demand JSON, so the
-initial page is tiny regardless of project size:</p>
-<pre><code>cabal run agda-deps -- --format=html --with-source --lazy -i src/ -o out/ src/Main.agda
-cd out &amp;&amp; python3 -m http.server 8000
+<p><code>--lazy</code> splits the JSON into a module-level skeleton plus per-module detail
+files, so a renderer can load the shape of the project first and pull in
+definitions only when they are asked for:</p>
+<pre><code>cabal run agda-deps -- --format=json --lazy -i src/ -o out/ src/Main.agda
+agda-plotter --view=big-module-dag-pods -o out/
+cd out &amp;&amp; python3 -m http.server 8000     # http://localhost:8000/deps.html
 </code></pre>
 <p>Layout under <code>-o</code>:</p>
-<pre><code>deps.html              ← small shell, no inlined data
-graph.json             ← module-level skeleton:
+<pre><code>graph.json             ← module-level skeleton:
                        ·   modules, moduleEdges (compact A→B pairs)
                        ·   moduleFiles: name → modules/&lt;Module&gt;.json  (the manifest)
-                       ·   bundleFiles: name → snippets/&lt;Module&gt;.json  (only with --with-source)
 modules/&lt;Module&gt;.json  ← that module's leaves + edges (detail-&lt;hash&gt;.json for non-safe names)
-snippets/&lt;Module&gt;.json ← per-module snippet bundle (bundle-&lt;hash&gt;.json fallback)
+deps.html              ← small shell, no inlined data   (written by agda-plotter)
 </code></pre>
-<p>On load the shell fetches only <code>graph.json</code> and renders module boxes plus
-aggregated edges; clicking a module fetches its <code>modules/&lt;Module&gt;.json</code> and
-splices in the leaves.</p>
+<p><code>--lazy</code> only splits the packed form; under <code>--json-mode=expanded</code> it is inert
+and a single <code>deps.json</code> is written. It needs <code>-o</code>, and the resulting page
+needs HTTP serving — browsers block <code>fetch()</code> on <code>file://</code>.</p>
+<p>Without <code>--lazy</code>, <code>--format=json</code> writes one <code>deps.json</code> and <code>agda-plotter</code>
+inlines it into a self-contained page that opens straight off disk.</p>
 <h2 id="consuming-the-json-output">Consuming the JSON output</h2>
 <p><code>--format=json</code> ships in two shapes, selected by <code>--json-mode</code>:</p>
 <ul>
@@ -606,7 +545,7 @@ concept for visualizing and exploring Agda projects. Feel free to edit them.</p>
 </main>
 <footer class="site-footer"><div class="wrap">
 <div>
-<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="roadmap.html">Roadmap</a></div>
+<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a> · <a href="changelog.html">Changelog</a></div>
 <div class="muted">Built with
 <a href="https://getpelican.com">Pelican</a>.
 <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div>

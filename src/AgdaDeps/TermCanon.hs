@@ -30,10 +30,10 @@ import           Agda.Syntax.Common
 import           Agda.Syntax.Internal
                    ( Term(..), pattern Var
                    , Elim, Elim'(..), Elims
-                   , Abs, unAbs
+                   , unAbs
                    , Dom, unDom
                    , Type, unEl
-                   , ConHead, conName
+                   , conName
                    )
 import           Agda.Syntax.Common.Pretty ( prettyShow )
 import           Agda.Utils.Hash ( hashString )

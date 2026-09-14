@@ -58,10 +58,10 @@ import System.FilePath
   ( (</>), takeDirectory, takeExtension )
 
 import AgdaDeps.Options
-  ( Options(..), OutputFormat(..), JsonMode(..), View(..)
+  ( Options(..), OutputFormat(..), JsonMode(..)
   , ColorPalette(..), defaultPalette, defaultOptions
-  , viewSlug, formatSlug, jsonModeSlug
-  , allViews, allFormats, allJsonModes, parseSlug
+  , formatSlug, jsonModeSlug
+  , allFormats, allJsonModes, parseSlug
   )
 
 -- | YAML config payload. Every field is 'Maybe' so an empty file
@@ -70,20 +70,13 @@ import AgdaDeps.Options
 data Config = Config
   { cfgOutDir          :: Maybe FilePath
   , cfgFormat          :: Maybe OutputFormat
-  , cfgView            :: Maybe View
   , cfgTheme           :: Maybe Theme
   , cfgColorDefined    :: Maybe String
   , cfgColorPostulate  :: Maybe String
   , cfgColorHole       :: Maybe String
   , cfgColorFailed     :: Maybe String
-  , cfgWithSource      :: Maybe Bool
   , cfgLazy            :: Maybe Bool
   , cfgExcludeModules  :: Maybe [String]
-  , cfgNoSourceFor     :: Maybe [String]
-  , cfgMaxSnippetBytes :: Maybe (Maybe Int)
-    -- ^ Outer 'Just' means the field was present in the YAML. Inner
-    -- 'Nothing' means the user wrote @max-snippet-bytes: 0@ to disable
-    -- the cap; matches the CLI's @--max-snippet-bytes=0@ semantics.
   , cfgGzip            :: Maybe Bool
   , cfgKeepGoing       :: Maybe Bool
   , cfgSkipAgda        :: Maybe Bool
@@ -111,25 +104,19 @@ data Config = Config
   , cfgShowImplicit    :: Maybe Bool
     -- ^ Mirror of @--signature-implicits@ (named to avoid clashing with
     -- Agda's own @--show-implicit@).
-  , cfgAgdaHtmlDir     :: Maybe FilePath
-    -- ^ Mirror of @--agda-html-dir=DIR@.
   } deriving (Show)
 
 defaultConfig :: Config
 defaultConfig = Config
   { cfgOutDir          = Nothing
   , cfgFormat          = Nothing
-  , cfgView            = Nothing
   , cfgTheme           = Nothing
   , cfgColorDefined    = Nothing
   , cfgColorPostulate  = Nothing
   , cfgColorHole       = Nothing
   , cfgColorFailed     = Nothing
-  , cfgWithSource      = Nothing
   , cfgLazy            = Nothing
   , cfgExcludeModules  = Nothing
-  , cfgNoSourceFor     = Nothing
-  , cfgMaxSnippetBytes = Nothing
   , cfgGzip            = Nothing
   , cfgKeepGoing       = Nothing
   , cfgSkipAgda        = Nothing
@@ -146,7 +133,6 @@ defaultConfig = Config
   , cfgWithSignatures  = Nothing
   , cfgNormaliseSignatures = Nothing
   , cfgShowImplicit    = Nothing
-  , cfgAgdaHtmlDir     = Nothing
   }
 
 -- | Preset colour palette. Individual @--color-*@ CLI flags layer on
@@ -210,9 +196,6 @@ instance FromJSON OutputFormat where
 instance FromJSON JsonMode where
   parseJSON = parseEnum "json-mode" (parseSlug "json-mode" jsonModeSlug allJsonModes)
 
-instance FromJSON View where
-  parseJSON = parseEnum "view" (parseSlug "view" viewSlug allViews)
-
 instance FromJSON Theme where
   parseJSON = parseEnum "theme" parseTheme
 
@@ -227,24 +210,13 @@ instance FromJSON Config where
       parseObj o = do
         cfgOutDir          <- o .:? "out-dir"
         cfgFormat          <- o .:? "format"
-        cfgView            <- o .:? "view"
         cfgTheme           <- o .:? "theme"
         cfgColorDefined    <- o .:? "color-defined"
         cfgColorPostulate  <- o .:? "color-postulate"
         cfgColorHole       <- o .:? "color-hole"
         cfgColorFailed     <- o .:? "color-failed"
-        cfgWithSource      <- o .:? "with-source"
         cfgLazy            <- o .:? "lazy"
         cfgExcludeModules  <- o .:? "exclude"
-        cfgNoSourceFor     <- o .:? "no-source-for"
-        -- max-snippet-bytes: number; 0 disables the cap.
-        rawMaxSnip         <- o .:? "max-snippet-bytes" :: A.Parser (Maybe Int)
-        let cfgMaxSnippetBytes = case rawMaxSnip of
-              Nothing -> Nothing
-              Just 0  -> Just Nothing
-              Just n
-                | n > 0     -> Just (Just n)
-                | otherwise -> Nothing  -- negatives ignored
         cfgGzip            <- o .:? "gzip"
         cfgKeepGoing       <- o .:? "keep-going"
         cfgSkipAgda        <- o .:? "skip-agda"
@@ -261,7 +233,6 @@ instance FromJSON Config where
         cfgWithSignatures  <- o .:? "with-signatures"
         cfgNormaliseSignatures <- o .:? "normalise-signatures"
         cfgShowImplicit    <- o .:? "signature-implicits"
-        cfgAgdaHtmlDir     <- o .:? "agda-html-dir"
         pure Config{..}
 
 -- ---------------------------------------------------------------------------
@@ -287,13 +258,9 @@ applyConfig c opts0 =
   in opts1
       { optOutDir          = maybe (optOutDir opts1) Just (cfgOutDir c)
       , optFormat          = fromMaybe (optFormat opts1) (cfgFormat c)
-      , optView            = fromMaybe (optView   opts1) (cfgView   c)
       , optColors          = pal'
-      , optWithSource      = fromMaybe (optWithSource opts1) (cfgWithSource c)
       , optLazy            = fromMaybe (optLazy       opts1) (cfgLazy       c)
       , optExcludeModules  = fromMaybe (optExcludeModules opts1) (cfgExcludeModules c)
-      , optNoSourceFor     = fromMaybe (optNoSourceFor    opts1) (cfgNoSourceFor    c)
-      , optMaxSnippetBytes = fromMaybe (optMaxSnippetBytes opts1) (cfgMaxSnippetBytes c)
       , optGzip            = fromMaybe (optGzip       opts1) (cfgGzip       c)
       , optKeepGoing       = fromMaybe (optKeepGoing  opts1) (cfgKeepGoing  c)
       , optSkipAgda        = fromMaybe (optSkipAgda   opts1) (cfgSkipAgda   c)
@@ -309,7 +276,6 @@ applyConfig c opts0 =
       , optWithSignatures  = fromMaybe (optWithSignatures opts1) (cfgWithSignatures c)
       , optNormaliseSignatures = fromMaybe (optNormaliseSignatures opts1) (cfgNormaliseSignatures c)
       , optShowImplicit    = fromMaybe (optShowImplicit   opts1) (cfgShowImplicit   c)
-      , optAgdaHtmlDir     = maybe (optAgdaHtmlDir opts1) Just (cfgAgdaHtmlDir c)
       }
 
 -- ---------------------------------------------------------------------------
@@ -339,25 +305,19 @@ showDefaultsYaml = unlines $
   , "# --- Output ----------------------------------------------------------------"
   , ""
   , "# Output directory. Default: none (usually set with -o on the CLI)."
-  , "# Note: a .html / .json / .dot extension selects the format only when given"
+  , "# Note: a .json / .dot extension selects the format only when given"
   , "# as -o on the command line; here it is just a directory name, so set"
   , "# `format:` below as well."
   , "#out-dir: deps"
   , ""
-  , "# Output format: dot | html | json."
+  , "# Output format: dot | json."
   , "#format: " ++ formatSlug (optFormat defaultOptions)
-  , ""
-  , "# HTML view (only used with format: html). One of: cytoscape,"
-  , "# ide-three-pane, module-dag-pods, source-centric, notion-doc,"
-  , "# wiki-backlinks, sigma, big-module-dag-pods, critical-path-holes,"
-  , "# progress-dashboard, cartographic-atlas, sunburst-hierarchy,"
-  , "# reading-order-narrative, pixel-grid-overview."
-  , "#view: " ++ viewSlug (optView defaultOptions)
   , ""
   , "# --- Node colours ----------------------------------------------------------"
   , ""
   , "# Colour preset for the four definition states: default | light | dark |"
   , "# colorblind. The color-* keys below override individual slots. Default: none."
+  , "# Used by DOT output. agda-plotter takes the same keys for HTML."
   , "#theme: default"
   , ""
   , "# Per-state node colours (#RRGGBB); quote them so YAML doesn't read # as a"
@@ -367,31 +327,16 @@ showDefaultsYaml = unlines $
   , "#color-hole: " ++ yColor (colorHole defaultPalette)
   , "#color-failed: " ++ yColor (colorFailed defaultPalette)
   , ""
-  , "# --- HTML source snippets --------------------------------------------------"
-  , ""
-  , "# Embed source snippets in the HTML (requires lazy: true; served over HTTP)."
-  , "#with-source: " ++ yBool (optWithSource defaultOptions)
-  , ""
-  , "# Split HTML output into per-module files. Needs an HTTP server: browsers"
-  , "# block fetch() on file://."
-  , "#lazy: " ++ yBool (optLazy defaultOptions)
-  , ""
-  , "# Module-name prefixes to exclude from source snippets (with lazy +"
-  , "# with-source). Example: [Agda.Builtin, Data]"
-  , "#no-source-for: []"
-  , ""
-  , "# Maximum bytes per embedded source snippet; 0 disables the cap."
-  , "#max-snippet-bytes: " ++ maxSnip
-  , ""
-  , "# Location of `agda --html` pages, resolved by the browser relative to the"
-  , "# output HTML; adds an \"Open source\" link. Default: none."
-  , "#agda-html-dir: html"
-  , ""
   , "# --- JSON output -----------------------------------------------------------"
   , ""
   , "# JSON layout: packed (CSR adjacency + base64 typed arrays) | expanded"
   , "# (arrays of records)."
   , "#json-mode: " ++ jsonModeSlug (optJsonMode defaultOptions)
+  , ""
+  , "# Split JSON output into a module-level graph.json plus per-module"
+  , "# modules/<Module>.json detail files, instead of one deps.json. What"
+  , "# agda-plotter's lazy page shell fetches. Needs format: json."
+  , "#lazy: " ++ yBool (optLazy defaultOptions)
   , ""
   , "# Add the per-def analytical arrays (kind / line / access / type / subterm)"
   , "# to packed JSON. Only affects json-mode: packed."
@@ -452,7 +397,7 @@ showDefaultsYaml = unlines $
   , "# Default: <out-dir>/.agda-deps-cache."
   , "#cache-dir: .agda-deps-cache"
   , ""
-  , "# Gzip the emitted artifacts."
+  , "# Gzip the JSON files written by the lazy path. Needs lazy: true."
   , "#gzip: " ++ yBool (optGzip defaultOptions)
   , ""
   , "# Suppress progress logging."
@@ -464,10 +409,6 @@ showDefaultsYaml = unlines $
 
     -- Colours start with '#', which YAML would read as a comment: quote them.
     yColor c = "\"" ++ c ++ "\""
-
-    maxSnip = case optMaxSnippetBytes defaultOptions of
-      Nothing -> "0"
-      Just n  -> show n
 
 -- ---------------------------------------------------------------------------
 -- Discovery
@@ -604,7 +545,6 @@ inferFormatFromOutput = pickValue
 
     matchExt :: FilePath -> Maybe String
     matchExt v = case takeExtension v of
-      ".html" -> Just "html"
       ".json" -> Just "json"
       ".dot"  -> Just "dot"
       _       -> Nothing

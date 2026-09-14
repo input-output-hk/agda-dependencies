@@ -19,6 +19,13 @@ module AgdaDeps.Backend
     -- * Per-module state passed between hooks
   , ModuleEnv(..)
   , ModuleRes
+
+    -- * Output writing (shared with "AgdaDeps.SkipAgda")
+  , checkOutputFlags
+  , writeLazyTree
+  , writeJsonMaybeGz
+  , SerialiseCtx(..)
+  , noSerialiseCtx
   ) where
 
 import Control.Monad ( when, unless, forM )
@@ -73,7 +80,7 @@ import Agda.TypeChecking.Monad ( TCM, liftTCM )
 import Agda.TypeChecking.Monad.Base
   ( iImportedModules, miInterface, Interface
   , iScope, iModuleName, iTopLevelModuleName
-  , iSignature, sigDefinitions, iFullHash
+  , sigDefinitions, iFullHash
   , iFilePragmaOptions, iOptionsUsed
   )
 -- 'pragmaStrings' + 'iFilePragmaOptions' live here on both 2.8 and 2.9
@@ -86,27 +93,27 @@ import Agda.Utils.Lens ( (^.) )
 import qualified Data.HashMap.Strict as HMap
 
 import Agda.Compiler.Backend
-  ( Backend'(..), Backend'_boot(..), Recompile(..) )
+  ( Backend', Backend'_boot(..), Recompile(..) )
 import Agda.Syntax.Common ( IsMain(..) )
 
 import System.IO.Unsafe ( unsafePerformIO )
 
 import AgdaDeps.Deps
   ( ADDef(..), NodeRef(..), DefAccess(..)
-  , compileDefAD, collectAllQNames, nodeKey, moduleKey, hashQName
+  , compileDefAD, collectAllQNames, moduleKey, hashQName
+  , withDependencyProvenance
   , mkRef, nodeKeyOfQ, moduleKeyOfQ, nrSrcLoc
   , optionEscapes
   , unsolvedInterfaceLines, liveSilentMetaLines
   , contractIgnoredEdges
   , addInstanceMethodEdges
-  , IgnoredEdgeMap, readIgnoredEdges, mergeIgnoredEdges
-  , MethodProviderMap, readMethodProviders, mergeMethodProviders
-  , UnsaturatedMap, readUnsaturatedRefs
-  , mergeUnsaturatedRefs, partiallyAppliedSet
+  , SideChannels, readSideChannels, sideChannelDelta, mergeSideChannels
+  , readUnsaturatedRefs, partiallyAppliedSet
   , resetSideChannels
   , ArgUsage(..), effectiveOptionFlags )
 import AgdaDeps.FragmentCache
   ( FragmentData(..)
+  , fragmentSideChannels, makeFragmentData
   , optionsFingerprint, fragmentFileFor, readFragment, writeFragment
   , gcFragments )
 import AgdaDeps.SerialiseCache
@@ -117,10 +124,10 @@ import BuildInfo ( buildFingerprint )
 import AgdaDeps.Layout ( Position, computePositions )
 import AgdaDeps.Options
   ( Options(..), OutputFormat(..), DefState
-  , ColorPalette(..), defaultOptions
-  , outdirOpt, formatOpt, viewOpt
-  , colorOpt, withSourceOpt, agdaHtmlDirOpt, lazyOpt, excludeOpt
-  , noSourceForOpt, maxSnippetBytesOpt, gzipOpt, keepGoingOpt, skipAgdaOpt
+  , ColorPalette(..), defaultOptions, formatSlug, lazyTreeOutput
+  , outdirOpt, formatOpt
+  , colorOpt, lazyOpt, excludeOpt
+  , gzipOpt, keepGoingOpt, skipAgdaOpt
   , incrementalOpt, cacheDirOpt, packedAnalyticalOpt
   , quietOpt, noExternalsOpt, jsonModeOpt, lenientImportsOpt
   , resolveDepsOpt
@@ -136,22 +143,21 @@ import AgdaDeps.Precompute ( PrecomputedGraph(..), emptyGraph )
 import qualified Codec.Compression.GZip as GZip
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BLC
-import AgdaDeps.Source ( Snippet, collectHighlightedSnippets )
 import AgdaDeps.Backend.Dot  ( renderDot )
-import AgdaDeps.Backend.GraphJson ( GraphInput(..), ExternalsSummary, buildExternalsSummary )
-import AgdaDeps.Backend.Html ( renderHtml, renderLazyHtml, LazyOutput(..) )
+import AgdaDeps.Backend.GraphJson
+  ( GraphInput(..), GraphJsonOutput(..), ExternalsSummary
+  , ModuleDetailJson(mdjFileName, mdjEpoch, mdjContent)
+  , buildExternalsSummary, buildGraphJson )
 import AgdaDeps.Backend.Json ( renderJson )
 
 -- | Per-module state from 'moduleSetup', threaded to 'postModuleAD':
--- in-scope names plus pre-module snapshots of the two side-channels, so
+-- in-scope names plus a pre-module snapshot of all side channels, so
 -- the fragment cache attributes each module's contributions as a
 -- before/after delta. Must be a delta, not a name-prefix slice: prefixes
 -- miss defs Agda homes in anonymous modules (bare @_.…@ copies).
 data ModuleEnv = ModuleEnv
-  { namesInScope       :: Set QName
-  , envIgnoredBefore   :: IgnoredEdgeMap
-  , envProvidersBefore :: MethodProviderMap
-  , envUnsatBefore     :: UnsaturatedMap
+  { namesInScope          :: Set QName
+  , envSideChannelsBefore :: SideChannels
   }
 
 -- | @--theme=NAME@ parser. Sets the four 'optColor*' slots; individual
@@ -183,13 +189,11 @@ backendWithSeed seed = Backend'
   , options               = seed
   , commandLineFlags      =
       [ Option ['o'] ["out-dir"] (ReqArg outdirOpt "DIR")
-        "Write output files to DIR (deps.dot / deps.html / deps.json).\nWithout it, dot and json go to stdout; html requires it. A DIR\nending in .html / .json / .dot also selects the format unless\n--format is given."
+        "Write output files to DIR (deps.dot / deps.json).\nWithout it, output goes to stdout; --lazy requires it. A DIR\nending in .json / .dot also selects the format unless\n--format is given."
       , Option []    ["format"]  (ReqArg formatOpt "FORMAT")
-        "Output format: dot (default), html, or json."
-      , Option []    ["view"]    (ReqArg viewOpt "VIEW")
-        "HTML view variant: module-dag-pods (default), cytoscape,\nide-three-pane, source-centric, notion-doc, wiki-backlinks,\nsigma, big-module-dag-pods, critical-path-holes,\nprogress-dashboard, cartographic-atlas, sunburst-hierarchy,\nreading-order-narrative, pixel-grid-overview."
+        "Output format: dot (default) or json. HTML rendering moved to\n`agda-plotter`, which reads the JSON this emits."
       , Option []    ["theme"]   (ReqArg themeOpt "THEME")
-        "Colour preset: default (=light), dark, or colorblind.\nIndividual --color-* flags override the corresponding slot."
+        "Colour preset for DOT output: default (=light), dark, or\ncolorblind. Individual --color-* flags override the corresponding\nslot. `agda-plotter` takes the same flags for HTML."
       , Option []    ["config"]  (ReqArg configOpt "PATH")
         "Load a YAML config file (kebab-case keys mirror CLI flag\nnames). CLI flags override config values. The flag is also\nresolved from $AGDA_DEPS_CONFIG or a .agda-deps.yml next to\nthe nearest .agda-lib."
       , Option []    ["color-defined"]
@@ -201,20 +205,12 @@ backendWithSeed seed = Backend'
       , Option []    ["color-hole"]
           (ReqArg (colorOpt "color-hole"      (\p s -> p{ colorHole      = s })) "#RRGGBB")
         "Color for definitions containing unsolved holes (default: #9c27b0)."
-      , Option []    ["with-source"] (NoArg withSourceOpt)
-        "Embed each definition's source snippet (signature + body) into the\nHTML output, fetched on demand. Requires --lazy; without it, has no\neffect. Clicking a leaf opens its definition in a side drawer. To link\nout to whole `agda --html` pages instead, see --agda-html-dir."
-      , Option []    ["agda-html-dir"] (ReqArg agdaHtmlDirOpt "DIR")
-        "Path to the pages written by `agda --html`, RELATIVE to the\ngenerated HTML (e.g. --agda-html-dir=html). The sunburst-hierarchy view\nthen shows an \"Open source\" link opening DIR/<Module.Name>.html. Off by\ndefault; when unset the output is unchanged. Best served over HTTP."
       , Option []    ["lazy"] (NoArg lazyOpt)
-        "HTML output only: split into a small deps.html shell plus\ngraph.json and per-module modules/<Module>.json,\nsnippets/<Module>.json files, loaded lazily via fetch().\nRequires HTTP serving (e.g. python -m http.server)."
+        "JSON output only: split into a module-level graph.json plus\nper-module modules/<Module>.json detail files, instead of one\nmonolithic deps.json. `agda-plotter` renders a page shell that\nfetches them on demand; that needs HTTP serving. Requires -o."
       , Option []    ["exclude"] (ReqArg excludeOpt "PREFIX")
         "Drop every module whose name is PREFIX or starts with PREFIX.\nCan be repeated."
-      , Option []    ["no-source-for"] (ReqArg noSourceForOpt "PREFIX")
-        "Skip source-snippet extraction for modules whose name is\nPREFIX or starts with PREFIX. Can be repeated."
-      , Option []    ["max-snippet-bytes"] (ReqArg maxSnippetBytesOpt "N")
-        "Soft per-module size cap on snippet bundles (default: 1000000).\n--max-snippet-bytes=0 disables the cap."
       , Option []    ["gzip"] (NoArg gzipOpt)
-        "Lazy HTML output only: also write a .gz sibling next to every\nemitted JSON file."
+        "Lazy JSON output only: also write a .gz sibling next to every\nemitted JSON file."
       , Option []    ["color-failed"]
           (ReqArg (colorOpt "color-failed"    (\p s -> p{ colorFailed    = s })) "#RRGGBB")
         "Color for modules whose type-check failed under --keep-going\n(default: #ff9800)."
@@ -261,9 +257,17 @@ backendWithSeed seed = Backend'
   , mayEraseType          = \ _ -> return True
   }
 
--- | Pre-compile hook: clear the side-channels (ignored-edge +
--- instance-method) for a fresh in-process run; warn once on
--- @--incremental@ + @--keep-going@.
+-- | Pre-compile hook: clear every side channel for a fresh in-process run,
+-- then report every flag combination that does not compose.
+--
+-- This is the earliest the backend sees a fully-resolved 'Options':
+-- Agda's own @GetOpt@ walks argv on top of the seed, so 'Main' has only
+-- the seed and the raw argv. Agda has already type-checked by the time
+-- this hook runs — but the per-definition walk, the layout pass and
+-- graph assembly have not, so failing here still saves the bulk of the
+-- backend's work rather than reporting at the very end.
+-- 'checkOutputFlags' is shared with the @--skip-agda@ path, which
+-- bypasses this hook entirely and does resolve options up front.
 preCompileAD :: Options -> TCM Options
 preCompileAD opts = do
   resetSideChannels
@@ -273,12 +277,39 @@ preCompileAD opts = do
   when (optIncremental opts && optKeepGoing opts) $
     info ("agda-deps: --incremental is disabled under --keep-going "
        ++ "(fragments are only cached from fully-checked runs).")
+  liftIO $ checkOutputFlags opts
   return opts
+
+-- | Report the output-flag combinations that do not compose: exit on the
+-- fatal one, notice on the merely-inert one.
+--
+-- Called from 'preCompileAD' and from 'AgdaDeps.SkipAgda', each as early
+-- as its path can resolve options. One function, so the two paths cannot
+-- disagree about which combinations are accepted or which are merely
+-- reported.
+checkOutputFlags :: Options -> IO ()
+checkOutputFlags opts = do
+  when (optLazy opts && optFormat opts == FmtJson
+        && optOutDir opts == Nothing) $ do
+    hPutStrLn stderr "agda-deps: --lazy requires -o/--out-dir to be set."
+    exitFailure
+  -- CPP module: use '++', not a backslash string gap (CPP collapses '\'-newline).
+  when (optLazy opts && optFormat opts == FmtJson
+        && not (lazyTreeOutput opts)) $
+    info ("agda-deps: --lazy only splits packed JSON and --json-mode=expanded "
+       ++ "is set; writing a single deps.json.")
+  when (optLazy opts && optFormat opts /= FmtJson) $
+    info ("agda-deps: --lazy only affects --format=json; it has no effect on "
+       ++ formatSlug (optFormat opts) ++ " output.")
+
+-- | Whether either incremental cache is active this run.
+incrementalCacheEnabled :: Options -> Bool
+incrementalCacheEnabled opts =
+  optIncremental opts && not (optKeepGoing opts)
 
 -- | Whether the fragment cache is active this run.
 useFragmentCache :: Options -> Bool
-useFragmentCache opts =
-  optIncremental opts && not (optKeepGoing opts)
+useFragmentCache = incrementalCacheEnabled
 
 -- | Where fragments + the serialise manifest live: @--cache-dir@, else
 -- @<out-dir>/.agda-deps-cache@ (or the cwd when output is stdout).
@@ -290,7 +321,7 @@ cacheDirFor opts = case optCacheDir opts of
 -- | Whether the @--incremental@ serialise cache is active. Disabled
 -- under @--keep-going@.
 useSerialiseCache :: Options -> Bool
-useSerialiseCache opts = optIncremental opts && not (optKeepGoing opts)
+useSerialiseCache = incrementalCacheEnabled
 
 -- | Output-context token for the monolithic no-op skip: fingerprints
 -- everything other than per-def /content/ (live module set,
@@ -309,11 +340,10 @@ outputToken opts modules = combineEpochs
     -- GHC's 'Show' limit). Add every new output-affecting option here, or
     -- the no-op skip serves stale output.
     optStrings =
-      [ show (optFormat opts), show (optJsonMode opts), show (optView opts)
-      , show (optColors opts), show (optGzip opts), show (optAgdaHtmlDir opts)
+      [ show (optFormat opts), show (optJsonMode opts), show (optLazy opts)
+      , show (optColors opts), show (optGzip opts)
       , show (optNoExternals opts), show (optExcludeModules opts)
-      , show (optWithSource opts), show (optNoSourceFor opts)
-      , show (optMaxSnippetBytes opts), show (optWithSignatures opts)
+      , show (optWithSignatures opts)
       , show (optNormaliseSignatures opts), show (optShowImplicit opts)
       , show (optWithTermHashes opts), show (optMinTermDepth opts)
       , show (optPackedAnalytical opts)
@@ -336,15 +366,8 @@ moduleSetup opts isMain tlmn _ = do
       -- Skip bypasses compileDef + postModule: re-inject the module's
       -- side-channel slices (else contraction drops edges through its
       -- ignored helpers) and the entry-module capture postModuleAD would do.
-      mergeIgnoredEdges (fragIgnored frag)
-      mergeMethodProviders (fragProviders frag)
-      mergeUnsaturatedRefs (fragUnsaturated frag)
-      case isMain of
-        IsMain -> do
-          iface <- curIF
-          let imports = map fst (iImportedModules iface)
-          liftIO $ writeIORef mainModuleRef (Just (tlmn, imports))
-        NotMain -> return ()
+      mergeSideChannels (fragmentSideChannels frag)
+      captureCurrentMainModule isMain tlmn
       info $ "agda-deps: --incremental: fragment hit for '"
              ++ prettyShow tlmn ++ "' ("
              ++ show (length (fragDefs frag)) ++ " defs)"
@@ -352,15 +375,28 @@ moduleSetup opts isMain tlmn _ = do
     Nothing -> do
       liftIO $ writeIORef recompiledRef True
       allNamesInScope <- nsInScope . allThingsInScope <$> liftTCM getCurrentScope
-      ignoredBefore   <- readIgnoredEdges
-      providersBefore <- readMethodProviders
-      unsatBefore     <- readUnsaturatedRefs
+      channelsBefore <- readSideChannels
       return $ Recompile
-        (ModuleEnv allNamesInScope ignoredBefore providersBefore unsatBefore)
+        (ModuleEnv allNamesInScope channelsBefore)
 
 {-# NOINLINE mainModuleRef #-}
 mainModuleRef :: IORef (Maybe (TopLevelModuleName, [TopLevelModuleName]))
 mainModuleRef = unsafePerformIO $ newIORef Nothing
+
+-- | Record the entry module and its imports when this hook is for the main
+-- module. The caller supplies an interface it already has.
+captureMainModule
+  :: IsMain -> TopLevelModuleName -> Interface -> TCM ()
+captureMainModule NotMain _ _ = pure ()
+captureMainModule IsMain tlmn iface =
+  let imports = map fst (iImportedModules iface)
+  in liftIO $ writeIORef mainModuleRef (Just (tlmn, imports))
+
+-- | Cache-hit variant: read the current interface only for the main module.
+captureCurrentMainModule :: IsMain -> TopLevelModuleName -> TCM ()
+captureCurrentMainModule NotMain _ = pure ()
+captureCurrentMainModule isMain tlmn =
+  curIF >>= captureMainModule isMain tlmn
 
 {-# NOINLINE failedModulesRef #-}
 failedModulesRef :: IORef (Set String)
@@ -395,11 +431,7 @@ postModuleAD
   -> TCM [Maybe ADDef]
 postModuleAD opts env isMain tlmn defs = do
   iface <- curIF
-  case isMain of
-    IsMain -> do
-      let imports = map fst (iImportedModules iface)
-      liftIO $ writeIORef mainModuleRef (Just (tlmn, imports))
-    NotMain -> return ()
+  captureMainModule isMain tlmn iface
 
   -- Recover dead-end private defs Agda's compileDef hook skips:
   -- 'eliminateDeadCode' prunes private defs no live code calls from
@@ -432,28 +464,16 @@ postModuleAD opts env isMain tlmn defs = do
           NotMain -> True
           IsMain  -> not (null sigDefs) || null (catMaybes result)
     when cacheable $ do
-      ignoredAll   <- readIgnoredEdges
-      providersAll <- readMethodProviders
-      unsatAll     <- readUnsaturatedRefs
+      channelsAfter <- readSideChannels
       -- This module's contributions = the delta since 'moduleSetup'
       -- snapshotted the side-channels. Delta, not name-prefix slice (see
       -- 'ModuleEnv').
-      let ignoredFrag = M.difference ignoredAll (envIgnoredBefore env)
-          -- Providers grow by *prepending* binders per method key, so
-          -- the delta on a shared key is the new list's prefix.
-          providersFrag = M.differenceWith
-            (\ new old -> case take (length new - length old) new of
-                            [] -> Nothing
-                            xs -> Just xs)
-            providersAll
-            (envProvidersBefore env)
-          -- Keyed by the referring def, so the key delta IS this module's
-          -- defs; a def only ever grows its own entry.
-          unsatFrag = M.difference unsatAll (envUnsatBefore env)
+      let channelsFrag =
+            sideChannelDelta (envSideChannelsBefore env) channelsAfter
           path = fragmentFileFor (cacheDirFor opts) (prettyShow tlmn)
       fp <- curOptsFingerprint
       writeFragment path fp (iFullHash iface)
-        (FragmentData (catMaybes result) ignoredFrag providersFrag unsatFrag)
+        (makeFragmentData (catMaybes result) channelsFrag)
 
   return result
 
@@ -463,9 +483,9 @@ postModuleAD opts env isMain tlmn defs = do
 -- the graph is built) from the options, live module set and on-disk
 -- manifest — never the graph — so when it fires the whole 'emitFullGraph'
 -- pipeline is skipped, not just the final write. Same inputs as the
--- per-format 'monoOutputUnchanged' check, taken earlier. Only @deps.json@
--- and non-lazy @deps.html@ carry a single token; @--lazy@ and @dot@ fall
--- through to the full pipeline.
+-- per-format 'monoOutputUnchanged' check, taken earlier. Only non-lazy
+-- @deps.json@ carries a single token; @--lazy@ and @dot@ fall through to
+-- the full pipeline.
 postCompileAD
   :: Options -> IsMain -> Map TopLevelModuleName [Maybe ADDef] -> TCM ()
 postCompileAD opts _ defMap = do
@@ -483,23 +503,24 @@ postCompileAD opts _ defMap = do
   case earlySkip of
     Just slot -> do
       info $ "agda-deps: --incremental: " ++ slot ++ " unchanged; skipped re-emit."
-      when (useFragmentCache opts) $ do
-        removed <- gcFragments cacheDir liveModules
-        when (removed > 0) $
-          info $ "agda-deps: --incremental: pruned " ++ show removed
-               ++ " stale fragment(s)."
+      gcStaleFragments opts cacheDir liveModules
     Nothing ->
       emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable
 
 -- | Whether the up-front no-op skip fires, and for which output file
--- ('Nothing' = fall through). Reuses 'monoOutputUnchanged' so it can't
--- drift from the per-format check. Only @deps.json@ / non-lazy @deps.html@.
+-- ('Nothing' = fall through). Only the monolithic @deps.json@: the
+-- @--lazy@ tree is many files with their own epochs, checked
+-- individually in 'writeLazyTree' so a missing one is still rewritten,
+-- and @dot@ is never cached.
+--
+-- Keyed on 'lazyTreeOutput' rather than @optLazy@, so
+-- @--lazy --json-mode=expanded@ — which does write one monolithic file —
+-- gets the skip too instead of building the whole graph first.
 hoistedMonoSkip :: Options -> FilePath -> Epoch -> Bool -> IO (Maybe String)
 hoistedMonoSkip opts cacheDir monoToken monoSkippable =
   case (optOutDir opts, optFormat opts) of
-    (Just dir, FmtJson) -> check "deps.json" (dir </> "deps.json")
-    (Just dir, FmtHtml)
-      | not (optLazy opts) -> check "deps.html" (dir </> "deps.html")
+    (Just dir, FmtJson)
+      | not (lazyTreeOutput opts) -> check "deps.json" (dir </> "deps.json")
     _ -> pure Nothing
   where
     check slot path = do
@@ -738,7 +759,7 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
           [ row | row@(_, (ms, cs)) <- withLive, not (null ms && null cs) ]
         where
           withLive = case entryModule of
-            Just em | not (null liveMetaLines), keep em ->
+            Just em | not (null liveMetaLines) && keep em ->
               let bump (m, (ms, cs))
                     | m == em   = (m, (sort (liveMetaLines ++ ms), cs))
                     | otherwise = (m, (ms, cs))
@@ -754,8 +775,8 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
     Just dir -> liftIO $ createDirectoryIfMissing True dir
     Nothing  -> return ()
 
-  let -- Shared graph-data bundle for the JSON / HTML emitters; each render
-      -- path overrides only its format-specific fields via record update.
+  let -- Shared graph-data bundle for the emitters; each render path
+      -- overrides only its format-specific fields via record update.
       baseGraphInput = GraphInput
         { giDefs             = defs
         , giStateMap         = stateMap
@@ -766,9 +787,7 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
         , giExternalModules  = externalModules
         , giFailedModules    = failedModules
         , giPositions        = positions
-        , giWithSource       = False
-        , giSnippetModules   = []
-        , giLazy             = False
+        , giLazy             = lazyTreeOutput opts
         , giExtraModules     = S.empty
         , giReExports        = []
         , giExternalsSummary = externalsSummary
@@ -778,53 +797,46 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
         , giUnsolvedModules  = unsolvedModules
         }
 
+      -- JSON-specific fields on top of the shared base.
+      gi = baseGraphInput { giReExports = reExportRows
+                          , giPackedAnalytical = optPackedAnalytical opts }
+      sc = SerialiseCtx (useSerialiseCache opts) cacheDir monoSkippable monoToken
+
   info "agda-deps: writing output…"
-  case optFormat opts of
-    FmtDot ->
+  -- One scrutiny of the output plan. '--lazy' without '-o' already
+  -- exited in 'checkOutputFlags', back in 'preCompileAD', so the lazy
+  -- arm can take the directory as given.
+  case (optFormat opts, lazyTreeOutput opts, optOutDir opts) of
+    (FmtDot, _, mDir) ->
       let dotText = renderDot (optColors opts) stateMap failedModules defs
-      in case optOutDir opts of
-           Just dir -> liftIO $ TL.writeFile (dir </> "deps.dot") dotText
-           Nothing  -> liftIO $ TL.putStrLn dotText
-    FmtJson ->
-      let jsonText = renderJson (optJsonMode opts)
-                       (baseGraphInput { giReExports = reExportRows
-                                       , giPackedAnalytical = optPackedAnalytical opts })
-      in case optOutDir opts of
-        Nothing -> liftIO $ putStrLn jsonText
-        Just dir -> liftIO $ do
-          let path = dir </> "deps.json"
-          skip <- monoOutputUnchanged monoSkippable cacheDir (optGzip opts)
-                    "deps.json" monoToken path
-          if skip
-            then info "agda-deps: --incremental: deps.json unchanged; skipped re-emit."
-            else do
-              writeFile path jsonText
-              when (useSerialiseCache opts) $
-                writeManifest cacheDir (optGzip opts)
-                  (manifestFromList [("deps.json", monoToken)])
-    FmtHtml ->
-      case optOutDir opts of
-        Nothing -> liftIO $ do
-          hPutStrLn stderr "agda-deps: --format=html requires -o/--out-dir to be set."
-          exitFailure
-        Just dir -> do
-          -- Snippet embedding only exists in the --lazy path. Without
-          -- --lazy, skip collecting snippets and emit a notice.
-          snippetMap <-
-            if optWithSource opts && optLazy opts
-              then collectHighlightedSnippets (optNoSourceFor opts) dir allQNames
-              else do
-                when (optWithSource opts) $
-                  -- CPP module: use '++', not a backslash string gap (CPP collapses '\'-newline).
-                  info ("agda-deps: --with-source has no effect without --lazy "
-                     ++ "(self-contained inline source was removed); rendering "
-                     ++ "without embedded snippets. Use --with-source --lazy, or "
-                     ++ "--agda-html-dir=DIR to link out to `agda --html` pages.")
-                return M.empty
-          liftIO $ writeHtmlOutput dir opts (SerialiseCtx (useSerialiseCache opts) cacheDir monoSkippable monoToken) snippetMap baseGraphInput
+      in liftIO $ case mDir of
+           Just dir -> TL.writeFile (dir </> "deps.dot") dotText
+           Nothing  -> TL.putStrLn dotText
+
+    -- '--lazy': a module-level graph.json plus one detail file per
+    -- module. Built through 'buildGraphJson' directly so the detail
+    -- files come out of the same pass as the skeleton.
+    (FmtJson, True, Just dir) -> liftIO $ writeLazyTree dir opts sc (buildGraphJson gi)
+
+    (FmtJson, _, Nothing) -> liftIO $ putStrLn (renderJson (optJsonMode opts) gi)
+
+    (FmtJson, _, Just dir) -> liftIO $ do
+      -- 'hoistedMonoSkip' already ran this exact check before the graph
+      -- was built; reaching here means it declined, so write.
+      let path = dir </> "deps.json"
+      writeFile path (renderJson (optJsonMode opts) gi)
+      when (useSerialiseCache opts) $
+        writeManifest cacheDir (optGzip opts)
+          (manifestFromList [("deps.json", monoToken)])
 
   -- '--incremental': prune fragment files for modules no longer in the
   -- graph. Live set = every module Agda processed this run.
+  gcStaleFragments opts cacheDir liveModules
+
+-- | Prune stale fragments after a successful output path. Call sites remain
+-- explicit so exceptions do not cause GC as an extra side effect.
+gcStaleFragments :: Options -> FilePath -> [String] -> TCM ()
+gcStaleFragments opts cacheDir liveModules =
   when (useFragmentCache opts) $ do
     removed <- gcFragments cacheDir liveModules
     when (removed > 0) $
@@ -874,10 +886,22 @@ data SerialiseCtx = SerialiseCtx
   , scMonoToken :: Epoch      -- ^ output-context token ('outputToken').
   }
 
--- | Whether a monolithic output (@deps.json@ / @deps.html@) re-emit can
--- be skipped: @skippable@ (cache active + nothing recompiled), the file
--- exists, and its manifest slot matches the current @token@. Shared by
--- the JSON and HTML paths so the two checks can't drift. Needs BOTH the
+-- | The cache-disabled context: every file is written, nothing is read,
+-- no manifest is kept. For callers with no incremental machinery — see
+-- 'AgdaDeps.SkipAgda', which never type-checks and so has nothing to
+-- cache against.
+noSerialiseCtx :: SerialiseCtx
+noSerialiseCtx = SerialiseCtx
+  { scEnabled   = False
+  , scCacheDir  = ""
+  , scMonoSkip  = False
+  , scMonoToken = 0
+  }
+
+-- | Whether a monolithic @deps.json@ re-emit can be skipped: @skippable@
+-- (cache active + nothing recompiled), the file exists, and its manifest
+-- slot matches the current @token@. Shared with the up-front
+-- 'hoistedMonoSkip' so the two checks can't drift. Needs BOTH the
 -- recompiled guard (in @skippable@) and a matching @token@.
 monoOutputUnchanged
   :: Bool -> FilePath -> Bool -> String -> Epoch -> FilePath -> IO Bool
@@ -888,60 +912,54 @@ monoOutputUnchanged skippable cacheDir gz slot token path
       ex <- System.Directory.doesFileExist path
       pure (manifestLookup slot m == Just token && ex)
 
--- | Write the HTML output: a self-contained @deps.html@, or (with
--- @--lazy@) a shell plus @graph.json@, per-module detail files, and
--- snippet files.
+-- | Write the @--lazy@ output tree: a module-level @graph.json@ plus one
+-- @modules\/\<Module\>.json@ detail file per module.
 --
--- Under @--incremental@ the lazy per-module + snippet files are rewritten
--- only when their content epoch changed (skipped files never force their
--- thunk); the non-lazy @deps.html@ uses the monolithic no-op skip.
-writeHtmlOutput
+-- Under @--incremental@ every file is rewritten only when it changed,
+-- and a skipped file never forces its (lazy) content thunk — which is
+-- the point of 'ModuleDetailJson' carrying a strict 'mdjEpoch' beside a
+-- lazy 'mdjContent'.
+--
+-- That includes the skeleton. @graph.json@ is not small: with 'giLazy'
+-- only the @defs@ \/ @edges@ blobs move out, so it still carries the
+-- per-module trees, the pod layout, the @moduleFiles@ manifest and —
+-- unconditionally — @searchIndex@, i.e. every definition name in the
+-- corpus plus its bigrams. Measured at ~630 bytes per module, which is
+-- tens of megabytes of 'String' to re-materialise on a corpus large
+-- enough to want @--lazy@ in the first place. So it takes the same
+-- monolithic no-op check @deps.json@ gets, against its own manifest
+-- slot; on an unchanged rebuild its thunk is never forced at all.
+writeLazyTree
   :: FilePath -> Options -> SerialiseCtx
-  -> Map NodeRef Snippet -- ^ per-definition source snippets (@--with-source@)
-  -> GraphInput          -- ^ shared graph data (from 'postCompileAD')
+  -> GraphJsonOutput  -- ^ from 'buildGraphJson' with @giLazy = True@
   -> IO ()
-writeHtmlOutput dir opts sc snippetMap gi
-  | optLazy opts = do
-      let gz = optGzip opts
-          lo = renderLazyHtml (optView opts) (optColors opts) gz (optAgdaHtmlDir opts) snippetMap gi
-      -- Shell + module-level skeleton are small: always (re)write.
-      writeFile (dir </> "deps.html")  (lazyShellHtml lo)
-      writeJsonMaybeGz gz (dir </> "graph.json") (lazyGraphJson lo)
+writeLazyTree dir opts sc gjo = do
+  let gz        = optGzip opts
+      skeleton  = dir </> "graph.json"
+      graphSlot = "graph.json"
 
-      oldManifest <-
-        if scEnabled sc then readManifest (scCacheDir sc) gz else pure mempty
+  oldManifest <-
+    if scEnabled sc then readManifest (scCacheDir sc) gz else pure mempty
 
-      detailEntries <-
-        case lazyModuleDetails lo of
-          []      -> return []
-          details -> do
-            let modulesDir = dir </> "modules"
-            createDirectoryIfMissing True modulesDir
-            mapM (writeDetail gz oldManifest modulesDir) details
+  skeletonCurrent <-
+    if scMonoSkip sc && manifestLookup graphSlot oldManifest == Just (scMonoToken sc)
+      then fileCurrent gz skeleton
+      else pure False
+  if skeletonCurrent
+    then info "agda-deps: --incremental: graph.json unchanged; skipped re-emit."
+    else writeJsonMaybeGz gz skeleton (gjoGraphJson gjo)
 
-      snippetEntries <-
-        case lazySnippetBundles lo of
-          []      -> return []
-          bundles -> do
-            let snippetDir = dir </> "snippets"
-            createDirectoryIfMissing True snippetDir
-            mapM (writeBundle gz oldManifest snippetDir (optMaxSnippetBytes opts)) bundles
+  detailEntries <-
+    case gjoModuleDetails gjo of
+      []      -> return []
+      details -> do
+        let modulesDir = dir </> "modules"
+        createDirectoryIfMissing True modulesDir
+        mapM (writeDetail gz oldManifest modulesDir) details
 
-      when (scEnabled sc) $
-        writeManifest (scCacheDir sc) gz
-          (manifestFromList (catMaybes (detailEntries ++ snippetEntries)))
-  | otherwise = do
-      let path = dir </> "deps.html"
-      skip <- monoOutputUnchanged (scMonoSkip sc) (scCacheDir sc) (optGzip opts)
-                "deps.html" (scMonoToken sc) path
-      if skip
-        then info "agda-deps: --incremental: deps.html unchanged; skipped re-emit."
-        else do
-          writeFile path $
-            renderHtml (optView opts) (optColors opts) (optGzip opts) (optAgdaHtmlDir opts) snippetMap gi
-          when (scEnabled sc) $
-            writeManifest (scCacheDir sc) (optGzip opts)
-              (manifestFromList [("deps.html", scMonoToken sc)])
+  when (scEnabled sc) $
+    writeManifest (scCacheDir sc) gz
+      (manifestFromList ((graphSlot, scMonoToken sc) : detailEntries))
   where
     -- Whether a file (and its .gz sibling, if gzip) is already on disk.
     fileCurrent :: Bool -> FilePath -> IO Bool
@@ -950,44 +968,21 @@ writeHtmlOutput dir opts sc snippetMap gi
       if not gz then pure a
                 else (a &&) <$> System.Directory.doesFileExist (full ++ ".gz")
 
-    -- A module-detail file. Returns the manifest entry (always 'Just' —
-    -- on disk afterwards), forcing the content thunk only on an actual write.
+    -- The returned pair is forced before it is handed back: leaving it
+    -- as thunks over @md@ would keep every 'ModuleDetailJson' — and so
+    -- every rendered detail 'String' — reachable until the fold ends,
+    -- which is the opposite of what @--lazy@ is for.
     writeDetail
-      :: Bool -> Manifest -> FilePath -> (FilePath, Epoch, String)
-      -> IO (Maybe (String, Epoch))
-    writeDetail gz oldM destDir (fname, epoch, content) = do
-      let slot = "modules/" ++ fname
-          full = destDir </> fname
+      :: Bool -> Manifest -> FilePath -> ModuleDetailJson -> IO (String, Epoch)
+    writeDetail gz oldM destDir md = do
+      let !fname = mdjFileName md
+          !epoch = mdjEpoch md
+          !slot  = "modules/" ++ fname
+          full   = destDir </> fname
       uptodate <- if scEnabled sc && manifestLookup slot oldM == Just epoch
                     then fileCurrent gz full else pure False
-      unless uptodate $ writeJsonMaybeGz gz full content
-      pure (Just (slot, epoch))
-
-    -- A snippet bundle. The byte cap is checked only when a (re)write is
-    -- needed, so an unchanged bundle is skipped without forcing its content.
-    -- A cap change is folded into the epoch. Cap-skipped bundles write no
-    -- file and record no manifest entry ('Nothing').
-    writeBundle
-      :: Bool -> Manifest -> FilePath -> Maybe Int -> (FilePath, Epoch, String)
-      -> IO (Maybe (String, Epoch))
-    writeBundle gz oldM destDir mCap (fname, epoch0, content) = do
-      let slot  = "snippets/" ++ fname
-          full  = destDir </> fname
-          epoch = combineEpochs [epoch0, hashEpoch (show mCap)]
-      uptodate <- if scEnabled sc && manifestLookup slot oldM == Just epoch
-                    then fileCurrent gz full else pure False
-      if uptodate
-        then pure (Just (slot, epoch))
-        else case mCap of
-          Just n | length content > n -> do
-            hPutStrLn stderr $
-              "agda-deps: skipping snippet bundle "
-                ++ fname ++ " (" ++ show (length content)
-                ++ " bytes > " ++ show n ++ " byte cap; set --max-snippet-bytes=0 to disable)"
-            pure Nothing
-          _ -> do
-            writeJsonMaybeGz gz full content
-            pure (Just (slot, epoch))
+      unless uptodate $ writeJsonMaybeGz gz full (mdjContent md)
+      pure $! (slot, epoch)
 
 -- | Write a JSON file at @path@, and (when @gz@ is set) a gzip-compressed
 -- @path.gz@ sibling.
@@ -1053,7 +1048,7 @@ dropExternalDefs externals defs =
   -- ('M.keysSet', no re-check), not by running 'isExt' over both — the
   -- @M.keysSet _depsProv == _deps@ invariant makes them identical.
   in [ let !prov' = M.filterWithKey (\qn _ -> not (isExt qn)) (_depsProv d)
-       in d { _deps = M.keysSet prov', _depsProv = prov' }
+       in withDependencyProvenance prov' d
      | d <- defs, not (isExt (_name d))
      ]
 

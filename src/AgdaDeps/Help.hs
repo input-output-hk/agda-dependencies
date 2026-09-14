@@ -67,8 +67,9 @@ printHelp = putStr $ unlines
   , "Usage: agda-deps [OPTIONS...] FILE.agda"
   , "       agda-deps doctor [--config=PATH] [--strict]"
   , ""
-  , "An Agda compiler backend that emits a dependency graph (DOT/HTML/JSON)"
-  , "of every definition reachable from FILE.agda."
+  , "An Agda compiler backend that emits a dependency graph (DOT/JSON) of"
+  , "every definition reachable from FILE.agda. To render the JSON as an"
+  , "interactive HTML page, feed it to `agda-plotter`."
   ]
     -- 2.9 added a leading column-width argument to 'usageInfo'.
 #if MIN_VERSION_Agda(2,9,0)

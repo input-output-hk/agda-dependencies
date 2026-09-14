@@ -21,17 +21,9 @@ Recipes: [Examples.md](Examples.md). Planned work: [TODO.md](TODO.md).
   (`stDecodedModules` / `stVisitedModules` / mtime-based `.agdai` invalidation)
   that cross-command reuse would touch.
 
-- **Snippet hashing for the `--skip-agda` drawer.** `big-module-dag-pods` keys defs
-  by a Murmur-on-`prettyShow` hash that `SkipAgda` doesn't reimplement, so it shows
-  a fallback. Add a JS-side hash for a future `--skip-agda --with-source` mode.
-
 - **Sub-modules in the source scan.** `Precompute.parseHeader` reads only the first
   `module …` per file; nested `module Foo.Inner where` blocks are missed. Fine for
   `--skip-agda` today.
-
-- **Scale validation at 100k modules.** `big-module-dag-pods` has the right shape
-  but is untested at that size; tune `BUCKET_SIZE` / `EDGE_BUDGET` / `VIEWPORT_PAD`
-  against a real corpus.
 
 - **External-module heuristic for `--skip-agda`.** Currently: external iff the
   source is outside `cwd` or it appears only as an import target. Could read
@@ -49,14 +41,15 @@ Recipes: [Examples.md](Examples.md). Planned work: [TODO.md](TODO.md).
 
 - **A `with`-provenance tag that actually fires.** The old `with` value in
   `definitionEdgesProvenance` was removed on 2026-08-31 as unreachable (see
-  [CLAUDE.md](CLAUDE.md) — `funWith` is non-empty on exactly the defs `ignoreDef`
-  drops). A dependency reached *only* through a `with`-abstraction is a real and
-  useful distinction, but the only place left to recover it is
-  `contractIgnoredEdges`: when the hidden intermediary was a with-function, tag the
-  contracted edge instead of inheriting the source's tag. That is a wire-*content*
-  change — edges currently tagged `body` would become `with`, re-goldening this repo
-  and the consumer's baselines — so it wants an explicit request, not a silent fix.
-  The consumer repo has been told the tag is gone and is not building on it.
+  [the `EdgeProv` rationale](src/AgdaDeps/Deps.hs) — `funWith` is non-empty on
+  exactly the defs `ignoreDef` drops). A dependency reached *only* through a
+  `with`-abstraction is a real and useful distinction, but the only place left to
+  recover it is `contractIgnoredEdges`: when the hidden intermediary was a
+  with-function, tag the contracted edge instead of inheriting the source's tag.
+  That is a wire-*content* change — edges currently tagged `body` would become
+  `with`, re-goldening this repo and the consumer's baselines — so it wants an
+  explicit request, not a silent fix. The consumer repo has been told the tag is
+  gone and is not building on it.
 
 - **`argUsage`: telling an *inserted* instance binder from a written one**
   (consumer field report, 2026-09-04, ask P6). `Protocol.Jolteon.Block.BlockId`

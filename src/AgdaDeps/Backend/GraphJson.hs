@@ -4,11 +4,11 @@
 -- | v2 graph.json schema emitter.
 --
 -- 'buildGraphJson' emits the packed form (CSR adjacency, base64 typed
--- arrays) consumed by the HTML viewer; 'buildExpandedJson' emits the
--- record-array form for @--json-mode=expanded@. 'buildModuleDetails'
--- produces the per-module detail files for lazy mode. The lazy-ingest
--- filename scheme ('moduleDetailFilename', 'snippetBundleFilename') is
--- shared with "AgdaDeps.Backend.Html".
+-- arrays) consumed by @agda-plotter@'s views; 'buildExpandedJson' emits
+-- the record-array form for @--json-mode=expanded@, consumed by analysis
+-- tools. 'buildModuleDetails' produces the per-module detail files for
+-- @--lazy@, named through 'moduleDetailFilename'. Only the packed form
+-- honours 'giLazy'.
 module AgdaDeps.Backend.GraphJson
   ( -- * Inputs gathered from the backend
     GraphInput(..)
@@ -27,9 +27,8 @@ module AgdaDeps.Backend.GraphJson
     -- * Expanded JSON shape (--json-mode=expanded)
   , buildExpandedJson
 
-    -- * Lazy-ingest filename scheme (shared with "AgdaDeps.Backend.Html")
+    -- * Lazy-ingest filename scheme
   , moduleDetailFilename
-  , snippetBundleFilename
   ) where
 
 import Control.DeepSeq ( NFData(..) )
@@ -55,10 +54,11 @@ import AgdaDeps.Csr
   )
 import AgdaDeps.Deps    ( ADDef(..), NodeRef(..), DefKind(..), DefAccess(..)
                         , EdgeProv(..), UnsafeTag(..), ArgUsage(..)
+                        , defKindCode, edgeProvCode
                         , nodeKey, moduleKey, nodeKeyVersion, hashQName, collectAllQNames )
 import BuildInfo        ( buildFingerprint )
 import AgdaDeps.Layout  ( Position(..) )
-import AgdaDeps.Options ( DefState(..) )
+import AgdaDeps.Options ( DefState(..), defStateCode )
 import AgdaDeps.Util    ( jsString, jsB64Raw, jStrArray, jStrMap, jStrArrMap )
 import AgdaDeps.Backend.Wire
   ( ExpandedGraph(..), WireDef(..), WireEdge(..), WireExternals(..)
@@ -141,8 +141,6 @@ data GraphInput = GraphInput
   , giExternalModules :: Set String
   , giFailedModules   :: Set String
   , giPositions       :: M.Map NodeRef Position
-  , giWithSource      :: Bool
-  , giSnippetModules  :: [String]
   , giLazy            :: Bool
   , giExtraModules    :: Set String
     -- ^ Module names to include in the graph even if they have no
@@ -190,7 +188,6 @@ data GraphInput = GraphInput
 data GraphJsonOutput = GraphJsonOutput
   { gjoGraphJson      :: String
   , gjoModuleDetails  :: [ModuleDetailJson]
-  , gjoModuleNames    :: [String]
   }
 
 -- | One per-module detail file in lazy mode.
@@ -520,14 +517,6 @@ buildGraphJson GraphInput{..} =
             [ (m, "modules/" ++ moduleDetailFilename m) | m <- modules ]
         | otherwise = M.empty
 
-      bundleFilesMap :: M.Map String FilePath
-      bundleFilesMap
-        | giWithSource = M.fromList
-            [ (m, "snippets/" ++ snippetBundleFilename m)
-            | m <- giSnippetModules
-            ]
-        | otherwise = M.empty
-
       -- (11) Search index ----------------------------------------------
       (searchNames, searchKinds, searchBigrams) =
         buildSearchIndex modules defNames
@@ -614,8 +603,6 @@ buildGraphJson GraphInput{..} =
         ++ ",\"moduleTree\":"   ++ moduleTreeJson
         ++ ",\"entryModule\":"  ++ maybe "null" jsString giEntryModule
         ++ ",\"externalModules\":" ++ jsB64Int32 externalModuleIdxs
-        ++ (if M.null bundleFilesMap then "" else
-            ",\"bundleFiles\":" ++ stringMapJson bundleFilesMap)
         ++ (if M.null moduleFilesMap then "" else
             ",\"moduleFiles\":" ++ stringMapJson moduleFilesMap)
         ++ ",\"searchIndex\":" ++ searchIndexJson searchNames searchKinds searchBigrams
@@ -628,7 +615,6 @@ buildGraphJson GraphInput{..} =
   in GraphJsonOutput
        { gjoGraphJson     = graphJson
        , gjoModuleDetails = moduleDetails
-       , gjoModuleNames   = modules
        }
 
 -- ** Per-module detail emission
@@ -918,24 +904,14 @@ jsB64Float32 = jsB64Raw . encodeFloat32LE
 -- ** State encoding
 
 encodeDefState :: DefState -> Int8
-encodeDefState Defined   = 0
-encodeDefState Postulate = 1
-encodeDefState Hole      = 2
-encodeDefState Failed    = 3
+encodeDefState = fromIntegral . defStateCode
 
 -- | Wire encoding for 'DefKind' in the packed-analytical @defs.kinds@
 -- array. Must mirror 'AgdaDeps.Backend.Wire.wireKind''s string ordering
 -- so the consumer maps the byte back to the same @kind@ the expanded
 -- form emits.
 encodeDefKind :: DefKind -> Int8
-encodeDefKind DKFunction    = 0
-encodeDefKind DKProjection  = 1
-encodeDefKind DKDatatype    = 2
-encodeDefKind DKRecord      = 3
-encodeDefKind DKConstructor = 4
-encodeDefKind DKPostulate   = 5
-encodeDefKind DKPrimitive   = 6
-encodeDefKind DKOther       = 7
+encodeDefKind = fromIntegral . defKindCode
 
 -- | Wire encoding for @defs.access@. MUST stay 3-valued
 -- (0 unknown\/absent, 1 public, 2 private): @0@ round-trips to
@@ -966,9 +942,13 @@ encodeUnsafeByte = foldl' (\acc t -> acc .|. tagBit t) 0
 -- | Index the defs by 'NodeRef' on a field that is only sometimes present:
 -- absent entries stay out of the map, so a lookup answers 'Nothing' both for
 -- a QName with no 'ADDef' and for one whose field is unset.
+defOptionalMap :: (ADDef -> Maybe b) -> [ADDef] -> M.Map NodeRef b
+defOptionalMap get defs =
+  M.fromList [ (_name d, v) | d <- defs, Just v <- [get d] ]
+
 mkDefOptional :: (ADDef -> Maybe b) -> [ADDef] -> (NodeRef -> Maybe b)
 mkDefOptional get defs =
-  let !m = M.fromList [ (_name d, v) | d <- defs, Just v <- [get d] ]
+  let !m = defOptionalMap get defs
   in (`M.lookup` m)
 
 -- | Index the defs by 'NodeRef' on a total field, with @dflt@ standing in for
@@ -996,13 +976,11 @@ mkDefSig = mkDefOptional _sig
 
 -- | Subterm-hash map by NodeRef ('--with-term-hashes'); empty when off.
 mkDefHashes :: [ADDef] -> M.Map NodeRef [Word64]
-mkDefHashes defs =
-  M.fromList [ (_name d, hs) | d <- defs, Just hs <- [_subtermHashes d] ]
+mkDefHashes = defOptionalMap _subtermHashes
 
 -- | Subterm-depth map by NodeRef, parallel to 'mkDefHashes'.
 mkDefDepths :: [ADDef] -> M.Map NodeRef [Int]
-mkDefDepths defs =
-  M.fromList [ (_name d, ds) | d <- defs, Just ds <- [_subtermDepths d] ]
+mkDefDepths = defOptionalMap _subtermDepths
 
 -- | Soundness-escape tags by NodeRef; @[]@ for QNames with no 'ADDef'.
 -- Shared by packed-analytical and expanded so the two agree
@@ -1030,12 +1008,7 @@ mkDefArgUsage = mkDefOptional _argUsage
 
 -- | Wire encoding for 'EdgeProv' in the packed JSON form.
 encodeEdgeProv :: EdgeProv -> Int8
-encodeEdgeProv ESignature   = 0
-encodeEdgeProv EBody        = 1
-encodeEdgeProv EModuleLocal = 2
--- 3 was the retired 'with' tag; left a hole so decoders of already-emitted
--- packed graphs keep reading 4 as 'unknown'.
-encodeEdgeProv EUnknown     = 4
+encodeEdgeProv = fromIntegral . edgeProvCode
 
 -- ** File tree
 
@@ -1188,22 +1161,16 @@ searchIndexJson names kinds bigrams =
 
 -- ** Filename helpers
 
--- | Filesystem-safe filename for a module: the module name verbatim
--- when every character is safe, else a @\<prefix\>\<hash\>@ fallback.
--- The lazy-ingest manifest and the on-disk files both derive names
--- through this.
-safeFilename :: String -> String -> FilePath
-safeFilename prefix m
+-- | Filesystem-safe filename for a module's detail file: the module name
+-- verbatim when every character is safe, else a @detail-\<hash\>@
+-- fallback. The lazy-ingest manifest and the on-disk files both derive
+-- names through this, so they cannot disagree.
+moduleDetailFilename :: String -> FilePath
+moduleDetailFilename m
   | all isSafeChar m && not (null m) = m ++ ".json"
-  | otherwise = prefix ++ show (hashString m) ++ ".json"
+  | otherwise = "detail-" ++ show (hashString m) ++ ".json"
   where
     isSafeChar c = isAlphaNum c || c == '.' || c == '_' || c == '-'
-
-moduleDetailFilename :: String -> FilePath
-moduleDetailFilename = safeFilename "detail-"
-
-snippetBundleFilename :: String -> FilePath
-snippetBundleFilename = safeFilename "bundle-"
 
 -- ** Transitive-edge helpers
 

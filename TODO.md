@@ -12,4 +12,4 @@ Shipped work: [Changelog.md](Changelog.md).
   the edited module's lazy file, but adding/removing a definition renumbers the
   dense global node indices the per-module `outEdges` embed, so many files'
   epochs change. Making that minimal needs a stable-per-node index in the lazy
-  wire format, coordinated with the JS consumer in `agda-graph-explorer`.
+  wire format, coordinated with the views in `agda-plotter` that read it.

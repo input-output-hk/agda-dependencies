@@ -13,14 +13,13 @@
 <a href="index.html">Home</a>
 <a href="guide.html">Guide</a>
 <a href="examples.html" class="active">Examples</a>
-<a href="views/index.html">Views ↗</a>
 <a href="https://github.com/input-output-hk/agda-dependencies">GitHub ↗</a>
 </nav>
 </div></header>
 <main><div class="layout">
 <aside class="toc"><div class="toc-inner">
 <div class="toc-title">On this page</div>
-<nav><a class="lvl2" href="#setup">Setup</a><a class="lvl2" href="#dot-output-default">DOT output (default)</a><a class="lvl2" href="#html-output-interactive-viewer">HTML output — interactive viewer</a><a class="lvl2" href="#json-output-for-downstream-tooling">JSON output — for downstream tooling</a><a class="lvl2" href="#-no-externals-drop-stdlib-from-the-graph">--no-externals — drop stdlib from the graph</a><a class="lvl2" href="#-keep-going-survive-type-check-errors">--keep-going — survive type-check errors</a><a class="lvl2" href="#-skip-agda-module-level-graph-no-type-checking">--skip-agda — module-level graph, no type-checking</a><a class="lvl2" href="#-with-source-lazy-full-html-viewer-at-scale">--with-source + --lazy — full HTML viewer at scale</a><a class="lvl2" href="#-with-term-hashes-subterm-fingerprints">--with-term-hashes — subterm fingerprints</a><a class="lvl2" href="#argusage-find-arguments-a-definition-never-uses">argUsage — find arguments a definition never uses</a><a class="lvl2" href="#-incremental-cache-per-module-work-across-rebuilds">--incremental — cache per-module work across rebuilds</a><a class="lvl2" href="#-packed-analytical-compact-json-without-losing-fidelity">--packed-analytical — compact JSON without losing fidelity</a><a class="lvl2" href="#a-yaml-config-checked-before-use">A YAML config, checked before use</a></nav>
+<nav><a class="lvl2" href="#setup">Setup</a><a class="lvl2" href="#dot-output-default">DOT output (default)</a><a class="lvl2" href="#html-output-hand-the-json-to-agda-plotter">HTML output — hand the JSON to agda-plotter</a><a class="lvl2" href="#json-output-for-downstream-tooling">JSON output — for downstream tooling</a><a class="lvl2" href="#-no-externals-drop-stdlib-from-the-graph">--no-externals — drop stdlib from the graph</a><a class="lvl2" href="#-keep-going-survive-type-check-errors">--keep-going — survive type-check errors</a><a class="lvl2" href="#-skip-agda-module-level-graph-no-type-checking">--skip-agda — module-level graph, no type-checking</a><a class="lvl2" href="#-lazy-a-page-that-stays-small-at-scale">--lazy — a page that stays small at scale</a><a class="lvl2" href="#-with-term-hashes-subterm-fingerprints">--with-term-hashes — subterm fingerprints</a><a class="lvl2" href="#argusage-find-arguments-a-definition-never-uses">argUsage — find arguments a definition never uses</a><a class="lvl2" href="#-incremental-cache-per-module-work-across-rebuilds">--incremental — cache per-module work across rebuilds</a><a class="lvl2" href="#-packed-analytical-compact-json-without-losing-fidelity">--packed-analytical — compact JSON without losing fidelity</a><a class="lvl2" href="#a-yaml-config-checked-before-use">A YAML config, checked before use</a></nav>
 </div></aside>
 <div class="prose"><h1 id="examples">Examples</h1>
 <p>Runnable recipes for <code>agda-deps</code>. Full flag reference: <a href="guide.html">README.md</a>.</p>
@@ -40,19 +39,16 @@ dot -Tsvg out/deps.dot -o out/deps.svg
 </code></pre>
 <p>Right when the consumer is another graph tool (Graphviz, dot2tex, anything
 reading <code>digraph</code> syntax).</p>
-<h2 id="html-output-interactive-viewer">HTML output — interactive viewer</h2>
-<pre><code class="language-bash">cabal run agda-deps -- --format=html --view=module-dag-pods \
-  -i test/ -o out/ test/Test.agda
+<h2 id="html-output-hand-the-json-to-agda-plotter">HTML output — hand the JSON to <code>agda-plotter</code></h2>
+<p>HTML rendering lives in a separate executable that reads this graph and links
+no Agda. Produce, then render:</p>
+<pre><code class="language-bash">cabal run agda-deps -- --format=json -i test/ -o out/ test/Test.agda
+agda-plotter --view=module-dag-pods -o out/
 xdg-open out/deps.html
 </code></pre>
-<p><code>module-dag-pods</code> (the default) is a top-down DAG of expandable module pods — the
-right start for projects under ~5k modules. Switch views:</p>
-<ul>
-<li><code>--view=cytoscape</code> — force-directed compound graph; one canvas with everything.</li>
-<li><code>--view=sigma</code> / <code>--view=big-module-dag-pods</code> — the large-corpus options.</li>
-<li><code>--view=ide-three-pane</code> / <code>--view=source-centric</code> — definition-level; want <code>--with-source --lazy</code>.</li>
-<li><code>--view=critical-path-holes</code> / <code>--view=progress-dashboard</code> — for in-progress proofs.</li>
-</ul>
+<p><code>module-dag-pods</code> (the plotter's default) is a top-down DAG of expandable module
+pods — the right start for projects under ~5k modules. <code>agda-plotter
+--list-views</code> names the other thirteen; its README documents each one.</p>
 <h2 id="json-output-for-downstream-tooling">JSON output — for downstream tooling</h2>
 <pre><code class="language-bash"># Compact: base64 CSR. Right for huge graphs.
 cabal run agda-deps -- --format=json --json-mode=packed -i test/ -o out/ test/Test.agda
@@ -77,21 +73,29 @@ Use when commits contain <code>?</code> holes, when onboarding a broken project,
 WIP module shouldn't hide the rest. Pair with <code>--lenient-imports</code> if Agda refuses
 to <em>import</em> a module with open metas.</p>
 <h2 id="-skip-agda-module-level-graph-no-type-checking"><code>--skip-agda</code> — module-level graph, no type-checking</h2>
-<pre><code class="language-bash">cabal run agda-deps -- --skip-agda --format=html -i test/ -o out/ test/Test.agda
+<pre><code class="language-bash">cabal run agda-deps -- --skip-agda --format=json -i test/ -o out/ test/Test.agda
+agda-plotter --view=module-dag-pods -o out/
 </code></pre>
 <p>Scans <code>module …</code> / <code>import …</code> lines and emits a module-level graph in
 milliseconds. Right when the project doesn't type-check, when you only care about
-the module DAG, or for a 1M+ module corpus. No D/P/H classification, no snippets,
-no definition-level edges.</p>
-<h2 id="-with-source-lazy-full-html-viewer-at-scale"><code>--with-source</code> + <code>--lazy</code> — full HTML viewer at scale</h2>
-<pre><code class="language-bash">cabal run agda-deps -- --format=html --view=ide-three-pane --with-source --lazy \
+the module DAG, or for a 1M+ module corpus. No D/P/H classification and no
+definition-level edges, so only module-level views have anything to draw.</p>
+<h2 id="-lazy-a-page-that-stays-small-at-scale"><code>--lazy</code> — a page that stays small at scale</h2>
+<pre><code class="language-bash">cabal run agda-deps -- --format=json --lazy \
   -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md
+agda-plotter --view=big-module-dag-pods -o out/
 cd out/ &amp;&amp; python3 -m http.server 8000
 </code></pre>
-<p><code>--with-source</code> embeds each definition's highlighted source (clicking a leaf
-opens it in a drawer); <code>--lazy</code> splits output into <code>graph.json</code> + per-module files
-so the initial load stays small. Lazy mode <strong>requires HTTP serving</strong>, and
-<code>--with-source</code> only takes effect under it.</p>
+<p><code>--lazy</code> splits the packed JSON into a module-level <code>graph.json</code> plus per-module
+<code>modules/&lt;M&gt;.json</code> detail files, so the initial load stays small however big the
+project is. <code>agda-plotter</code> sees the <code>modules/</code> directory and emits a page shell
+that fetches on demand instead of a self-contained page. Lazy output <strong>requires
+HTTP serving</strong> — browsers block <code>fetch()</code> on <code>file://</code>.</p>
+<p>To read the actual source alongside the graph, generate Agda's own highlighted
+pages and point the plotter at them:</p>
+<pre><code class="language-bash">agda --html --html-dir=out/html path/to/your-project/Main.lagda.md
+agda-plotter --view=sunburst-hierarchy --agda-html-dir=html -o out/
+</code></pre>
 <h2 id="-with-term-hashes-subterm-fingerprints"><code>--with-term-hashes</code> — subterm fingerprints</h2>
 <pre><code class="language-bash">cabal run agda-deps -- --format=json --json-mode=expanded \
   --with-term-hashes --min-term-depth=3 \
@@ -153,7 +157,7 @@ Agda and needs no input module.</p></div>
 </main>
 <footer class="site-footer"><div class="wrap">
 <div>
-<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="roadmap.html">Roadmap</a></div>
+<a href="guide.html">Guide</a> · <a href="examples.html">Examples</a> · <a href="roadmap.html">Roadmap</a> · <a href="backlog.html">Backlog</a> · <a href="changelog.html">Changelog</a></div>
 <div class="muted">Built with
 <a href="https://getpelican.com">Pelican</a>.
 <a href="https://github.com/input-output-hk/agda-dependencies">Source on GitHub ↗</a></div>

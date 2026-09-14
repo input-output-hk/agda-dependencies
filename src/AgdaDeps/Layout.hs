@@ -27,7 +27,6 @@ module AgdaDeps.Layout
   ) where
 
 import Control.Exception ( SomeException, try )
-import Control.Monad ( when )
 
 import Data.List ( foldl' )
 import qualified Data.IntMap.Strict as IM

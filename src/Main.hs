@@ -18,11 +18,12 @@ import System.FilePath ( (</>), isAbsolute, takeDirectory, takeExtension )
 import Control.Monad ( when )
 import Data.List ( isPrefixOf )
 
-import Agda.Compiler.Backend ( Backend_boot(Backend) )
 #if MIN_VERSION_Agda(2,9,0)
+import Agda.Compiler.Backend ( Backend_boot(Backend) )
 import Agda.Main ( runAgdaArgs )
 #else
 -- Agda 2.8 has no 'runAgdaArgs'; shim it below over 'runAgda''.
+import Agda.Compiler.Backend ( Backend, Backend_boot(Backend) )
 import Agda.Main ( runAgda' )
 import System.Environment ( withArgs )
 #endif
@@ -52,6 +53,7 @@ import AgdaDeps.Util ( candidateDirs, looksLikeAgdaSource )
 -- | Agda 2.8 shim for 2.9's @runAgdaArgs@: run Agda with an explicit
 -- argv and exactly the given backends. 'runAgda'' (not @runAgda@) skips
 -- the builtin backends; 'withArgs' feeds the argv it reads via 'getArgs'.
+runAgdaArgs :: [Backend] -> [String] -> IO ()
 runAgdaArgs backends args = withArgs args (runAgda' backends)
 #endif
 

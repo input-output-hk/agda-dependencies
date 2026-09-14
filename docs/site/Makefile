@@ -8,7 +8,7 @@
 #
 # Output goes to docs/ (OUTPUT_PATH in pelicanconf.py); the clean rebuild keeps
 # this generator (docs/site) and docs/.nojekyll via OUTPUT_RETENTION.
-# Pass STAGE_FLAGS=--internal to also render CLAUDE.md as an Internals page.
+# Pass STAGE_FLAGS=--internal to also render AGENTS.md as an Internals page.
 
 VENV    ?= .venv
 PY       = $(VENV)/bin/python
@@ -33,4 +33,4 @@ serve: html
 	cd .. && python3 -m http.server 8000 --bind 127.0.0.1
 
 clean:
-	rm -rf content/pages content/views __pycache__ plugins/__pycache__
+	rm -rf content/pages __pycache__ plugins/__pycache__

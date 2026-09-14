@@ -110,7 +110,6 @@ import Agda.TypeChecking.Monad.Signature ( unionSignature )
 #endif
 import Agda.TypeChecking.Primitive.Base ( lookupPrimitiveFunction )
 import qualified Data.HashMap.Strict as HMap
-import Agda.Utils.Lens ( over, (^.) )
 import Agda.TypeChecking.Monad.Imports ( getDecodedModules, visitModule )
 
 import AgdaDeps.Logging ( info )

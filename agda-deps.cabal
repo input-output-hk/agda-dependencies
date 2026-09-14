@@ -8,21 +8,6 @@ synopsis:            Reporting lemma dependencies of Agda proofs.
 
 extra-doc-files:    README.md
 
-extra-source-files: src/AgdaDeps/templates/deps.html.tmpl
-                    src/AgdaDeps/templates/views/ide-three-pane.html.tmpl
-                    src/AgdaDeps/templates/views/module-dag-pods.html.tmpl
-                    src/AgdaDeps/templates/views/source-centric.html.tmpl
-                    src/AgdaDeps/templates/views/notion-doc.html.tmpl
-                    src/AgdaDeps/templates/views/wiki-backlinks.html.tmpl
-                    src/AgdaDeps/templates/views/sigma.html.tmpl
-                    src/AgdaDeps/templates/views/big-module-dag-pods.html.tmpl
-                    src/AgdaDeps/templates/views/critical-path-holes.html.tmpl
-                    src/AgdaDeps/templates/views/progress-dashboard.html.tmpl
-                    src/AgdaDeps/templates/views/cartographic-atlas.html.tmpl
-                    src/AgdaDeps/templates/views/sunburst-hierarchy.html.tmpl
-                    src/AgdaDeps/templates/views/reading-order-narrative.html.tmpl
-                    src/AgdaDeps/templates/views/pixel-grid-overview.html.tmpl
-
 source-repository head
   type:     git
   location: https://github.com/input-output-hk/agda-dependencies.git
@@ -48,11 +33,9 @@ executable agda-deps
                        AgdaDeps.Deps
                        AgdaDeps.FragmentCache
                        AgdaDeps.SerialiseCache
-                       AgdaDeps.Source
                        AgdaDeps.Backend.Dot
                        AgdaDeps.Backend.Wire
                        AgdaDeps.Backend.GraphJson
-                       AgdaDeps.Backend.Html
                        AgdaDeps.Backend.Json
                        AgdaDeps.Backend
                        AgdaDeps.Doctor

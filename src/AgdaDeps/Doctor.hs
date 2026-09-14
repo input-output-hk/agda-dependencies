@@ -9,11 +9,11 @@
 --   * unknown keys (silently ignored by @FromJSON Config@ — the most common
 --     way a config \"does nothing\"), with a did-you-mean suggestion;
 --   * per-key type and domain errors (a colour that is not @#RRGGBB@, a
---     negative @max-snippet-bytes@, an unknown @view:@ slug, a @null@ value
---     from an unquoted @#…@ that YAML read as a comment);
+--     non-positive @min-term-depth@, an unknown @format:@ slug, a @null@
+--     value from an unquoted @#…@ that YAML read as a comment);
 --   * coherence: keys that are individually valid but do nothing in
---     combination (@with-source@ without @lazy@, @cache-dir@ without
---     @incremental@, a @view@ under @format: dot@, …).
+--     combination (@lazy@ under @format: dot@, @cache-dir@ without
+--     @incremental@, @min-term-depth@ without @with-term-hashes@, …).
 --
 -- Exit status is 1 when any error was found (or, under @--strict@, any
 -- warning), 0 otherwise — so it can gate CI.
@@ -50,7 +50,7 @@ import AgdaDeps.Config
   ( ConfigOrigin, allThemes, describeOrigin, extractConfigArg
   , findConfigPath, themeSlug )
 import AgdaDeps.Options
-  ( allFormats, allJsonModes, allViews, formatSlug, jsonModeSlug, viewSlug )
+  ( allFormats, allJsonModes, formatSlug, jsonModeSlug )
 import AgdaDeps.Util ( isValidHexColor )
 
 -- ---------------------------------------------------------------------------
@@ -254,17 +254,13 @@ knownFields :: [(String, FieldTy)]
 knownFields =
   [ field "out-dir"              (TyStr nonEmpty)
   , field "format"               (TyEnum (map formatSlug allFormats))
-  , field "view"                 (TyEnum (map viewSlug allViews))
   , field "theme"                (TyEnum (map themeSlug allThemes))
   , field "color-defined"        (TyStr hexColor)
   , field "color-postulate"      (TyStr hexColor)
   , field "color-hole"           (TyStr hexColor)
   , field "color-failed"         (TyStr hexColor)
-  , field "with-source"          TyBool
   , field "lazy"                 TyBool
   , field "exclude"              (TyStrList modulePrefix)
-  , field "no-source-for"        (TyStrList modulePrefix)
-  , field "max-snippet-bytes"    (TyInt nonNegative)
   , field "gzip"                 TyBool
   , field "keep-going"           TyBool
   , field "skip-agda"            TyBool
@@ -281,7 +277,6 @@ knownFields =
   , field "with-signatures"      TyBool
   , field "normalise-signatures" TyBool
   , field "signature-implicits"  TyBool
-  , field "agda-html-dir"        (TyStr nonEmpty)
   ]
   where
     nonEmpty s
@@ -296,10 +291,6 @@ knownFields =
       | ".agda" `isSuffixOf` s || "/" `isInfixOf` s = Just
           (SevWarning, show s ++ " looks like a file path; a module-name"
                              ++ " prefix (e.g. Data.List) is expected")
-      | otherwise = Nothing
-    nonNegative n
-      | n < 0     = Just (SevError, show n ++ " is negative, so it is ignored;"
-                                           ++ " use 0 to disable the cap")
       | otherwise = Nothing
     positive n
       | n < 1     = Just (SevError, show n ++ " is below the minimum of 1"
@@ -436,30 +427,12 @@ editDistance a b = last (foldl step [0 .. length a] b)
 checkCoherence :: A.Object -> [Finding]
 checkCoherence o = catMaybes
   [ -- Output format gates most of the feature flags.
-    whenTrue "lazy" (fmtNot "html") $
-      warn (about "lazy" ("splits HTML output, but format is " ++ fmt))
-           (Just "set format: html, or drop lazy")
-  , if isTrue "with-source" && fmtNot "html"
-      then Just $ warn
-        (about "with-source" ("embeds snippets in HTML output, but format is "
-                              ++ fmt))
-        (Just "set format: html, or drop with-source")
-      else whenTrue "with-source" (not (isTrue "lazy")) $
-        warn (about "with-source" "has no effect without lazy: true")
-             (Just ("add lazy: true (the output then needs HTTP serving),"
-                    ++ " or link out with agda-html-dir"))
-  , whenSet "no-source-for" (not (isTrue "with-source")) $
-      warn (about "no-source-for" "only filters snippets, and with-source is off")
-           (Just "add with-source: true, or drop no-source-for")
-  , whenSet "max-snippet-bytes" (not (isTrue "with-source")) $
-      warn (about "max-snippet-bytes" "only caps snippets, and with-source is off")
-           (Just "add with-source: true, or drop max-snippet-bytes")
-  , whenSet "view" (fmtNot "html") $
-      warn (about "view" ("selects the HTML app, but format is " ++ fmt))
-           (Just "set format: html, or drop view")
-  , whenSet "agda-html-dir" (fmtNot "html") $
-      warn (about "agda-html-dir" ("only links HTML views, but format is " ++ fmt))
-           (Just "set format: html, or drop agda-html-dir")
+    whenTrue "lazy" (fmtNot "json") $
+      warn (about "lazy" ("splits JSON output, but format is " ++ fmt))
+           (Just "set format: json, or drop lazy")
+  , whenTrue "lazy" (fmtIs "json" && jsonModeIs "expanded") $
+      warn (about "lazy" "only splits packed JSON, and json-mode is expanded")
+           (Just "use json-mode: packed, or drop lazy")
   , whenSet "json-mode" (fmtNot "json") $
       warn (about "json-mode" ("shapes JSON output, but format is " ++ fmt))
            (Just "set format: json, or drop json-mode")
@@ -488,13 +461,13 @@ checkCoherence o = catMaybes
   , whenSet "cache-dir" (not (isTrue "incremental")) $
       warn (about "cache-dir" "only locates the incremental cache, which is off")
            (Just "add incremental: true, or drop cache-dir")
-  , whenTrue "gzip" (isJust mFmt && not (fmtIs "html" && isTrue "lazy")) $
+  , whenTrue "gzip" (isJust mFmt && not (fmtIs "json" && isTrue "lazy")) $
       warn (about "gzip" ("only compresses the JSON files written by the"
-                          ++ " lazy HTML path"))
-           (Just "use format: html with lazy: true, or drop gzip")
-  , if fmtIs "html" && not (isSet "out-dir")
+                          ++ " lazy path"))
+           (Just "use format: json with lazy: true, or drop gzip")
+  , if isTrue "lazy" && not (isSet "out-dir")
       then Just $ note
-        (about "format" "html writes into a directory, and out-dir is not set")
+        (about "lazy" "writes a directory of files, and out-dir is not set")
         (Just "pass -o DIR on the command line, or set out-dir here")
       else Nothing
   , do -- out-dir carrying a format extension: inference is CLI-only.
@@ -567,8 +540,7 @@ checkCoherence o = catMaybes
     skipAgdaFindings
       | not (isTrue "skip-agda") = []
       | otherwise = mapMaybe moot
-          [ ("with-source",      "there are no definitions to snapshot")
-          , ("with-signatures",  "there are no elaborated types")
+          [ ("with-signatures",  "there are no elaborated types")
           , ("with-term-hashes", "there are no elaborated terms")
           , ("incremental",      "nothing is type-checked to cache")
           , ("keep-going",       "there is no type-check to survive")

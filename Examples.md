@@ -27,21 +27,20 @@ dot -Tsvg out/deps.dot -o out/deps.svg
 Right when the consumer is another graph tool (Graphviz, dot2tex, anything
 reading `digraph` syntax).
 
-## HTML output — interactive viewer
+## HTML output — hand the JSON to `agda-plotter`
+
+HTML rendering lives in a separate executable that reads this graph and links
+no Agda. Produce, then render:
 
 ```bash
-cabal run agda-deps -- --format=html --view=module-dag-pods \
-  -i test/ -o out/ test/Test.agda
+cabal run agda-deps -- --format=json -i test/ -o out/ test/Test.agda
+agda-plotter --view=module-dag-pods -o out/
 xdg-open out/deps.html
 ```
 
-`module-dag-pods` (the default) is a top-down DAG of expandable module pods — the
-right start for projects under ~5k modules. Switch views:
-
-- `--view=cytoscape` — force-directed compound graph; one canvas with everything.
-- `--view=sigma` / `--view=big-module-dag-pods` — the large-corpus options.
-- `--view=ide-three-pane` / `--view=source-centric` — definition-level; want `--with-source --lazy`.
-- `--view=critical-path-holes` / `--view=progress-dashboard` — for in-progress proofs.
+`module-dag-pods` (the plotter's default) is a top-down DAG of expandable module
+pods — the right start for projects under ~5k modules. `agda-plotter
+--list-views` names the other thirteen; its README documents each one.
 
 ## JSON output — for downstream tooling
 
@@ -81,26 +80,37 @@ to *import* a module with open metas.
 ## `--skip-agda` — module-level graph, no type-checking
 
 ```bash
-cabal run agda-deps -- --skip-agda --format=html -i test/ -o out/ test/Test.agda
+cabal run agda-deps -- --skip-agda --format=json -i test/ -o out/ test/Test.agda
+agda-plotter --view=module-dag-pods -o out/
 ```
 
 Scans `module …` / `import …` lines and emits a module-level graph in
 milliseconds. Right when the project doesn't type-check, when you only care about
-the module DAG, or for a 1M+ module corpus. No D/P/H classification, no snippets,
-no definition-level edges.
+the module DAG, or for a 1M+ module corpus. No D/P/H classification and no
+definition-level edges, so only module-level views have anything to draw.
 
-## `--with-source` + `--lazy` — full HTML viewer at scale
+## `--lazy` — a page that stays small at scale
 
 ```bash
-cabal run agda-deps -- --format=html --view=ide-three-pane --with-source --lazy \
+cabal run agda-deps -- --format=json --lazy \
   -i path/to/your-project/ -o out/ path/to/your-project/Main.lagda.md
+agda-plotter --view=big-module-dag-pods -o out/
 cd out/ && python3 -m http.server 8000
 ```
 
-`--with-source` embeds each definition's highlighted source (clicking a leaf
-opens it in a drawer); `--lazy` splits output into `graph.json` + per-module files
-so the initial load stays small. Lazy mode **requires HTTP serving**, and
-`--with-source` only takes effect under it.
+`--lazy` splits the packed JSON into a module-level `graph.json` plus per-module
+`modules/<M>.json` detail files, so the initial load stays small however big the
+project is. `agda-plotter` sees the `modules/` directory and emits a page shell
+that fetches on demand instead of a self-contained page. Lazy output **requires
+HTTP serving** — browsers block `fetch()` on `file://`.
+
+To read the actual source alongside the graph, generate Agda's own highlighted
+pages and point the plotter at them:
+
+```bash
+agda --html --html-dir=out/html path/to/your-project/Main.lagda.md
+agda-plotter --view=sunburst-hierarchy --agda-html-dir=html -o out/
+```
 
 ## `--with-term-hashes` — subterm fingerprints
 

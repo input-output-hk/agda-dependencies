@@ -7,7 +7,7 @@
 -- OPTIONS pragma, so it never lives in the interface's
 -- `iFilePragmaOptions` and must NOT appear in `moduleOptionEscapes` —
 -- this fixture pins that boundary (see AgdaDeps.Deps.optionEscapes and
--- the CLAUDE.md gotcha). No `--safe` here on purpose.
+-- its safetyRelevantOptionFlags rationale). No `--safe` here on purpose.
 module OptionEscapes where
 
 -- Typechecks only with universe checking off (`--type-in-type`): Set : Set.

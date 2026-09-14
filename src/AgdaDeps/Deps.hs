@@ -17,7 +17,9 @@ module AgdaDeps.Deps
 
     -- * The per-definition record
   , ADDef(..)
+  , withDependencyProvenance
   , DefKind(..)
+  , defKindCode
   , DefAccess(..)
   , UnsafeTag(..)
   , ArgUsage(..)
@@ -35,6 +37,7 @@ module AgdaDeps.Deps
 
     -- * Edge provenance
   , EdgeProv(..)
+  , edgeProvCode
   , provPrec
   , provTag
 
@@ -78,6 +81,10 @@ module AgdaDeps.Deps
   , contractIgnoredEdges
 
     -- * Side channels: one reset for all of them
+  , SideChannels(..)
+  , readSideChannels
+  , sideChannelDelta
+  , mergeSideChannels
   , resetSideChannels
 
     -- * Side-channel: unsaturated (partially applied) references
@@ -103,7 +110,7 @@ import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Data.Binary ( Binary )
 import qualified Data.Binary as B
 import Data.IORef ( IORef, modifyIORef', newIORef, readIORef, writeIORef )
-import Data.List ( foldl', isInfixOf, isPrefixOf, sort, sortOn )
+import Data.List ( foldl', isInfixOf, isPrefixOf, sort )
 import Data.Maybe ( fromMaybe, isJust, mapMaybe, maybeToList )
 import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as M
@@ -113,7 +120,7 @@ import Data.Set ( Set )
 import qualified Data.Set as S
 import Data.Sequence ( Seq, (|>) )
 import qualified Data.Sequence as Seq
-import Data.Word ( Word32, Word64 )
+import Data.Word ( Word8, Word32, Word64 )
 import System.Environment ( lookupEnv )
 import System.IO ( hPutStrLn, stderr )
 import System.IO.Unsafe ( unsafePerformIO )
@@ -220,6 +227,17 @@ data DefKind
 
 instance NFData DefKind where
   rnf x = x `seq` ()
+
+-- | Stable numeric code shared by packed output and the fragment cache.
+defKindCode :: DefKind -> Word8
+defKindCode DKFunction    = 0
+defKindCode DKProjection  = 1
+defKindCode DKDatatype    = 2
+defKindCode DKRecord      = 3
+defKindCode DKConstructor = 4
+defKindCode DKPostulate   = 5
+defKindCode DKPrimitive   = 6
+defKindCode DKOther       = 7
 
 -- | Whether a definition is declared @private@ in its defining module.
 -- 'Nothing' on 'ADDef._access' means it could not be determined and is
@@ -1125,6 +1143,14 @@ provTag EBody        = "body"
 provTag EModuleLocal = "module-local"
 provTag EUnknown     = "unknown"
 
+-- | Stable numeric code shared by packed output and the fragment cache.
+-- Code 3 belonged to the retired @with@ tag and remains reserved.
+edgeProvCode :: EdgeProv -> Word8
+edgeProvCode ESignature   = 0
+edgeProvCode EBody        = 1
+edgeProvCode EModuleLocal = 2
+edgeProvCode EUnknown     = 4
+
 -- | One node in the dependency graph: a definition plus its direct deps
 -- and classification. Invariant: @M.keysSet _depsProv == _deps@ (every
 -- kept dep carries exactly one 'EdgeProv' tag).
@@ -1192,13 +1218,7 @@ instance Pretty ADDef where
 -- 'Word8's; an out-of-range tag @fail@s the decode (a cache miss).
 
 instance Binary EdgeProv where
-  put = B.putWord8 . \case
-    ESignature -> 0
-    EBody -> 1
-    EModuleLocal -> 2
-    -- 3 was the retired 'with' tag; the numbering is left with a hole so
-    -- the packed wire encoding of the surviving tags does not shift.
-    EUnknown -> 4
+  put = B.putWord8 . edgeProvCode
   get = B.getWord8 >>= \case
     0 -> pure ESignature
     1 -> pure EBody
@@ -1207,15 +1227,7 @@ instance Binary EdgeProv where
     _ -> fail "EdgeProv"
 
 instance Binary DefKind where
-  put = B.putWord8 . \case
-    DKFunction -> 0
-    DKProjection -> 1
-    DKDatatype -> 2
-    DKRecord -> 3
-    DKConstructor -> 4
-    DKPostulate -> 5
-    DKPrimitive -> 6
-    DKOther -> 7
+  put = B.putWord8 . defKindCode
   get = B.getWord8 >>= \case
     0 -> pure DKFunction
     1 -> pure DKProjection
@@ -1376,8 +1388,7 @@ moduleKeyOfQ :: QName -> String
 moduleKeyOfQ = liftAnonSegments . prettyShow . qnameModule
 
 -- | @(source file, 1-indexed line)@ of a 'QName''s binding occurrence.
--- Lives here (not 'AgdaDeps.Source', which imports 'Deps') to avoid an
--- import cycle; 'Source' consumes it via 'nrSrcLoc'.
+-- Surfaced on the wire as 'nrSrcLoc'.
 srcLocOfQ :: QName -> Maybe (FilePath, Word32)
 srcLocOfQ qn = do
   let bindRange = nameBindingSite (qnameName qn)
@@ -1438,10 +1449,6 @@ nodeKey = nrKey
 moduleKey :: NodeRef -> String
 moduleKey = nrModule
 
--- | 1-indexed binding-site line, if any.
-bindingLine :: NodeRef -> Maybe Int
-bindingLine = nrLine
-
 -- | @(source file, line)@ of the binding occurrence, if fully known.
 nrSrcLoc :: NodeRef -> Maybe (FilePath, Word32)
 nrSrcLoc r = (,) <$> nrFile r <*> (fromIntegral <$> nrLine r)
@@ -1473,6 +1480,37 @@ collectAllQNames defs = IM.elems (foldl' addDef IM.empty defs)
 
 -- ** building ADDefs
 
+-- | Apply module exclusions to the separate signature and body walks.
+-- Keeping the two sets separate lets edge provenance retain its current
+-- signature-over-body precedence.
+filteredDependencySets
+  :: [String] -> [QName] -> [QName] -> (Set QName, Set QName)
+filteredDependencySets excludes rawSig rawBody =
+  (S.fromList (filter keep rawSig), S.fromList (filter keep rawBody))
+  where
+    keep qn = not (isExcludedModule excludes (moduleKeyOfQ qn))
+
+-- | Convert the filtered live 'QName' dependency sets to serializable
+-- 'NodeRef's and attach provenance. The ascending QName walk and
+-- 'M.fromList' retain the producer's deterministic last-wins behavior if two
+-- live names collide as 'NodeRef's.
+dependencyProvenance
+  :: Set QName -> Set QName -> TCM (Map NodeRef EdgeProv)
+dependencyProvenance sigNames bodyNames =
+  M.fromList <$> mapM one (S.toAscList (S.union sigNames bodyNames))
+  where
+    one q = do
+      r <- mkRef q
+      let !p = tagOneWith sigNames bodyNames q (nrWhereHelper r)
+      pure (r, p)
+
+-- | Replace an 'ADDef''s dependency provenance and derive the parallel set.
+-- Use this at replacement sites so the record invariant cannot drift.
+withDependencyProvenance :: Map NodeRef EdgeProv -> ADDef -> ADDef
+withDependencyProvenance prov d =
+  let !deps = M.keysSet prov
+  in d { _deps = deps, _depsProv = prov }
+
 -- | Build an 'ADDef' for a *kept* (non-ignored) definition.
 --
 -- Collects raw 'QName' dependencies via 'namesIn' and stores them
@@ -1482,16 +1520,14 @@ collectAllQNames defs = IM.elems (foldl' addDef IM.empty defs)
 computeDefAD :: Options -> Definition -> TCM ADDef
 computeDefAD opts def@Defn{..} = do
   let excludes = optExcludeModules opts
-      notExcluded qn = not (isExcludedModule excludes (moduleKeyOfQ qn))
       -- Walk 'defType' and 'theDef' separately to record which set each
       -- name came from. Raw walks are shared with 'classifyDefWith' (one
       -- traversal each); 'ignoreDependency' is applied later in
       -- 'contractIgnoredEdges'.
       !rawSig    = namesIn defType
       !rawBody   = namesIn theDef
-      !sigNames  = S.fromList (filter notExcluded rawSig)
-      !bodyNames = S.fromList (filter notExcluded rawBody)
-      !deps      = S.union sigNames bodyNames
+      (!sigNames, !bodyNames) =
+        filteredDependencySets excludes rawSig rawBody
   -- Reuse the raw (pre-exclude) name walks: a synthetic @unsolved#meta.*@
   -- name in an excluded module must still flip the Hole classification.
   (st, silentMetas) <- classifyDefWith rawSig rawBody def
@@ -1530,13 +1566,8 @@ computeDefAD opts def@Defn{..} = do
   -- precomputed 'nrWhereHelper' bit instead of a per-edge 'prettyShow'.
   -- 'S.toAscList' fixes the key order, so 'M.fromList''s last-wins on
   -- colliding NodeRefs is deterministic.
-  provPairs <- mapM (\ q -> do
-                       r <- mkRef q
-                       let !p = tagOneWith sigNames bodyNames q (nrWhereHelper r)
-                       pure (r, p))
-                    (S.toAscList deps)
-  let !depsProvR = M.fromList provPairs
-      !depsR     = M.keysSet depsProvR
+  !depsProvR <- dependencyProvenance sigNames bodyNames
+  let !depsR = M.keysSet depsProvR
   return ADDef
     { _name   = nameRef
     , _deps   = depsR
@@ -1608,19 +1639,15 @@ compileDefAD opts _ _ def@Defn{..}
       -- Record raw out-edges without applying 'ignoreDependency' (refs to
       -- other ignored defs are kept so the closure pass can chain through).
       -- Module-exclusion still applies.
-      let notExcluded qn = not (isExcludedModule excludes (moduleKeyOfQ qn))
-          !sigNames  = S.fromList (filter notExcluded (namesIn defType))
-          !bodyNames = S.fromList (filter notExcluded (namesIn theDef))
-          !raw       = S.union sigNames bodyNames
+      let !rawSig  = namesIn defType
+          !rawBody = namesIn theDef
+          (!sigNames, !bodyNames) =
+            filteredDependencySets excludes rawSig rawBody
       -- Convert to NodeRef at the boundary (see 'computeDefAD'); tag edges
       -- off the precomputed 'nrWhereHelper' bit.
       nameRef  <- mkRef defName
-      provPairs <- mapM (\ q -> do
-                           r <- mkRef q
-                           let !p = tagOneWith sigNames bodyNames q (nrWhereHelper r)
-                           pure (r, p))
-                        (S.toAscList raw)
-      recordIgnoredDef nameRef (M.fromList provPairs)
+      prov <- dependencyProvenance sigNames bodyNames
+      recordIgnoredDef nameRef prov
       return Nothing
   | isExcludedModule excludes (moduleKeyOfQ defName) = return Nothing
   | otherwise = do
@@ -1811,9 +1838,8 @@ resetMethodProviders :: MonadIO m => m ()
 resetMethodProviders = liftIO $ writeIORef methodProvidersRef M.empty
 
 -- | Clear every per-run side channel, so repeated in-process invocations
--- stay independent. One place, so adding a fourth channel cannot forget the
--- reset half — the failure mode is silent (state from the previous run leaks
--- into this graph) and only reachable in-process, hence not caught by CI.
+-- stay independent. Keep this aligned with 'SideChannels': omitting a reset
+-- silently leaks state from the previous run into the next graph.
 --
 -- The per-'QName' memos ('nodeRefCacheRef', 'silentSpansCacheRef') are
 -- deliberately NOT here: they cache deterministic functions of a name, which
@@ -1835,6 +1861,50 @@ readMethodProviders = liftIO $ readIORef methodProvidersRef
 mergeMethodProviders :: MonadIO m => MethodProviderMap -> m ()
 mergeMethodProviders extra =
   liftIO $ modifyIORef' methodProvidersRef (M.unionWith (++) extra)
+
+-- | One observation of every per-run side channel. The maps remain backed by
+-- their separate 'IORef's; this record only makes snapshot, delta, and replay
+-- exhaustive at their shared call sites.
+data SideChannels = SideChannels
+  { sideIgnored     :: IgnoredEdgeMap
+  , sideProviders   :: MethodProviderMap
+  , sideUnsaturated :: UnsaturatedMap
+  }
+
+-- | Read all side channels in their established order.
+readSideChannels :: MonadIO m => m SideChannels
+readSideChannels = do
+  ignored     <- readIgnoredEdges
+  providers   <- readMethodProviders
+  unsaturated <- readUnsaturatedRefs
+  pure (SideChannels ignored providers unsaturated)
+
+-- | Contributions recorded between two snapshots. The three channels have
+-- deliberately different growth rules; keep their delta logic explicit.
+sideChannelDelta :: SideChannels -> SideChannels -> SideChannels
+sideChannelDelta before after = SideChannels
+  { sideIgnored = M.difference
+      (sideIgnored after) (sideIgnored before)
+  , sideProviders = M.differenceWith newProviderPrefix
+      (sideProviders after) (sideProviders before)
+  , sideUnsaturated = M.difference
+      (sideUnsaturated after) (sideUnsaturated before)
+  }
+  where
+    -- Providers grow by prepending binders per method key, so the new
+    -- contribution is the current list's prefix.
+    newProviderPrefix new old =
+      case take (length new - length old) new of
+        [] -> Nothing
+        xs -> Just xs
+
+-- | Replay a cached module's side-channel slices in the established order.
+-- Each field delegates to its channel-specific collision rule.
+mergeSideChannels :: MonadIO m => SideChannels -> m ()
+mergeSideChannels channels = do
+  mergeIgnoredEdges (sideIgnored channels)
+  mergeMethodProviders (sideProviders channels)
+  mergeUnsaturatedRefs (sideUnsaturated channels)
 
 -- | Append @binder@ to the providers list for each of @methods@. An
 -- empty @methods@ list is a no-op (the binder is still recorded by the
@@ -1913,7 +1983,7 @@ contractIgnoredEdges defs = do
     rewriteOne hidden memo d =
       let expanded  = contractWith hidden memo (_depsProv d)
           !keptProv = M.filterWithKey (\ k _ -> not (nrIgnorable k)) expanded
-      in d { _deps = M.keysSet keptProv, _depsProv = keptProv }
+      in withDependencyProvenance keptProv d
 
     -- Expand a kept def's raw dep map: every ignored-def key is replaced by
     -- its cached closure of real targets (each inheriting the kept def's tag
@@ -2322,7 +2392,7 @@ ignoreDef Defn{..} = case theDef of
   -- Do NOT remove: drops user @{-# INLINE #-}@ functions. Agda inlines every
   -- call site during type-checking, so an INLINE function has zero incoming
   -- edges by hook time — keeping it adds a false-"dead" orphan.
-  d@Function{..} | d ^. funInline -> True
+  d@Function{} | d ^. funInline -> True
 
   -- Primitive functions with no clauses (keeps builtin ones).
   Primitive{..} -> null primClauses
@@ -2331,8 +2401,8 @@ ignoreDef Defn{..} = case theDef of
   Axiom{} | prettyShow defName == "Agda.Primitive.Level" -> True
 
   -- Other kinds not wanted as nodes.
-  PrimitiveSort{..} -> True
-  DataOrRecSig{..} -> True
+  PrimitiveSort{} -> True
+  DataOrRecSig{} -> True
   GeneralizableVar _ -> True
 
   _ -> False

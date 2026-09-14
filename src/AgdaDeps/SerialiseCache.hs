@@ -5,15 +5,15 @@
 -- byte-identical output. Two skip mechanisms, both keyed off a tiny
 -- text manifest persisted next to the fragment cache:
 --
--- * __Monolithic output__ (@deps.json@ / inline @deps.html@): one blob,
---   so only a no-op rebuild wins. Skip generation and write when no
---   module recompiled this run AND the output-affecting context (module
---   set, options, build identity) is unchanged — both guards required.
+-- * __Monolithic output__ (@deps.json@): one blob, so only a no-op
+--   rebuild wins. Skip generation and write when no module recompiled
+--   this run AND the output-affecting context (module set, options,
+--   build identity) is unchanged — both guards required.
 --
--- * __Lazy per-module files__ (@modules\/\<M\>.json@,
---   @snippets\/\<M\>.json@): each carries a content /epoch/; regenerate
---   only files whose epoch changed. Adding\/removing a definition shifts
---   the global node indices, so many epochs change.
+-- * __Lazy per-module files__ (@modules\/\<M\>.json@): each carries a
+--   content /epoch/; regenerate only files whose epoch changed.
+--   Adding\/removing a definition shifts the global node indices, so
+--   many epochs change.
 --
 -- Manifest header carries a format version + the @--gzip@ flag; a change
 -- to either invalidates it wholesale. Needs no CPP.
@@ -35,7 +35,7 @@ import qualified Data.Map.Strict as M
 import Numeric ( readHex, showHex )
 import System.Directory
   ( createDirectoryIfMissing, doesFileExist )
-import System.FilePath ( (</>), takeDirectory )
+import System.FilePath ( (</>) )
 
 import Agda.Utils.Hash ( hashString )
 
@@ -51,9 +51,9 @@ hashEpoch = hashString
 combineEpochs :: [Epoch] -> Epoch
 combineEpochs = foldl (\ !acc x -> acc * 1099511628211 + x) 1469598103934665603
 
--- | Slot name -> content epoch. Slots are output-relative paths
--- (@"deps.json"@, @"modules\/Foo.json"@, …) plus the synthetic
--- @"::mono::"@ token slot for the monolithic no-op check.
+-- | Slot name -> content epoch. Every slot is an output-relative path
+-- (@"deps.json"@, @"modules\/Foo.json"@, …); the monolithic no-op check
+-- reads the @"deps.json"@ slot directly rather than a synthetic one.
 type Manifest = M.Map String Epoch
 
 emptyManifest :: Manifest

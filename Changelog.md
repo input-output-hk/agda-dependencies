@@ -7,6 +7,93 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-09-14 — the HTML renderer moves out
+
+`agda-deps` was doing two unrelated jobs: producing the dependency graph, which
+links Agda and runs inside the type-checker, and rendering that graph as HTML,
+which needs nothing from Agda at all. The second is now
+[`agda-plotter`](https://github.com/input-output-hk/agda-plotter), a sibling
+repository that reads the packed `graph.json` this emits. A template edit no
+longer drags an Agda rebuild.
+
+**`--format=html` is gone**, along with `--view`, `--agda-html-dir`, the
+`View` catalogue, `Backend.Html`, the fourteen templates and the `views/`
+gallery. The flow is two commands:
+
+```sh
+agda-deps    --format=json -i src/ -o out/ src/Main.agda
+agda-plotter --view=module-dag-pods -o out/
+```
+
+**`--lazy` now applies to `--format=json`.** It was reachable only through
+`--format=html`, which is what kept `buildModuleDetails` wired to the renderer.
+It writes the same tree it always did — a module-level `graph.json` plus
+`modules/<Module>.json` detail files — just without the page shell, which
+`agda-plotter` now writes. Verified byte-for-byte against the pre-split output,
+`graph.json` and every detail file. `--lazy` splits the packed form only;
+`buildExpandedJson` has no such split, so `--json-mode=expanded --lazy` is inert
+and now says so instead of quietly writing the wrong shape. `--gzip` follows
+`--lazy` to the JSON path. `--skip-agda --format=json --lazy` works too.
+
+`optLazy` joins `outputToken`: it now reshapes the emitted bytes, and an
+output-affecting option that is missing from that fingerprint makes the
+`--incremental` no-op skip serve stale output. `optView`, `optAgdaHtmlDir`,
+`optWithSource`, `optNoSourceFor` and `optMaxSnippetBytes` leave it.
+
+`lazyTreeOutput` in `Options` is the single answer to "does this run write the
+lazy tree", asked by the graph emitter, the output writer, the no-op skip and
+the `--skip-agda` path. It replaced two hand-copied predicates that had already
+drifted: the `--skip-agda` path computed the same condition and then silently
+omitted the expanded-is-inert notice the Agda path emitted. The fatal
+"`--lazy` requires `-o`" check was likewise duplicated; both now live in one
+`checkOutputFlags`, called from `preCompileAD` and from `--skip-agda`'s option
+resolution — the earliest each path has resolved options. On the Agda path that
+is still after type-checking (Agda's `GetOpt` walks argv inside the backend, so
+nothing earlier sees a resolved `Options`), but it is before the per-definition
+walk, the layout pass and graph assembly, instead of at the very end.
+
+`hoistedMonoSkip` keys on `lazyTreeOutput` rather than `optLazy`, so
+`--lazy --json-mode=expanded` — which does write one monolithic file — gets the
+up-front skip too. And `graph.json` now takes that same skip against its own
+manifest slot: the skeleton is *not* small, because `--lazy` moves out only the
+`defs`/`edges` blobs and leaves `searchIndex` (every definition name plus its
+bigrams) behind — measured at ~630 bytes per module, so tens of megabytes of
+`String` re-materialised on every no-op rebuild of a corpus big enough to want
+`--lazy`. On an unchanged rebuild its thunk is never forced at all.
+
+**`--with-source` was dropped, not moved.** It drove Agda's HTML highlighter
+over every loaded module from a live `TCM` session with visited interfaces, and
+sliced each definition's highlighted span into `snippets/<Module>.json`. A
+renderer reading a file on disk has none of that. Removing it takes
+`AgdaDeps.Source`, `--no-source-for`, `--max-snippet-bytes`, the `giWithSource`
+/ `giSnippetModules` inputs and the `bundleFiles` field with it — and, because
+the snippet-bundle code held the renderer's only imports of `Agda.Utils.Hash`,
+`AgdaDeps.Deps` and `AgdaDeps.Source`, that removal is precisely what lets
+`agda-plotter` link no Agda. `--agda-html-dir` survives in the plotter as the
+link-out path to `agda --html` pages. The Agda-free route back to inline
+snippets — slicing those same pages using the source locations the graph
+already carries — is recorded in the plotter's backlog.
+
+**The palette is duplicated, not moved.** DOT still needs the four state
+colours, so `--theme` and `--color-*` stay here and `agda-plotter` carries its
+own copy with the same names, defaults and presets. Nothing puts them on the
+wire; change one, change both.
+
+**The expanded wire format did not change.** The cold golden, the generated
+schema, and the packed-analytical parity check are all unchanged — this moved a
+renderer, not a field. Two dead things went with it: a `"::mono::"` manifest
+slot `SerialiseCache` documented but no code ever wrote or read, and
+`gjoModuleNames`, which had no consumer anywhere.
+
+The docs site drops the view gallery and grows a "what reads the graph" section
+pointing at `agda-plotter` and `agda-graph-explorer`. `Backlog.md` and
+`Changelog.md` move from `INTERNAL_PAGES` to `DOC_PAGES`, where they belonged:
+both are published and tracked under `docs/`, so staging them only under
+`--internal` meant a plain `make html` left them stale while the rest of the
+site moved on.
+
+---
+
 ## 2026-09-04 — `agda-deps` — `argUsage`, first field report from a consumer
 
 `agda-unused` ran the `arg-removable` / `arg-erasable` checks over a real proof

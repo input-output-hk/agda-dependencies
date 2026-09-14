@@ -4,7 +4,7 @@
 --
 -- A /fragment/ is the @[ADDef]@ 'AgdaDeps.Backend.postModuleAD' returns
 -- for one module (dead-private extras included) plus the module's slices
--- of the two side-channels ('IgnoredEdgeMap', 'MethodProviderMap'). A
+-- of the three side channels. A
 -- @Skip@ped module's @compileDef@ never runs, so those slices must be
 -- cached or its helper edges are lost.
 --
@@ -23,6 +23,8 @@
 -- 2.9 (the cache works on both).
 module AgdaDeps.FragmentCache
   ( FragmentData(..)
+  , fragmentSideChannels
+  , makeFragmentData
   , optionsFingerprint
   , fragmentFileFor
   , readFragment
@@ -50,7 +52,8 @@ import Agda.TypeChecking.Monad ( TCM )
 import Agda.Utils.Hash ( hashString )
 
 import AgdaDeps.Deps
-  ( ADDef, IgnoredEdgeMap, MethodProviderMap, UnsaturatedMap, nodeKeyVersion )
+  ( ADDef, IgnoredEdgeMap, MethodProviderMap, UnsaturatedMap
+  , SideChannels(..), nodeKeyVersion )
 import AgdaDeps.Logging ( info )
 import AgdaDeps.Options ( Options(..) )
 
@@ -74,6 +77,18 @@ instance Binary FragmentData where
   put (FragmentData a b c d) = put a *> put b *> put c *> put d
   get = FragmentData <$> get <*> get <*> get <*> get
 
+-- | View a fragment's flat, compatibility-stable fields as one side-channel
+-- snapshot for replay.
+fragmentSideChannels :: FragmentData -> SideChannels
+fragmentSideChannels (FragmentData _ ignored providers unsaturated) =
+  SideChannels ignored providers unsaturated
+
+-- | Construct the existing flat fragment payload from compiled definitions
+-- and a side-channel delta. The hand-written 'Binary' layout stays unchanged.
+makeFragmentData :: [ADDef] -> SideChannels -> FragmentData
+makeFragmentData defs (SideChannels ignored providers unsaturated) =
+  FragmentData defs ignored providers unsaturated
+
 -- | Bump whenever the fragment payload shape (or any encoded field's
 -- meaning) changes. The side-channel slices must be exact before/after
 -- deltas, not name-prefix filters — a filter drops anonymous-module
@@ -90,8 +105,8 @@ fragmentFormatVersion :: Word64
 fragmentFormatVersion = 11
 
 -- | Fingerprint of every option that changes fragment /content/.
--- Rendering-only options (format, view, colours, externals filtering,
--- snippets, …) are applied in @postCompile@, downstream of the cache,
+-- Serialisation-only options (format, colours, externals filtering,
+-- @--lazy@, …) are applied in @postCompile@, downstream of the cache,
 -- and deliberately excluded.
 optionsFingerprint :: Options -> Word64
 optionsFingerprint opts = hashString $ show
