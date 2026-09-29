@@ -6,7 +6,6 @@
 -- partial-compile machinery lives in "AgdaDeps.ModuleExplorer".
 module AgdaDeps.Driver
   ( runAgdaArgsKeepGoing
-  , wantsKeepGoing
   ) where
 
 import qualified Data.Set as S
@@ -18,11 +17,6 @@ import Agda.Compiler.Backend ( Backend )
 
 import AgdaDeps.Backend ( failedModulesRef )
 import AgdaDeps.ModuleExplorer ( runPartial )
-
--- | Quick scan of argv for @--keep-going@ so @Main.main@ can decide
--- which driver to call without a full option parse.
-wantsKeepGoing :: [String] -> Bool
-wantsKeepGoing = elem "--keep-going"
 
 -- | Drop-in for 'Agda.Main.runAgdaArgs' using the partial-compile
 -- interactor from "AgdaDeps.ModuleExplorer". Threads failed module

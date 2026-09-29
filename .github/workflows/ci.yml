@@ -54,7 +54,7 @@ jobs:
     - name: Dependency drift check
       # Catches dependency-resolution failures early, before we burn
       # time on the actual build.
-      run: cabal build --enable-tests --enable-benchmarks --dry-run
+      run: cabal build --dry-run
 
     - name: Build agda-deps
       # Agda 2.8.0 from Hackage; first run builds it, then cache hits.
@@ -153,18 +153,15 @@ jobs:
       # node-for-node (kind/line/access/type/subterm hashes). Both runs
       # start cold so the main module's dead-private recovery is the
       # complete variant in both (a warm .agdai would degrade only one
-      # side and produce a spurious mismatch).
+      # side and produce a spurious mismatch). The expanded side is the
+      # cold ci-out/expanded run above, which used the same flags.
       run: |
         rm -rf test/*.agdai test/_build
         cabal run -v0 agda-deps -- --format=json --json-mode=packed \
           --packed-analytical --with-signatures --with-term-hashes \
           -i test/ -o ci-out/packed test/Test.agda
-        rm -rf test/*.agdai test/_build
-        cabal run -v0 agda-deps -- --format=json --json-mode=expanded \
-          --with-signatures --with-term-hashes \
-          -i test/ -o ci-out/expanded-cmp test/Test.agda
         python3 schema/packed_analytical_check.py \
-          ci-out/packed/deps.json ci-out/expanded-cmp/deps.json
+          ci-out/packed/deps.json ci-out/expanded/deps.json
 
     - name: keep-going emits a graph on a broken corpus
       # Locks the --keep-going best-effort guarantee: one module whose
@@ -346,9 +343,24 @@ jobs:
         cabal run -v0 agda-deps -- --incremental --format=json \
           --json-mode=expanded --with-signatures --with-term-hashes \
           -i test/ -o ci-out/inc test/Test.agda 2>ci-out/inc.edit.log
-        ! grep -q "skipped re-emit" ci-out/inc.edit.log
+        # (`! grep` would never fail the step: bash -e ignores negated commands.)
+        if grep -q "skipped re-emit" ci-out/inc.edit.log; then
+          echo "edit did not defeat the no-op skip" >&2; exit 1
+        fi
         grep -q '"Nat.fortyTwo"' ci-out/inc/deps.json
         git checkout test/Nat.agda
+        # (2b) the source scan is an input too: a new module under -i that
+        #      nothing imports recompiles nothing, but must still defeat the
+        #      skip and appear in sourceFiles
+        printf 'module Orphan where\n' > test/Orphan.agda
+        cabal run -v0 agda-deps -- --incremental --format=json \
+          --json-mode=expanded --with-signatures --with-term-hashes \
+          -i test/ -o ci-out/inc test/Test.agda 2>ci-out/inc.orphan.log
+        if grep -q "skipped re-emit" ci-out/inc.orphan.log; then
+          echo "new source file did not defeat the no-op skip" >&2; exit 1
+        fi
+        grep -q 'Orphan.agda"' ci-out/inc/deps.json
+        rm test/Orphan.agda
         # (3) GC: plant a stale fragment, rerun, confirm it is pruned
         touch ci-out/inc/.agda-deps-cache/Zombie-deadbeefdeadbeef.frag
         rm -rf test/*.agdai test/_build
@@ -366,6 +378,72 @@ jobs:
         find ci-out/lazyinc/modules -name '*.json' -printf '%T@ %p\n' | sort > ci-out/mt.after
         diff ci-out/mt.before ci-out/mt.after
         echo "incremental serialise + GC OK"
+
+    - name: config keys, term-hash identity, DOT quoting, failed externals
+      # Regressions the golden cannot see.
+      # (1) quiet / skip-agda / keep-going / lenient-imports are decided in
+      #     Main before Agda parses argv; each must work from the config
+      #     file exactly as its CLI flag does (defaults → config → CLI).
+      # (2) Subterm hashes name references by node key: Collision's two
+      #     same-named `where` helpers (`QED`, raw name Collision._.QED)
+      #     are different nodes, so useA and useB must hash apart. Depth 1,
+      #     because their bodies are below the golden's --min-term-depth.
+      # (3) The --skip-agda DOT renderer quotes names as DOT, not JSON
+      #     (P' must not become "P'").
+      # (4) --no-externals drops a failed module outside the project root
+      #     like any other external.
+      run: |
+        mkdir -p ci-out/fixes
+        # (1)
+        printf 'skip-agda: true\nquiet: true\n' > ci-out/fixes/skip.yml
+        cabal run -v0 agda-deps -- --config=ci-out/fixes/skip.yml --format=json \
+          --json-mode=expanded -i test/ -o ci-out/fixes/skip test/Test.agda \
+          2>ci-out/fixes/skip.err
+        if grep -q '^agda-deps:' ci-out/fixes/skip.err; then
+          echo "config quiet ignored" >&2; exit 1
+        fi
+        printf 'keep-going: true\n' > ci-out/fixes/kg.yml
+        cabal run -v0 agda-deps -- --config=ci-out/fixes/kg.yml --format=json \
+          --json-mode=expanded -i test-keepgoing -o ci-out/fixes/kg \
+          test-keepgoing/Entry.agda
+        printf 'lenient-imports: true\n' > ci-out/fixes/li.yml
+        rm -rf test-unsolved/*.agdai test-unsolved/_build
+        cabal run -v0 agda-deps -- --config=ci-out/fixes/li.yml --format=json \
+          -i test-unsolved -o ci-out/fixes/li test-unsolved/Entry.agda
+        # (2)
+        cabal run -v0 agda-deps -- --format=json --json-mode=expanded \
+          --with-term-hashes --min-term-depth=1 \
+          -i test/ -o ci-out/fixes/hash1 test/Test.agda
+        # (3)
+        mkdir -p ci-out/fixes/quote
+        printf "module P' where\n" > "ci-out/fixes/quote/P'.agda"
+        printf "module Q where\nopen import P'\n" > ci-out/fixes/quote/Q.agda
+        cabal run -v0 agda-deps -- --skip-agda --format=dot \
+          -i ci-out/fixes/quote ci-out/fixes/quote/Q.agda > ci-out/fixes/quote.dot
+        grep -qF "\"Q\" -> \"P'\";" ci-out/fixes/quote.dot
+        # (4)
+        mkdir -p ci-out/fixes/ext/proj ci-out/fixes/ext/lib
+        cp test-keepgoing/Good.agda test-keepgoing/Broken.agda ci-out/fixes/ext/lib/
+        printf 'module Entry where\n\nopen import Good\nopen import Broken\n' \
+          > ci-out/fixes/ext/proj/Entry.agda
+        printf 'name: proj\ninclude: .\n' > ci-out/fixes/ext/proj/proj.agda-lib
+        (cd ci-out/fixes/ext/proj && cabal run -v0 agda-deps -- --keep-going \
+          --no-externals --format=json --json-mode=expanded -i . -i ../lib \
+          -o ../out Entry.agda)
+        python3 - <<'EOF'
+        import json
+        load = lambda p: json.load(open(f"ci-out/fixes/{p}/deps.json"))
+        assert load("skip")["definitions"] == [], "config skip-agda ignored"
+        assert load("kg").get("failedModules") == ["Broken"], "config keep-going ignored"
+        g = load("hash1")
+        h = dict(zip([d["name"] for d in g["definitions"]], g["definitionSubtermHashes"]))
+        assert h["Collision.useA"] != h["Collision.useB"], "same-named where helpers hash alike"
+        ext = load("ext/out")
+        assert ext.get("failedModules") == [], ext.get("failedModules")
+        assert "Broken" not in ext["modules"], ext["modules"]
+        assert "Broken" in ext["externals_summary"]["modules"]
+        print("config keys, hash identity, DOT quoting, failed externals OK")
+        EOF
 
     - name: Upload generated artefacts
       uses: actions/upload-artifact@v4

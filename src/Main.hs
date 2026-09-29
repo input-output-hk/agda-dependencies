@@ -9,13 +9,12 @@
 module Main where
 
 import System.Directory
-  ( canonicalizePath, doesDirectoryExist, getCurrentDirectory
-  , listDirectory, setCurrentDirectory )
+  ( canonicalizePath, getCurrentDirectory, setCurrentDirectory )
 import System.Environment ( getArgs )
 import System.Exit ( exitSuccess )
-import System.FilePath ( (</>), isAbsolute, takeDirectory, takeExtension )
+import System.FilePath ( (</>), isAbsolute, takeDirectory )
 
-import Control.Monad ( when )
+import Control.Monad ( forM_, when )
 import Data.List ( isPrefixOf )
 
 #if MIN_VERSION_Agda(2,9,0)
@@ -30,13 +29,14 @@ import System.Environment ( withArgs )
 
 import Data.IORef ( writeIORef )
 
-import AgdaDeps.Backend ( backendWithSeed, precomputedGraphRef )
+import AgdaDeps.Backend
+  ( backendWithSeed, parseBackendFlags, precomputedGraphRef )
 import AgdaDeps.Config
   ( applyConfig, defaultConfig, discoverConfigPath, loadConfig
   , extractConfigArg, inferFormatFromOutput, cfgResolveDeps
   , showDefaultsYaml )
 import AgdaDeps.Doctor  ( isDoctorCommand, runDoctor )
-import AgdaDeps.Driver  ( runAgdaArgsKeepGoing, wantsKeepGoing )
+import AgdaDeps.Driver  ( runAgdaArgsKeepGoing )
 import AgdaDeps.Backend.Wire ( expandedSchemaJson )
 import AgdaDeps.Help
   ( isHelpRequest, wantsAgdaHelp, rewriteAgdaHelp, printHelp
@@ -44,10 +44,11 @@ import AgdaDeps.Help
 import AgdaDeps.LibResolve
   ( wantsResolveDeps, stripResolveDepsFlag, resolveProjectDepsArgs )
 import AgdaDeps.Logging ( setQuiet, info )
-import AgdaDeps.Options ( defaultOptions )
+import AgdaDeps.Options ( Options(..), defaultOptions )
 import AgdaDeps.Precompute ( precomputeFromArgs )
-import AgdaDeps.SkipAgda ( runSkipAgda, wantsSkipAgda )
-import AgdaDeps.Util ( candidateDirs, looksLikeAgdaSource )
+import AgdaDeps.SkipAgda ( runSkipAgda )
+import AgdaDeps.Util
+  ( candidateDirs, looksLikeAgdaSource, nearestAgdaLibAncestor )
 
 #if !MIN_VERSION_Agda(2,9,0)
 -- | Agda 2.8 shim for 2.9's @runAgdaArgs@: run Agda with an explicit
@@ -80,8 +81,6 @@ main = do
   -- file: `agda-deps --show-defaults > Project/.agda-deps.yml`.
   when ("--show-defaults" `elem` rawArgs) $
     putStr showDefaultsYaml >> exitSuccess
-  -- Detect --quiet before any 'info' call.
-  setQuiet ("--quiet" `elem` rawArgs)
 
   -- Lift out the optional --config=PATH token so Agda's GetOpt never
   -- sees it and the YAML loads before argv parsing.
@@ -89,30 +88,37 @@ main = do
 
   let cliResolveDeps    = wantsResolveDeps argsNoConfig
       argsNoResolveDeps = stripResolveDepsFlag argsNoConfig
-  let args = rewriteLenientImports (rewriteAgdaHelp argsNoResolveDeps)
-  args' <- canonicalizePathArgs args
+  args' <- canonicalizePathArgs (rewriteAgdaHelp argsNoResolveDeps)
   mRoot <- if userOptedOutOfLibDiscovery args'
              then return Nothing
              else discoverProjectRoot args'
-  case mRoot of
-    Just root -> do
-      info $
-        "agda-deps: changing directory to project root " ++ root
-        ++ " so Agda picks up its .agda-lib"
-      setCurrentDirectory root
-    Nothing -> return ()
+  mapM_ setCurrentDirectory mRoot
 
   -- Discover + load YAML config (if any) once cwd has settled on the
   -- project root. Config layered onto 'defaultOptions' is the seed
   -- Agda's GetOpt walks argv on top of.
   mCfgPath <- discoverConfigPath cliConfigArg
-  cfg <- case mCfgPath of
-    Just p -> do
-      c <- loadConfig p
-      info $ "agda-deps: applied config from " ++ p
-      pure c
-    Nothing -> pure defaultConfig
+  cfg <- maybe (pure defaultConfig) loadConfig mCfgPath
   let seedOptions = applyConfig cfg defaultOptions
+
+  -- The full option set (defaults → config → CLI), resolved once so every
+  -- decision taken before Agda runs reads the answer the backend will get.
+  -- The backend itself stays seeded with 'seedOptions': Agda's parse layers
+  -- the CLI on top again, and repeatable flags (--exclude) would otherwise
+  -- count twice. A bad flag value is left for the chosen path to report,
+  -- so routing falls back to the config alone.
+  let resolved = either (const seedOptions) fst
+                   (parseBackendFlags seedOptions args')
+  setQuiet (optQuiet resolved)
+  forM_ mRoot $ \root -> info $
+    "agda-deps: changing directory to project root " ++ root
+    ++ " so Agda picks up its .agda-lib"
+  forM_ mCfgPath $ \p -> info $ "agda-deps: applied config from " ++ p
+
+  -- --lenient-imports (CLI or config) is forwarded to Agda as
+  -- --allow-unsolved-metas.
+  let args = [ "--allow-unsolved-metas" | optLenientImports resolved ]
+             ++ filter (/= "--lenient-imports") args'
 
   -- --resolve-deps (CLI or YAML): replace Agda's library resolver with an
   -- explicit @--no-libraries -i \<dir\> ...@ list from the project's
@@ -124,7 +130,7 @@ main = do
       resolveRoot <- maybe getCurrentDirectory return mRoot
       resolveProjectDepsArgs info resolveRoot
     else return []
-  let args'WithResolve = resolveArgs ++ args'
+  let args'WithResolve = resolveArgs ++ args
 
   -- Infer --format from the -o extension when --format wasn't given
   -- explicitly. Explicit --format in argv wins over inference, which
@@ -141,9 +147,9 @@ main = do
   precomputed <- precomputeFromArgs args''
   writeIORef precomputedGraphRef precomputed
   let runWith = Backend (backendWithSeed seedOptions)
-  if wantsSkipAgda args''
+  if optSkipAgda resolved
     then runSkipAgda seedOptions precomputed args''
-    else if wantsKeepGoing args''
+    else if optKeepGoing resolved
       then runAgdaArgsKeepGoing [runWith] args''
       else runAgdaArgs           [runWith] args''
 
@@ -209,31 +215,12 @@ discoverProjectRoot args = do
   cwd <- getCurrentDirectory
   if any (sameDir cwd) candidates
     then return Nothing  -- cwd is already a candidate
-    else firstJustM walkUp candidates
+    else firstJustM nearestAgdaLibAncestor candidates
   where
     sameDir a b = takeDirectory (a </> "x") == takeDirectory (b </> "x")
-
-    walkUp :: FilePath -> IO (Maybe FilePath)
-    walkUp d = do
-      hit <- hasAgdaLib d
-      if hit
-        then return (Just d)
-        else do
-          let up = takeDirectory d
-          if up == d then return Nothing else walkUp up
-
-    hasAgdaLib :: FilePath -> IO Bool
-    hasAgdaLib d = doesDirectoryExist d >>= \case
-      False -> return False
-      True  -> any ((== ".agda-lib") . takeExtension) <$> listDirectory d
 
     firstJustM :: (a -> IO (Maybe b)) -> [a] -> IO (Maybe b)
     firstJustM _ []     = return Nothing
     firstJustM f (x:xs) = f x >>= \case
       Just y  -> return (Just y)
       Nothing -> firstJustM f xs
-
--- | Rewrite every @--lenient-imports@ token to @--allow-unsolved-metas@,
--- before Agda's own option parser sees argv.
-rewriteLenientImports :: [String] -> [String]
-rewriteLenientImports = map (\a -> if a == "--lenient-imports" then "--allow-unsolved-metas" else a)

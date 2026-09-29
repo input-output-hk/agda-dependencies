@@ -3,7 +3,7 @@
 -- @--skip-agda@ code path. 'AgdaDeps.Precompute' has already
 -- line-parsed every @.agda@ source under the @-i@ paths for its
 -- @module …@ \/ @import …@ statements; this module wires that data
--- into the v2 graph.json schema and emits DOT \/ HTML \/ JSON.
+-- into the v2 graph.json schema and emits DOT \/ JSON.
 --
 -- Output covers module-level edges and names only — no
 -- definition-level data and no state classification.
@@ -13,55 +13,39 @@
 -- here drives @agda-plotter@'s module-level views normally; its
 -- definition-level views render an empty canvas.
 --
--- Key functions: 'wantsSkipAgda', 'runSkipAgda'.
+-- Key function: 'runSkipAgda'.
 module AgdaDeps.SkipAgda
-  ( wantsSkipAgda
-  , runSkipAgda
+  ( runSkipAgda
   ) where
 
-import Control.Monad ( foldM )
-import Data.List ( find, isPrefixOf )
+import Data.List ( find )
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.IO as TL
 
-import System.Directory ( createDirectoryIfMissing, getCurrentDirectory )
 import System.Exit ( exitFailure )
-import System.FilePath ( (</>), normalise )
 import System.IO ( hPutStrLn, stderr )
 
-import Agda.Compiler.Backend ( commandLineFlags )
-import Agda.Interaction.Options ( runOptM )
-import Agda.Utils.GetOpt ( ArgOrder(Permute), getOpt' )
-
 import AgdaDeps.Backend
-  ( backend, checkOutputFlags, writeLazyTree, noSerialiseCtx )
+  ( checkOutputFlags, noSerialiseCtx, parseBackendFlags, writeOutputs )
 import AgdaDeps.Logging ( info )
-import AgdaDeps.Backend.GraphJson
-  ( GraphInput(..), GraphJsonOutput(..)
-  , buildGraphJson, buildExpandedJson )
+import AgdaDeps.Backend.GraphJson ( GraphInput(..), emptyGraphInput )
 import AgdaDeps.Options
-  ( Options(..), OutputFormat(..), JsonMode(..)
-  , lazyTreeOutput, isExcludedModule )
+  ( Options(..), lazyTreeOutput, isExcludedModule )
 import AgdaDeps.Precompute ( PrecomputedGraph(..) )
-import AgdaDeps.Util       ( jsString, looksLikeAgdaSource )
-
--- | True when argv contains the @--skip-agda@ flag.
-wantsSkipAgda :: [String] -> Bool
-wantsSkipAgda = elem "--skip-agda"
+import AgdaDeps.Util       ( looksLikeAgdaSource, underCwd )
 
 -- | Entry point. Parses backend options out of argv (Agda-side flags
 -- are tolerated and ignored), identifies the entry source file from
--- the positional arguments, and writes the output files. Mirrors the
--- @--format@ dispatch in 'AgdaDeps.Backend.postCompileAD'.
+-- the positional arguments, and writes the output files through
+-- 'AgdaDeps.Backend.writeOutputs', the full pipeline's writer.
 --
 -- @seed@ is the YAML-config-seeded 'Options' assembled in 'Main'; CLI
 -- flags in @argv@ layer on top of it, preserving the
 -- defaults → config → CLI merge order.
 runSkipAgda :: Options -> PrecomputedGraph -> [String] -> IO ()
 runSkipAgda seed precomputed argv = do
-  (opts, positionals) <- case parseBackendOnlyOptions seed argv of
+  (opts, positionals) <- case parseBackendFlags seed argv of
     Left err -> do
       hPutStrLn stderr $ "agda-deps: --skip-agda: " ++ err
       exitFailure
@@ -90,11 +74,8 @@ runSkipAgda seed precomputed argv = do
 
       entryModule = entrySource >>= (`M.lookup` fileToModule)
 
-  cwd <- getCurrentDirectory
-  let root          = normalise cwd
-      isUnderRoot p = root `isPrefixOf` normalise p
-
-      -- External classification, best-effort without Agda:
+  isUnderRoot <- underCwd
+  let -- External classification, best-effort without Agda:
       --   (1) modules whose binding-site file lives outside cwd, and
       --   (2) modules that appear only as import targets, with no
       --       source file under the '-i' paths.
@@ -127,8 +108,10 @@ runSkipAgda seed precomputed argv = do
        (precomputedSourceFiles precomputed)
        (S.fromList mods')
 
--- | Format-dispatch + file write. HTML is rendered inline only; lazy
--- mode is rejected.
+-- | Build the module-only graph and write it through the full pipeline's
+-- writer, with the cache disabled: nothing is type-checked here, so there
+-- is nothing to cache against and every file is written. Sharing it keeps
+-- the output plan, the gz convention and the modules/ layout single-owner.
 emit
   :: Options
   -> M.Map String FilePath
@@ -138,64 +121,23 @@ emit
   -> [FilePath]
   -> S.Set String          -- ^ all in-project modules (for 'giExtraModules')
   -> IO ()
-emit opts moduleFileMap entryModule externals imports sourceFiles allModules = do
-  -- Create the output dir if needed.
-  case optOutDir opts of
-    Just dir -> createDirectoryIfMissing True dir
-    Nothing  -> return ()
-  let gi = GraphInput
-        { giDefs            = []
-        , giStateMap        = M.empty
-        , giImportEdges     = imports
-        , giSourceFiles     = sourceFiles
-        , giModuleFile      = moduleFileMap
-        , giEntryModule     = entryModule
-        , giExternalModules = externals
-        , giFailedModules   = S.empty
-        , giPositions       = M.empty
-        , giLazy            = lazyTreeOutput opts
-        , giExtraModules    = allModules
-        , giReExports       = []
-        , giExternalsSummary = Nothing
-        , giPackedAnalytical = False
-        -- Empty: the source scanner doesn't extract file-level
-        -- @{-# OPTIONS #-}@ tokens ('Precompute.stripBlockComments'
-        -- strips them as block comments).
-        , giModuleOptionEscapes = []
-        -- Empty for the same reason: the effective option set is Agda's
-        -- answer, not the scanner's.
-        , giModuleEffectiveOptions = []
-        -- Empty: without Agda there is no elaboration, hence no metas.
-        , giUnsolvedModules = []
-        }
-      gjo = buildGraphJson gi
-
-  -- Same scrutiny as 'Backend.postCompileAD'. '--lazy' without '-o' was
-  -- already fatal in 'checkOutputFlags', above, so the lazy arm can take
-  -- the directory as given.
-  case (optFormat opts, lazyTreeOutput opts, optOutDir opts) of
-    (FmtDot, _, mDir) ->
-      let dotText = renderModuleDot allModules externals imports entryModule
-      in case mDir of
-           Just dir -> TL.writeFile (dir </> "deps.dot") dotText
-           Nothing  -> TL.putStrLn dotText
-
-    -- The shared writer, with the cache disabled: nothing is
-    -- type-checked here, so there is nothing to cache against and every
-    -- file is written. Sharing it keeps the gz convention and the
-    -- modules/ layout single-owner.
-    (FmtJson, True, Just dir) -> writeLazyTree dir opts noSerialiseCtx gjo
-
-    (FmtJson, _, mDir) ->
-      let jsonText = case optJsonMode opts of
-            JsonPacked   -> gjoGraphJson gjo
-            JsonExpanded -> buildExpandedJson gi
-      in case mDir of
-           -- Plain 'writeFile', not 'writeJsonMaybeGz': --gzip documents
-           -- itself as affecting the lazy path's files only, and the
-           -- full pipeline's monolithic deps.json is not gzipped either.
-           Just dir -> writeFile (dir </> "deps.json") jsonText
-           Nothing  -> putStrLn jsonText
+emit opts moduleFileMap entryModule externals imports sourceFiles allModules =
+  writeOutputs opts noSerialiseCtx
+    (renderModuleDot allModules externals imports entryModule)
+    -- No defs, states, positions or metas without Agda. The module-level
+    -- option rollups stay empty too: the source scanner doesn't extract
+    -- file-level @{-# OPTIONS #-}@ tokens ('Precompute.stripBlockComments'
+    -- strips them as block comments), and the effective option set is
+    -- Agda's answer, not the scanner's.
+    emptyGraphInput
+      { giImportEdges     = imports
+      , giSourceFiles     = sourceFiles
+      , giModuleFile      = moduleFileMap
+      , giEntryModule     = entryModule
+      , giExternalModules = externals
+      , giLazy            = lazyTreeOutput opts
+      , giExtraModules    = allModules
+      }
 
 -- | DOT renderer for the module-only graph: one node per module, one
 -- edge per import. The entry module gets a red border, externals
@@ -217,7 +159,7 @@ renderModuleDot mods externals edges entry =
     ++ [ "}\n" ]
   where
     nodeLine m =
-      "  " ++ jsString m ++ " [label=" ++ jsString m ++ attrs m ++ "];\n"
+      "  " ++ dotQuote m ++ " [label=" ++ dotQuote m ++ attrs m ++ "];\n"
 
     attrs m
       | Just m == entry        = ", color=\"#e94560\", penwidth=2"
@@ -225,21 +167,14 @@ renderModuleDot mods externals edges entry =
       | otherwise              = ", color=\"#3a6090\""
 
     edgeLine (s, t) =
-      "  " ++ jsString s ++ " -> " ++ jsString t ++ ";\n"
+      "  " ++ dotQuote s ++ " -> " ++ dotQuote t ++ ";\n"
 
--- | Parse backend-only options from argv, layered on top of @seed@
--- (the YAML-config-seeded 'Options'). Uses 'getOpt'' so Agda's own
--- flags (@-i@, @--include-path@, etc.) pass through as
--- \"unrecognised\" and are discarded. Folding the CLI actions over
--- @seed@ gives the defaults → config → CLI precedence.
-parseBackendOnlyOptions :: Options -> [String] -> Either String (Options, [String])
-parseBackendOnlyOptions seed argv =
-  let descs                            = commandLineFlags backend
-      (actions, positionals, _unrec, errs) = getOpt' Permute descs argv
-  in if not (null errs)
-       then Left (concat errs)
-       else
-         let (result, _warns) = runOptM (foldM (\o act -> act o) seed actions)
-         in case result of
-              Left  e -> Left e
-              Right o -> Right (o, positionals)
+-- | Quote a string as a DOT ID. Only @\"@ and @\\@ are special inside a
+-- quoted DOT string; every other character, non-ASCII included, goes
+-- through as is (JSON's @\\u@ escapes would render literally).
+dotQuote :: String -> String
+dotQuote s = '"' : concatMap esc s ++ "\""
+  where
+    esc '"'  = "\\\""
+    esc '\\' = "\\\\"
+    esc c    = [c]

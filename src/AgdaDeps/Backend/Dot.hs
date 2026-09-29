@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
--- | Graphviz DOT renderer.
+-- | Graphviz DOT renderer for the definition graph. (The @--skip-agda@
+-- module-only graph has its own small renderer in "AgdaDeps.SkipAgda".)
 module AgdaDeps.Backend.Dot
   ( renderDot
   ) where
@@ -25,13 +26,14 @@ import AgdaDeps.Options ( ColorPalette, DefState(..), colorFor )
 import AgdaDeps.Util    ( parseHexColor )
 
 -- | Render the dependency graph as a DOT 'TL.Text', ready to write to
--- disk or stream to stdout. The 'Map' carries each node's classification
--- for colour lookup; dependency-only nodes (no 'ADDef' of their own)
--- default to 'Defined'. Failed module names get a synthetic singleton
--- node coloured by 'colorFailed'.
-renderDot :: ColorPalette -> Map NodeRef DefState -> Set String -> [ADDef] -> TL.Text
-renderDot palette stateMap failed defs =
+-- disk or stream to stdout. Nodes are coloured by their def's '_state';
+-- dependency-only nodes (no 'ADDef' of their own) default to 'Defined'.
+-- Failed module names get a synthetic singleton node coloured by
+-- 'colorFailed'.
+renderDot :: ColorPalette -> Set String -> [ADDef] -> TL.Text
+renderDot palette failed defs =
   printDotGraph $ buildDotGraph palette stateMap failed defs
+  where stateMap = M.fromList [ (_name d, _state d) | d <- defs ]
 
 -- | DOT node label used for failed-module markers. Stored as the label
 -- so the cluster id and renderer share a single string.

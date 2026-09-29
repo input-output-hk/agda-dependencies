@@ -45,7 +45,7 @@ import qualified Data.Set as S
 import AgdaDeps.Options ( DefState(..) )
 import AgdaDeps.Deps    ( DefKind(..), DefAccess(..), UnsafeTag(..), ArgUsage(..)
                         , ArgBinder(..), BinderHiding(..), EdgeProv, provTag )
-import AgdaDeps.Util    ( jsString, jArray, jStrArray, jStrMap, jStrArrMap )
+import AgdaDeps.Util    ( jsString, jArray, jObj, jStrArray, jStrMap, jStrArrMap )
 
 -- * Wire value types
 --
@@ -227,23 +227,22 @@ encodeObject fs = \a -> "{" ++ intercalate "," (mapMaybe (emit a) prepared) ++ "
 
 -- * Encoder helpers
 
--- | The generic array/object encoders ('jArray', 'jStrArray', 'jStrMap',
--- 'jStrArrMap') live in "AgdaDeps.Util" so this expanded path and the
--- packed/lazy path in "AgdaDeps.Backend.GraphJson" share one byte layout.
+-- | The generic array/object encoders ('jArray', 'jObj', 'jStrArray',
+-- 'jStrMap', 'jStrArrMap') live in "AgdaDeps.Util" so this expanded path
+-- and the packed/lazy path in "AgdaDeps.Backend.GraphJson" share one byte
+-- layout.
 
 encEdge :: WireEdge -> String
-encEdge (WireEdge (a, b)) = "[" ++ jsString a ++ "," ++ jsString b ++ "]"
+encEdge (WireEdge (a, b)) = jStrArray [a, b]
 
 -- | The @unsolvedModules@ object: module → @{metas, constraints}@ line
 -- arrays. Shared with the packed emitter in "AgdaDeps.Backend.GraphJson"
 -- so both forms produce identical bytes for the field.
 unsolvedModulesJson :: [(String, ([Int], [Int]))] -> String
-unsolvedModulesJson rows =
-  "{" ++ intercalate "," [ jsString m ++ ":" ++ entry e | (m, e) <- rows ] ++ "}"
+unsolvedModulesJson rows = jObj [ (m, entry e) | (m, e) <- rows ]
   where
     entry (ms, cs) =
-      "{\"metas\":" ++ jArray show ms
-      ++ ",\"constraints\":" ++ jArray show cs ++ "}"
+      jObj [ ("metas", jArray show ms), ("constraints", jArray show cs) ]
 
 -- | The per-def @argUsage@ object (@$defs/argUsage@):
 -- @{removable, removableRequires?, occursInBody?, erasable, arity,
@@ -275,7 +274,7 @@ argUsageFields =
   [ Required "removable"         (arrOf nat) (jArray show . auRemovable)
   , Optional "removableRequires" (SMap (arrOf nat))
       (omitEmpty auRemovableRequires
-                 (\rq -> jobj [ (show i, jArray show js) | (i, js) <- rq ]))
+                 (\rq -> jObj [ (show i, jArray show js) | (i, js) <- rq ]))
   , Optional "occursInBody"      (arrOf nat)
       (omitEmpty auOccursInBody (jArray show))
   , Required "erasable"          (arrOf nat) (jArray show . auErasable)
@@ -287,7 +286,7 @@ argUsageFields =
       (\au -> if auPartiallyApplied au then Just (jbool True) else Nothing)
   , Optional "binders"           (SMap (SRef "argBinder"))
       (omitEmpty auBinders
-                 (\bs -> jobj [ (show i, encodeObject argBinderFields b)
+                 (\bs -> jObj [ (show i, encodeObject argBinderFields b)
                               | (i, b) <- bs ]))
   ]
   where nat = SInteger (Just 0)
@@ -406,15 +405,14 @@ externalsSummaryFields =
 defsRegistry :: [(String, SchemaDoc)]
 defsRegistry =
   [ ("edge",       SArray (SString Nothing) (Just 2) (Just 2))
-  , ("state",      SString (Just ["D", "P", "H", "F"]))
-  , ("kind",       SString (Just [ "function", "projection", "datatype"
-                                  , "record", "constructor", "postulate"
-                                  , "primitive", "other" ]))
-  , ("access",     SString (Just ["private", "public"]))
-  , ("provenance", SString (Just [ "signature", "body", "module-local"
-                                  , "unknown" ]))
-  , ("unsafeTag",  SString (Just [ "non-terminating", "trustme" ]))
-  , ("hiding",     SString (Just [ "explicit", "implicit", "instance" ]))
+  -- Enum values come from the encoders over every constructor, so a new
+  -- constructor cannot be emitted without appearing here.
+  , ("state",      enumOf wireState)
+  , ("kind",       enumOf wireKind)
+  , ("access",     enumOf wireAccess)
+  , ("provenance", enumOf provTag)
+  , ("unsafeTag",  enumOf wireUnsafe)
+  , ("hiding",     enumOf wireHiding)
   , ("unsolvedModule",
       SObject ["metas", "constraints"]
               [ ("metas",       arrOf (SInteger (Just 1)))
@@ -427,13 +425,12 @@ defsRegistry =
   , ("externalsSummary", objectSchemaOf externalsSummaryFields)
   ]
 
+-- | A string enum listing an encoder's value for every constructor, in
+-- constructor order.
+enumOf :: (Bounded a, Enum a) => (a -> String) -> SchemaDoc
+enumOf wire = SString (Just (map wire [minBound .. maxBound]))
+
 -- * Rendering the schema to text
-
-jobj :: [(String, String)] -> String
-jobj kvs = "{" ++ intercalate "," [ jsString k ++ ":" ++ v | (k, v) <- kvs ] ++ "}"
-
-jarr :: [String] -> String
-jarr xs = "[" ++ intercalate "," xs ++ "]"
 
 jbool :: Bool -> String
 jbool b = if b then "true" else "false"
@@ -442,39 +439,39 @@ jbool b = if b then "true" else "false"
 renderSchema :: SchemaDoc -> String
 renderSchema sd = case sd of
   SObject reqd props addP ->
-    jobj $ [ ("type", jsString "object")
+    jObj $ [ ("type", jsString "object")
            , ("additionalProperties", jbool addP) ]
-        ++ [ ("required", jarr (map jsString reqd)) | not (null reqd) ]
-        ++ [ ("properties", jobj [ (k, renderSchema v) | (k, v) <- props ]) ]
+        ++ [ ("required", jStrArray reqd) | not (null reqd) ]
+        ++ [ ("properties", jObj [ (k, renderSchema v) | (k, v) <- props ]) ]
   SArray items mn mx ->
-    jobj $ [ ("type", jsString "array")
+    jObj $ [ ("type", jsString "array")
            , ("items", renderSchema items) ]
         ++ [ ("minItems", show n) | Just n <- [mn] ]
         ++ [ ("maxItems", show n) | Just n <- [mx] ]
   SMap val ->
-    jobj [ ("type", jsString "object")
+    jObj [ ("type", jsString "object")
          , ("additionalProperties", renderSchema val) ]
-  SString Nothing   -> jobj [ ("type", jsString "string") ]
-  SString (Just es) -> jobj [ ("type", jsString "string")
-                            , ("enum", jarr (map jsString es)) ]
-  SBool             -> jobj [ ("type", jsString "boolean") ]
-  SInteger Nothing  -> jobj [ ("type", jsString "integer") ]
-  SInteger (Just m) -> jobj [ ("type", jsString "integer"), ("minimum", show m) ]
-  SConstInt n       -> jobj [ ("const", show n) ]
-  SConstStr s       -> jobj [ ("const", jsString s) ]
-  SNullableType t   -> jobj [ ("type", jarr [jsString t, jsString "null"]) ]
-  SRef name         -> jobj [ ("$ref", jsString ("#/$defs/" ++ name)) ]
+  SString Nothing   -> jObj [ ("type", jsString "string") ]
+  SString (Just es) -> jObj [ ("type", jsString "string")
+                            , ("enum", jStrArray es) ]
+  SBool             -> jObj [ ("type", jsString "boolean") ]
+  SInteger Nothing  -> jObj [ ("type", jsString "integer") ]
+  SInteger (Just m) -> jObj [ ("type", jsString "integer"), ("minimum", show m) ]
+  SConstInt n       -> jObj [ ("const", show n) ]
+  SConstStr s       -> jObj [ ("const", jsString s) ]
+  SNullableType t   -> jObj [ ("type", jStrArray [t, "null"]) ]
+  SRef name         -> jObj [ ("$ref", jsString ("#/$defs/" ++ name)) ]
 
 -- | The generated JSON Schema for the expanded @graph.json@, as text.
 expandedSchemaJson :: String
-expandedSchemaJson = jobj
+expandedSchemaJson = jObj
   [ ("$schema", jsString "https://json-schema.org/draft/2020-12/schema")
   , ("title",   jsString "agda-deps v2 graph.json (expanded mode)")
   , ("type",    jsString "object")
   , ("additionalProperties", jbool True)
-  , ("required", jarr (map jsString [ fName f | f <- expandedFields, fInRequired f ]))
-  , ("properties", jobj [ (fName f, renderSchema (fSchema f)) | f <- expandedFields ])
-  , ("$defs", jobj [ (n, renderSchema d) | (n, d) <- defsRegistry ])
+  , ("required", jStrArray [ fName f | f <- expandedFields, fInRequired f ])
+  , ("properties", jObj [ (fName f, renderSchema (fSchema f)) | f <- expandedFields ])
+  , ("$defs", jObj [ (n, renderSchema d) | (n, d) <- defsRegistry ])
   ]
 
 -- | Encode an 'ExpandedGraph' to wire JSON.

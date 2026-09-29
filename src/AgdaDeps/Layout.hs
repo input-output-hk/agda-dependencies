@@ -2,8 +2,9 @@
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
--- | Pre-computed 2-D positions for the definition-level graph, so the
--- viewer can draw immediately without running a browser-side layout.
+-- | Pre-computed 2-D positions for the definition-level graph (the wire
+-- @x@ \/ @y@ fields), so a renderer can draw without a layout pass of
+-- its own.
 -- 'computePositions' picks one of three modes:
 --
 -- 1. Below 'sfdpNodeThreshold' — pipe the graph through Graphviz's
@@ -28,9 +29,9 @@ module AgdaDeps.Layout
 
 import Control.Exception ( SomeException, try )
 
-import Data.List ( foldl' )
+import Data.Containers.ListUtils ( nubInt )
 import qualified Data.IntMap.Strict as IM
-import qualified Data.IntSet as IS
+import Text.Read ( readMaybe )
 
 import System.Exit ( ExitCode(..) )
 import System.Process ( readProcessWithExitCode )
@@ -38,8 +39,8 @@ import System.Timeout ( timeout )
 
 import AgdaDeps.Logging ( info )
 
--- | An (x, y) position for a graph node, in arbitrary units. The HTML
--- viewer rescales these to the canvas.
+-- | An (x, y) position for a graph node, in arbitrary units (renderers
+-- rescale them).
 data Position = Position { posX :: !Float, posY :: !Float }
   deriving (Show)
 
@@ -130,18 +131,13 @@ parsePlain nodeIds out =
         return (nid, x, y)
       _ -> Nothing
 
-    readMaybe :: Read a => String -> Maybe a
-    readMaybe s = case reads s of
-      [(v, rest)] | all (`elem` (" \t" :: String)) rest -> Just v
-      _ -> Nothing
-
 -- | Module-grouped grid layout. Each distinct module id gets a tile
 -- on a coarse grid; the definitions inside that module sit on a
 -- smaller sub-grid centred on the tile. Deterministic.
 moduleGrouped :: [(Int, Int)] -> [Position]
 moduleGrouped nodes =
   let -- Distinct module ids in first-appearance order.
-      orderedModules = uniq (map snd nodes)
+      orderedModules = nubInt (map snd nodes)
       modIx :: IM.IntMap Int
       modIx = IM.fromList (zip orderedModules [(0 :: Int)..])
       nMods = max 1 (length orderedModules)
@@ -187,12 +183,3 @@ moduleGrouped nodes =
   in [ IM.findWithDefault (Position 0 0) nid allPos
      | (nid, _) <- nodes
      ]
-
--- | Deduplicate 'Int's preserving first-occurrence order.
-uniq :: [Int] -> [Int]
-uniq = go IS.empty
-  where
-    go _    []     = []
-    go !seen (x:xs)
-      | IS.member x seen = go seen xs
-      | otherwise        = x : go (IS.insert x seen) xs

@@ -27,11 +27,13 @@ Use these documents as the source of truth:
 - `src/AgdaDeps/Backend.hs`: backend hooks and post-compile orchestration.
 - `src/AgdaDeps/Deps.hs`: definition extraction, identity, filtering, states,
   edge contraction, and analytical fields.
+- `src/AgdaDeps/NodeKey.hs`: the `QName` → node-key / module-key naming
+  convention, shared by `Deps` and the subterm hasher (`TermCanon`).
 - `src/AgdaDeps/Options.hs`, `Config.hs`, `Doctor.hs`: CLI and YAML surfaces.
 - `src/AgdaDeps/Backend/Wire.hs`: canonical expanded-v2 field definitions and
   generated schema description.
 - `src/AgdaDeps/Backend/GraphJson.hs`: packed, expanded, and lazy JSON output.
-- `src/AgdaDeps/Backend/{Dot,Json}.hs`: format renderers.
+- `src/AgdaDeps/Backend/Dot.hs`: DOT renderer.
 - `src/AgdaDeps/{FragmentCache,SerialiseCache}.hs`: incremental caches.
 - `test/`: main Agda fixture corpus and expanded JSON golden.
 - `test-keepgoing/`, `test-unsolved/`, `test-matchconstant/`: specialized
@@ -127,9 +129,10 @@ generated pages.
 
 ## Extending the tool
 
-When adding an option, update `Options`, `defaultOptions`, its `NFData` instance,
-and `commandLineFlags`; update the YAML `Config` record, `defaultConfig`,
-`FromJSON`, `applyConfig`, and `showDefaultsYaml`; then update
+When adding an option, update `Options`, `defaultOptions`, and
+`commandLineFlags` (the `NFData` instance is `Generic`-derived); update the
+YAML `Config` record, `defaultConfig`, `FromJSON`, `applyConfig`, and
+`showDefaultsYaml`; then update
 `Doctor.knownFields` and add a coherence rule when combinations can be
 ineffective. Merge precedence remains defaults, then config, then CLI. Enum
 values belong in the shared `allFormats`, `allJsonModes`, or `allThemes` tables.

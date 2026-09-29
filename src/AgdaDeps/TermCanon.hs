@@ -13,8 +13,10 @@
 --   * 'Var' uses Agda's de-Bruijn indices directly; the display
 --     'absName' on 'Lam' / 'Pi' is discarded.
 --   * 'MetaV' identities are replaced by a sentinel.
---   * 'QName' references go through 'prettyShow' (same convention as
---     'AgdaDeps.Deps.hashQName').
+--   * 'QName' references (definitions, constructors, projections) are
+--     encoded by their node key ('nodeKeyOfQ', the wire @name@), so a
+--     reference hashes by the node it names: same-named @where@ helpers
+--     (@M._.g@ in raw 'prettyShow') hash apart.
 --   * 'ArgInfo' is reduced to its 'Hiding' bit; relevance, quantity,
 --     modality, and origin are dropped.
 --   * 'ConInfo', 'ProjOrigin', and 'DummyTermKind' are dropped.
@@ -37,6 +39,8 @@ import           Agda.Syntax.Internal
                    )
 import           Agda.Syntax.Common.Pretty ( prettyShow )
 import           Agda.Utils.Hash ( hashString )
+
+import           AgdaDeps.NodeKey ( nodeKeyOfQ )
 
 -- | Difference list of @(hash, depth)@ pairs, threaded through the walk
 -- so each parent\/child concatenation is an O(1) function composition,
@@ -93,12 +97,12 @@ canonAndSubs !minD t0 = case t0 of
   Def qn es ->
     let (esEnc, esD, esHs) = canonElimsSubs minD es
         !d  = if null es then 1 else esD + 1
-        enc = ('D':) . encStr (prettyShow qn) . esEnc
+        enc = ('D':) . encStr (nodeKeyOfQ qn) . esEnc
     in (enc, d, emit minD d enc esHs)
   Con ch _ es ->
     let (esEnc, esD, esHs) = canonElimsSubs minD es
         !d  = if null es then 1 else esD + 1
-        enc = ('C':) . encStr (prettyShow (conName ch)) . esEnc
+        enc = ('C':) . encStr (nodeKeyOfQ (conName ch)) . esEnc
     in (enc, d, emit minD d enc esHs)
   Pi dom bod ->
     let (dEnc, dD, dHs) = canonAndSubsDom minD dom
@@ -160,7 +164,7 @@ canonElimSubs !minD (Apply a) =
       (uEnc, uD, uHs) = canonAndSubs minD (unArg a)
   in ( ('A':) . encHiding h . uEnc , uD , uHs )
 canonElimSubs !_minD (Proj _ qn) =
-  ( ('R':) . encStr (prettyShow qn) , 1 , id )
+  ( ('R':) . encStr (nodeKeyOfQ qn) , 1 , id )
 canonElimSubs !minD (IApply u v w) =
   let (uEnc, uD, uHs) = canonAndSubs minD u
       (vEnc, vD, vHs) = canonAndSubs minD v

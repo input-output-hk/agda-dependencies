@@ -7,6 +7,70 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-09-29 — `agda-deps` — six fixes from the pre-release review
+
+**Config keys that act before Agda runs now work.** `quiet`, `skip-agda`,
+`keep-going` and `lenient-imports` in `.agda-deps.yml` did nothing: `Main`
+decided them by scanning the raw command line. It now resolves the full option
+set (defaults → config → CLI) with the backend's own flag table
+(`Backend.parseBackendFlags`) and routes on that, so each key behaves exactly
+as its flag. The backend is still seeded with the config alone, so repeatable
+flags are not applied twice.
+
+**`--incremental` no longer serves a stale graph after the source scan
+changes.** The no-op skip's token covered options, build, and the live
+module set, but not the pre-scan of the `-i` directories. Adding a module that
+nothing imports recompiles nothing, so the skip fired and `sourceFiles` went
+stale. The token now also covers the scan, the project root and the entry
+module. The token value changes, so each existing cache re-emits once.
+
+**`--no-externals` drops a failed external module too.** `failedModules` was
+filtered by `--exclude` only, so a module outside the project root whose
+type-check failed under `--keep-going` survived in `failedModules` and
+`modules`. It is now dropped like any other external and listed in
+`externals_summary`.
+
+**`--skip-agda --format=dot` quotes names as DOT.** It used the JSON escaper,
+so `P'` rendered as `P'`.
+
+**`access` respects an indented `private` block.** The back-fill scan treated
+a `private` block as running to the next column-0 line, so an indented block
+inside a sub-module swallowed its public siblings. A block now covers only the
+lines indented deeper than its `private` keyword (Agda's layout rule).
+Column-0 blocks are unaffected. The scan stays a source-text heuristic: Agda
+drops private names from the scope it serialises, so interfaces cannot answer
+the question. New fixture: `test/Access.agda`.
+
+**Subterm hashes name references by node key.** `TermCanon` encoded a
+referenced definition, constructor or projection by raw `prettyShow`, under
+which same-named `where` helpers are indistinguishable (`M._.g`). Two terms
+calling different helpers hashed alike. References now use the wire node key
+(`M.g@8`, `M.g@14`), so a hash names the node the graph does. Hash values
+change for subterms that reference `where` or section helpers; in the bundled
+corpus that is five definitions. `fragmentFormatVersion` is bumped to 12 so
+cached fragments with the old values are dropped. The node-key helpers moved
+to a new `AgdaDeps.NodeKey` module, shared by `Deps` and `TermCanon`.
+
+The golden is regenerated for the new fixture and the changed hashes. CI gains
+a step covering the fixes the golden cannot see. The incremental step's
+edit-detect assertion (`! grep -q "skipped re-emit"`) is rewritten as
+`if grep …; then exit 1`: `bash -e` ignores a negated command, so it could
+never fail.
+
+---
+
+## 2026-09-28 — `agda-deps` — `--gzip` writes a faithful `.gz`
+
+Under `--lazy --gzip`, each `.gz` sibling was compressed from the JSON text
+with every character truncated to one byte, so any file containing a non-ASCII
+name (`≡`, `∀`, …) got a `.gz` that did not decompress to its `.json`. On the
+bundled `test/` corpus that was 7 of the 40 lazy files, `graph.json` among
+them. `writeJsonMaybeGz` now encodes the text as UTF-8 once and writes both
+files from those bytes. The `.json` files are unchanged; only the broken `.gz`
+files differ.
+
+---
+
 ## 2026-09-14 — the HTML renderer moves out
 
 `agda-deps` was doing two unrelated jobs: producing the dependency graph, which

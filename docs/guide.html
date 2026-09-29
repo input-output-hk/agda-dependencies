@@ -19,19 +19,19 @@
 <main><div class="layout">
 <aside class="toc"><div class="toc-inner">
 <div class="toc-title">On this page</div>
-<nav><a class="lvl2" href="#prerequisites">Prerequisites</a><a class="lvl2" href="#build">Build</a><a class="lvl2" href="#quick-start">Quick start</a><a class="lvl2" href="#rendering-the-graph">Rendering the graph</a><a class="lvl2" href="#backend-flags">Backend flags</a><a class="lvl2" href="#node-colours">Node colours</a><a class="lvl2" href="#yaml-config">YAML config</a><a class="lvl3" href="#checking-a-config-agda-deps-doctor">Checking a config: agda-deps doctor</a><a class="lvl2" href="#large-projects-lazy-output">Large projects: lazy output</a><a class="lvl2" href="#consuming-the-json-output">Consuming the JSON output</a><a class="lvl3" href="#expanded-top-level-fields">Expanded top-level fields</a><a class="lvl2" href="#what-gets-filtered-out">What gets filtered out</a><a class="lvl2" href="#ai-disclaimer">AI disclaimer</a></nav>
+<nav><a class="lvl2" href="#prerequisites">Prerequisites</a><a class="lvl2" href="#build">Build</a><a class="lvl2" href="#quick-start">Quick start</a><a class="lvl2" href="#backend-flags">Backend flags</a><a class="lvl2" href="#node-colours">Node colours</a><a class="lvl2" href="#yaml-config">YAML config</a><a class="lvl3" href="#checking-a-config-agda-deps-doctor">Checking a config: agda-deps doctor</a><a class="lvl2" href="#large-projects-lazy-output">Large projects: lazy output</a><a class="lvl2" href="#consuming-the-json-output">Consuming the JSON output</a><a class="lvl3" href="#expanded-top-level-fields">Expanded top-level fields</a><a class="lvl2" href="#what-gets-filtered-out">What gets filtered out</a><a class="lvl2" href="#ai-disclaimer">AI disclaimer</a></nav>
 </div></aside>
 <div class="prose"><h1 id="agda-deps-an-agda-dependency-graph-generator">agda-deps: an Agda dependency graph generator</h1>
 <p><code>agda-deps</code> is an Agda compiler backend that emits a dependency graph relating
-definitions, postulates, and incomplete definitions/expressions — a quick
-overview of the state of a library.</p>
+definitions, postulates, and incomplete definitions/expressions plus their
+relation.</p>
 <p>It writes two things:</p>
 <ul>
-<li>a stable <strong>JSON</strong> artifact, the v2 <code>graph.json</code> (see
+<li>a stable <strong>JSON</strong> artifact (see
   <a href="#consuming-the-json-output">Consuming the JSON output</a>),</li>
 <li>a Graphviz <strong>DOT</strong> file, for a quick static picture.</li>
 </ul>
-<p>Everything else reads the JSON:</p>
+<p>We also built two other tools consuming generated JSON files:</p>
 <table>
 <thead>
 <tr>
@@ -42,7 +42,7 @@ overview of the state of a library.</p>
 <tbody>
 <tr>
 <td><a href="https://github.com/input-output-hk/agda-plotter"><code>agda-plotter</code></a></td>
-<td>Renders the graph as an interactive HTML page — fourteen views, from module-DAG overviews to definition-level browsers.</td>
+<td>Renders the graph as an interactive HTML page.</td>
 </tr>
 <tr>
 <td><a href="https://github.com/input-output-hk/agda-graph-explorer"><code>agda-graph-explorer</code></a></td>
@@ -51,7 +51,7 @@ overview of the state of a library.</p>
 </tbody>
 </table>
 <p>Neither links Agda, so both build from Hackage in minutes. For an interactive
-page, see <a href="#rendering-the-graph">Rendering the graph</a>.</p>
+page, see the <a href="https://github.com/input-output-hk/agda-plotter#readme"><code>agda-plotter</code> README</a>.</p>
 <p>Each node is coloured by the state of its definition:</p>
 <table>
 <thead>
@@ -107,26 +107,9 @@ dot -Tsvg test/deps.dot -o deps.svg
 imports (repeat <code>-i</code> for the standard library) and passing the top module:</p>
 <pre><code>cabal run agda-deps -- --format=json -i src/ -i /path/to/agda-stdlib/src -o out/ src/MyMain.agda
 </code></pre>
-<h2 id="rendering-the-graph">Rendering the graph</h2>
-<p>HTML output lives in <a href="https://github.com/input-output-hk/agda-plotter"><code>agda-plotter</code></a>,
-a separate executable that reads the JSON emitted above. It does not link Agda,
-so it builds from Hackage in minutes.</p>
-<pre><code>agda-deps   --format=json -i src/ -o out/ src/MyMain.agda    # produce
-agda-plotter --view=module-dag-pods -o out/                  # render -&gt; out/deps.html
-xdg-open out/deps.html
-</code></pre>
-<p>The default view is interactive: pan &amp; zoom, expand/collapse module pods,
-click a definition for a detail drawer, search modules and definitions,
-re-layout, and an <strong>Externals: on/off</strong> toggle that hides everything outside
-the project root (stdlib, <code>Agda.Builtin.*</code>, <code>depend:</code> libraries). Thirteen
-other views cover module-DAG overviews, definition-level browsing, and
-proof-progress dashboards; <code>agda-plotter --list-views</code> names them, and its
-README documents each one.</p>
-<p>For projects large enough that inlining the whole graph makes the page slow to
-open, see <a href="#large-projects-lazy-output">Large projects: lazy output</a>.</p>
 <h2 id="backend-flags">Backend flags</h2>
-<p>Everything after <code>--</code> is forwarded to the backend and to Agda's CLI. Standard
-Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</code>,
+<p>Everything after <code>--</code> is forwarded to the backend and to Agda's CLI.
+Standard Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</code>,
 <code>--library-file=FILE</code>, <code>--no-libraries</code>, and the trailing positional module.
 <code>--help</code> lists the backend's options; <code>--agda-help</code> shows Agda's.</p>
 <p>There is one subcommand, <code>agda-deps doctor</code>, which checks the YAML config file
@@ -138,27 +121,19 @@ and exits — see <a href="#checking-a-config-agda-deps-doctor">Checking a confi
 <li><code>--format=dot|json</code> — output format (default <code>dot</code>).</li>
 <li><code>--config=PATH</code> — load a YAML config. See <a href="#yaml-config">YAML config</a>.</li>
 <li><code>--theme=default|light|dark|colorblind</code> — palette preset for the four state
-  colours in DOT output. <code>default</code>/<code>light</code> is the standard palette; <code>dark</code> is
-  <code>#81c784</code>/<code>#ef5350</code>/<code>#ba68c8</code>/<code>#ffb74d</code>; <code>colorblind</code> is
-  <code>#1b9e77</code>/<code>#d95f02</code>/<code>#7570b3</code>/<code>#e7298a</code>. Explicit <code>--color-*</code> flags win.
-  <code>agda-plotter</code> takes the same flags with the same defaults, so a DOT and an
-  HTML rendering of one project can be made to agree.</li>
+  colours in DOT output.</li>
 <li><code>--color-defined|postulate|hole|failed=#RRGGBB</code> — override a state colour
   (defaults <code>#4caf50</code> / <code>#f44336</code> / <code>#9c27b0</code> / <code>#ff9800</code>).</li>
 <li><code>--keep-going</code> — don't abort on a type-check error: tag the failing module
   <code>failed</code> and emit whatever loaded, with def-level data for every module that
   elaborated.</li>
 <li><code>--skip-agda</code> — don't invoke Agda; emit a module-level graph from a source
-  scan (<code>module</code> / <code>import</code> lines). No definition graph and no D/P/H states, so
+  scan (<code>module</code> / <code>import</code> lines). No definition graph, so
   only module-level views have anything to draw.</li>
 <li><code>--lenient-imports</code> — forward <code>--allow-unsolved-metas</code> to Agda, for projects
   that deliberately commit <code>?</code> holes; combine with <code>--keep-going</code>. Under this
   flag a module with unsolved metas <em>succeeds</em> (they become <code>unsolved#meta.*</code>
-  postulates), so <code>failedModules: []</code> alone does <strong>not</strong> mean "everything
-  compiles" — check <code>unsolvedModules</code> and the per-def <code>unsolvedMetas</code> counts,
-  which single out the <em>silent</em> metas (missing record fields, failed instance
-  search, unsolved <code>_</code>) that plain <code>agda</code> would reject, while honest <code>?</code> holes
-  stay plain state-<code>H</code> defs.</li>
+  postulates).</li>
 <li><code>--resolve-deps</code> — constrain Agda's search path to the project's <code>.agda-lib</code>
   <code>depend:</code> closure.</li>
 <li><code>--no-externals</code> — drop everything outside the project root (nodes and edges).
@@ -170,8 +145,7 @@ and exits — see <a href="#checking-a-config-agda-deps-doctor">Checking a confi
   are enabled) to packed, so a decoded packed graph is node-for-node identical
   to expanded.</li>
 <li><code>--with-term-hashes</code> — emit a <code>Word64</code> fingerprint per definition subterm
-  (<code>definitionSubtermHashes</code> + <code>definitionSubtermDepths</code>) in expanded JSON. Off
-  by default (adds a Term walk, ~50–100% wire growth).</li>
+  (<code>definitionSubtermHashes</code> + <code>definitionSubtermDepths</code>) in expanded JSON.</li>
 <li><code>--min-term-depth=N</code> — drop subterms below AST depth <code>N</code> (default <code>3</code>; <code>1</code>
   disables). Needs <code>--with-term-hashes</code>.</li>
 <li><code>--with-signatures</code> — emit each definition's reified type as the per-def
@@ -215,11 +189,11 @@ that module-level graph into the output, so modules that never type-checked
 changing one here does not change what <code>agda-plotter</code> draws. Pass the same
 flags to both, or set them once in a shared <code>.agda-deps.yml</code>.</p>
 <h2 id="yaml-config">YAML config</h2>
-<p><code>agda-deps</code> reads an optional YAML config. Keys mirror the CLI flags in
-kebab-case (<code>--no-externals</code> ↔ <code>no-externals</code>). Merge order is
-<strong>defaults → config → CLI</strong>. Discovery (first match wins): <code>--config=PATH</code>,
-<code>$AGDA_DEPS_CONFIG</code>, <code>./.agda-deps.yml</code> (or <code>.yaml</code>), then the dotfile in the
-nearest ancestor with a <code>*.agda-lib</code>.</p>
+<p><code>agda-deps</code> reads an optional YAML config.
+Keys mirror the CLI flags in kebab-case (<code>--no-externals</code> ↔ <code>no-externals</code>).
+Merge order is <strong>defaults → config → CLI</strong>. Discovery (first match wins):
+<code>--config=PATH</code>, <code>$AGDA_DEPS_CONFIG</code>, <code>./.agda-deps.yml</code> (or <code>.yaml</code>), then the
+dotfile in the nearest ancestor with a <code>*.agda-lib</code>.</p>
 <p>The quickest way to start is to generate a fully-documented sample — every
 option at its default with a one-line comment — and edit it:</p>
 <pre><code>agda-deps --show-defaults &gt; .agda-deps.yml
@@ -238,22 +212,16 @@ exclude:
   - Agda.Builtin
   - Data
 </code></pre>
-<p>Repeatable flags (<code>exclude</code>) take YAML lists. Explicit <code>--color-*</code> CLI flags
-still win over <code>theme:</code>. Run <code>agda-deps doctor</code> to check a file before relying
-on it.</p>
+<p>Run <code>agda-deps doctor</code> to check a file before relying on it.</p>
 <h3 id="checking-a-config-agda-deps-doctor">Checking a config: <code>agda-deps doctor</code></h3>
 <pre><code>agda-deps doctor [--config=PATH] [--strict]
 </code></pre>
-<p>Resolves the config exactly as a run would, then reports what is wrong with it
-— no Agda run, no input module. It catches the failures a config fails
-<em>silently</em>:</p>
+<p>Resolves the config exactly as a run would, then reports what is wrong with it.
+It catches the failures a config fails <em>silently</em>:</p>
 <ul>
 <li><strong>Unknown keys.</strong> A misspelled key is ignored by the parser, so the setting
-  just never applies. <code>doctor</code> names it and suggests the closest real key.</li>
-<li><strong>Bad values.</strong> A colour that isn't <code>#RRGGBB</code>, an unrecognised <code>format:</code> slug
-  (with a did-you-mean), <code>exclude: Data</code> where a list was meant, a quoted
-  <code>"true"</code>, a non-positive <code>min-term-depth</code>. Also the YAML trap of an unquoted
-  <code>color-hole: #9c27b0</code>, which YAML reads as a comment, leaving the key null.</li>
+  just never applies.</li>
+<li><strong>Bad values.</strong> A colour that isn't <code>#RRGGBB</code>.</li>
 <li><strong>Combinations that do nothing.</strong> <code>lazy</code> under <code>format: dot</code>, <code>cache-dir</code>
   without <code>incremental</code>, <code>min-term-depth</code> without <code>with-term-hashes</code>,
   <code>json-mode</code> under <code>format: dot</code>, <code>incremental</code> together with <code>keep-going</code>,
@@ -274,8 +242,7 @@ agda-deps doctor
 Summary: 1 error, 1 warning
 </code></pre>
 <p>Exit status is 1 when there is any error, 0 otherwise; <code>--strict</code> fails on
-warnings too, for use as a CI gate. Warnings assume the config stands alone —
-a CLI flag layered on top can legitimately rescue any of them.</p>
+warnings too, for use as a CI gate.</p>
 <h2 id="large-projects-lazy-output">Large projects: lazy output</h2>
 <p><code>--lazy</code> splits the JSON into a module-level skeleton plus per-module detail
 files, so a renderer can load the shape of the project first and pull in
@@ -291,16 +258,13 @@ cd out &amp;&amp; python3 -m http.server 8000     # http://localhost:8000/deps.h
 modules/&lt;Module&gt;.json  ← that module's leaves + edges (detail-&lt;hash&gt;.json for non-safe names)
 deps.html              ← small shell, no inlined data   (written by agda-plotter)
 </code></pre>
-<p><code>--lazy</code> only splits the packed form; under <code>--json-mode=expanded</code> it is inert
-and a single <code>deps.json</code> is written. It needs <code>-o</code>, and the resulting page
-needs HTTP serving — browsers block <code>fetch()</code> on <code>file://</code>.</p>
 <p>Without <code>--lazy</code>, <code>--format=json</code> writes one <code>deps.json</code> and <code>agda-plotter</code>
 inlines it into a self-contained page that opens straight off disk.</p>
 <h2 id="consuming-the-json-output">Consuming the JSON output</h2>
 <p><code>--format=json</code> ships in two shapes, selected by <code>--json-mode</code>:</p>
 <ul>
 <li><strong>packed</strong> (default) — CSR adjacency; per-def state and module indices as
-  base64 <code>Int8</code>/<code>Int32</code> arrays (consumers decode base64 → typed array). <code>defs</code>
+  base64 <code>Int8</code>/<code>Int32</code> arrays. <code>defs</code>
   carries <code>names</code>/<code>modules</code>/<code>states</code>/<code>x</code>/<code>y</code> unless
   <a href="#backend-flags"><code>--packed-analytical</code></a> adds the <code>kinds</code>/<code>lines</code>/<code>access</code>/
   <code>unsafe</code>/<code>unsolvedMetas</code> (and <code>types</code>/<code>subterm*</code>) arrays. Best for tens of
@@ -389,139 +353,32 @@ described below and omitted when they carry nothing.</p>
 plus — when known for that definition — <code>line</code>, <code>access</code> (<code>private</code> / <code>public</code>),
 <code>type</code> (under <code>--with-signatures</code>), <code>unsafe</code>, <code>unsolvedMetas</code>, and <code>argUsage</code>.</p>
 <ul>
-<li><strong>State letters</strong> — <code>D</code> defined, <code>P</code> postulate, <code>H</code> hole, <code>F</code> failed
-  (module-level marker under <code>--keep-going</code>).</li>
-<li><strong>Kind</strong> (from Agda's <code>theDef</code>) — <code>function</code>, <code>projection</code>, <code>datatype</code>,
-  <code>record</code>, <code>constructor</code>, <code>postulate</code>, <code>primitive</code>, <code>other</code>. Filter on these
-  instead of scraping qnames.</li>
-<li><strong><code>unsafe</code></strong> (per-def, optional) — soundness escapes used <em>directly</em>:
+<li><strong>State letters</strong> — <code>D</code> defined, <code>P</code> postulate, <code>H</code> hole, <code>F</code> failed.</li>
+<li><strong>Kind</strong> — <code>function</code>, <code>projection</code>, <code>datatype</code>, <code>record</code>, <code>constructor</code>,
+  <code>postulate</code>, <code>primitive</code>, <code>other</code>. Filter on these instead of scraping qnames.</li>
+<li><strong><code>unsafe</code></strong> — soundness escapes used <em>directly</em>:
   <code>non-terminating</code> (<code>{-# NON_TERMINATING #-}</code>) and <code>trustme</code> (references
-  <code>primTrustMe</code>). Orthogonal to <code>state</code>. Omitted when empty. <code>{-# TERMINATING #-}</code>
-  is not surfaced (indistinguishable from an ordinary proven-terminating def).</li>
-<li><strong><code>unsolvedMetas</code></strong> (per-def, optional) — count of <em>silent</em> unsolved
-  metavariables the def mentions directly (missing record fields, failed
-  instance search, unsolved <code>_</code> — what plain <code>agda</code> reports as
-  <code>UnsolvedMetaVariables</code>). Honest interaction <code>?</code> holes are <em>not</em> counted, so
-  <code>H</code> with no <code>unsolvedMetas</code> = open goal(s) only; <code>H</code> with a count =
-  silently-missing evidence. Omitted when 0. Only meaningful under
-  <code>--lenient-imports</code> / <code>--allow-unsolved-metas</code> (without the flag such
-  modules simply fail).</li>
-<li><strong><code>argUsage</code></strong> (per-def, optional, expanded only) — arguments the
-  definition never actually uses:
-  <code>{ "removable": [i…], "removableRequires": {…}, "occursInBody": [i…], "erasable": [i…], "arity": n, "syntacticArity": n, "partiallyApplied": true, "binders": {…} }</code>.
-  Indices are telescope positions (0-based, implicits included, ascending)
-  over the definition's <em>own</em> binders — not the enclosing section's, which
-  Agda prepends internally. <code>removable</code> means the binder <em>and</em> the argument
-  at every call site can go; <code>erasable</code> means the argument is used only in
-  types, so it is an <code>@0</code> candidate rather than a removal. Not computed for
-  projections, constructors, datatypes, records, postulates or primitives.
-  Omitted entirely when there is nothing to report. Always computed — no
-  flag.</li>
-</ul>
-<p><strong>The index space is the definition's own <em>reduced</em> telescope, and it can
-  be longer than the signature line.</strong> A type whose codomain only becomes a
-  function after unfolding contributes positions with no written binder at
-  all — <code>f : (A : Set) → Tracer A</code> with <code>Tracer A = ⋯ → ⋯ → A → A</code> reports
-  <code>arity: 4</code> off one written binder. <strong><code>syntacticArity</code></strong> is how many
-  positions are on the signature line, and is omitted when it equals
-  <code>arity</code>; a position <code>&gt;= syntacticArity</code> has no binder to strike out, and
-  equivalently no <code>binders</code> entry.</p>
-<p>The verdict is <em>interprocedural</em>: an argument passed into a helper that
-  discards it reads unused in the caller too. Deleting a binder changes the
-  definition's type, so on anything exported it is an API change.</p>
-<p><code>removable</code> is filtered to positions whose binder can <em>actually</em> be
-  deleted: a position is dropped when its variable still occurs elsewhere in
-  the type, or when removing it would leave an earlier <strong>hidden</strong> binder
-  unsolvable (<code>typeOf : {A : Set} → A → Set</code> — the unused value argument's
-  domain is the only place <code>A</code> occurs). Both filters only ever shrink the
-  set. <code>erasable</code> is not filtered: it claims an <code>@0</code> candidate, not a
-  removal.</p>
-<p>Three fields qualify a <code>removable</code> verdict rather than producing one.
-  <strong><code>occursInBody</code></strong> lists the positions whose variable the elaborated body
-  still mentions: the value is threaded into a callee that discards it, so
-  the deletion has to reach that callee too, while a <code>removable</code> position
-  <em>absent</em> from it is a purely local edit. An instance argument resolved by
-  instance search counts — pair it with <code>binders[i].hiding == "instance"</code> for
-  the shape that most often breaks a build. <strong><code>partiallyApplied</code></strong> is <code>true</code>
-  when the definition is referenced somewhere in the graph with fewer
-  arguments than it takes: used as a value, so its arity is its interface and
-  no position is really removable. Both are omitted when empty.
-  <strong><code>removableRequires</code></strong> maps a position to the
-  others that must be deleted <strong>with</strong> it, since some removals are valid
-  only as a set; it is omitted when every removal stands alone, and a
-  position absent from it can be removed by itself.</p>
-<p>The indices do <strong>not</strong> index the sibling <code>type</code> string, which still shows
-  the section-inherited binders — align against the source signature, and
-  mind <code>syntacticArity</code>. For
-  <code>length : {a} {A : Set a} {n} → Vec A n → ℕ</code>:</p>
-<p><code>json
-  "argUsage": {
-    "removable": [0, 1, 3],
-    "removableRequires": { "0": [1, 3], "1": [3] },
-    "erasable": [], "arity": 4,
-    "binders": {
-      "0": { "hiding": "implicit", "name": "A.a" },
-      "1": { "hiding": "implicit", "name": "A" },
-      "3": { "hiding": "explicit" }
-    }
-  }</code></p>
-<p>— dropping the vector (3) alone is valid; dropping <code>A</code> (1) also forces 3;
-  dropping the level <code>a</code> (0) forces both. Index 2 (<code>n</code>) is genuinely used
-  and so is not listed at all.</p>
-<p><strong><code>binders</code></strong> says how each <em>reported</em> position is written, so a report
-  line can read <code>argument 0 ({A : Set})</code> instead of <code>argument 0</code> — the
-  difference between a correct edit and deleting the wrong argument, since
-  most reported positions are implicit or instance rather than explicit.
-  Keyed like <code>removableRequires</code> (position as a decimal string), sparse, and
-  read off the syntactic <code>Pi</code> spine — so <code>hiding</code> is always present
-  (<code>explicit</code> / <code>implicit</code> / <code>instance</code>), <code>name</code> only when the binder has
-  one (<code>Nat → Nat</code> names nothing), and a position whose type only becomes a
-  function after unfolding gets no entry at all. An <em>absent</em> entry means the
-  position is past the signature line (<code>&gt;= syntacticArity</code>); a <em>present</em>
-  entry with no <code>name</code> is a binder that is written, spelled <code>_</code>. Neither is
-  a default. A name containing a <code>.</code> (<code>A.a</code> above) is a binder Agda
-  <em>inserted</em> by generalising a <code>variable</code> declaration — a written binder
-  name can never contain <code>.</code>, so that is a reliable signal that the position
-  has nothing on the signature line to edit.</p>
-<p>Under <code>--with-signatures</code> each entry also carries <strong><code>type</code></strong>: that
-  binder's domain, reified in the context of the binders before it — the
-  slice of the signature at that position, which the per-def <code>type</code> string
-  cannot give you because it is not re-indexed onto the definition's own
-  binders. Often the only usable label, since most reported positions are
-  unnamed.
-- <strong><code>unsolvedModules</code></strong> (top-level, optional) — module →
-  <code>{ "metas": [lines], "constraints": [lines] }</code> rollup of the same split:
-  the source lines of each silent unsolved meta (one entry per meta) and of
-  unsolved constraints. Modules whose only holes are honest <code>?</code>s don't
-  appear; omitted when empty. Under <code>--lenient-imports</code> read this <em>alongside</em>
-  <code>failedModules</code> — an empty <code>failedModules</code> with a non-empty
-  <code>unsolvedModules</code> means "loaded, but with un-produced evidence".
-- <strong><code>moduleOptionEscapes</code></strong> (top-level, optional) — module → the file-level
-  <code>{-# OPTIONS #-}</code> flags that make <code>agda --safe</code> reject it (<code>--type-in-type</code>,
-  <code>--no-positivity-check</code>, <code>--rewriting</code>, …). Read from each module's own
-  <code>OPTIONS</code> pragma. Only safety-relevant flags; omitted when none.
-- <strong><code>moduleEffectiveOptions</code></strong> (top-level, optional) — module → the
+  <code>primTrustMe</code>).</li>
+<li><strong><code>unsolvedMetas</code></strong> — count of <em>silent</em> unsolved metavariables.</li>
+<li><strong><code>argUsage</code></strong> — arguments the
+  definition never actually uses.</li>
+<li><strong><code>unsolvedModules</code></strong> — module → <code>{ "metas": [lines], "constraints": [lines] }</code>.</li>
+<li><strong><code>moduleOptionEscapes</code></strong> — module → the file-level
+  <code>{-# OPTIONS #-}</code> flags that make <code>agda --safe</code> reject it.</li>
+<li><strong><code>moduleEffectiveOptions</code></strong> — module → the
   actionability-relevant options actually <em>in force</em>, currently <code>--erasure</code>
-  alone. Read from the interface's effective options, so unlike
-  <code>moduleOptionEscapes</code> it sees the <code>.agda-lib</code> <code>flags:</code> line and the command
-  line — which is where such a flag normally lives. Gate advice on it:
-  without <code>--erasure</code>, <code>@0</code> is <code>[AttributeKindNotEnabled]</code>, so every
-  <code>argUsage.erasable</code> verdict in that module is un-appliable as configured.
-  Omitted when no module enables one.
-- <strong><code>definitionEdgesProvenance</code></strong> (expanded, optional) — parallel to
+  alone.</li>
+<li><strong><code>definitionEdgesProvenance</code></strong> — parallel to
   <code>definitionEdges</code>, tagging each edge <code>signature | body | module-local |
-  unknown</code>. Absent falls back to <code>unknown</code>. There is no <code>with</code> tag: a dependency
-  reached only through a <code>with</code>-abstraction arrives on the parent as <code>body</code>,
-  because the helper's edges are contracted into it.
-- <strong><code>reexports</code></strong> rows (expanded only) — <code>{ "from", "to", "names": [...] }</code>,
-  one per <code>open import … public</code>; a row that used <code>renaming</code> also carries a
-  <code>"renames"</code> map (<code>alias → canonical name</code>).
-- <strong><code>externals_summary</code></strong> (top-level, optional) — under <code>--no-externals</code>, the
+  unknown</code>.</li>
+<li><strong><code>reexports</code></strong> — <code>{ "from", "to", "names": [...] }</code>,
+  one per <code>open import … public</code>.</li>
+<li><strong><code>externals_summary</code></strong> — under <code>--no-externals</code>, the
   modules that were dropped plus their postulates
-  (<code>{ "modules": [...], "postulates_by_module": {...} }</code>).
-- <strong><code>definitionSubtermHashes</code></strong> / <strong><code>definitionSubtermDepths</code></strong> (expanded,
-  optional) — under <code>--with-term-hashes</code>, one array per definition, parallel to
-  <code>definitions</code>.</p>
+  (<code>{ "modules": [...], "postulates_by_module": {...} }</code>).</li>
+<li><strong><code>definitionSubtermHashes</code></strong> / <strong><code>definitionSubtermDepths</code></strong> — under <code>--with-term-hashes</code>, one array per definition, parallel to
+  <code>definitions</code>.</li>
+</ul>
 <p>The expanded form has a JSON Schema at
 <a href="schema/graph-v2-expanded.schema.json"><code>schema/graph-v2-expanded.schema.json</code></a>.
 Validate with e.g.
@@ -539,8 +396,8 @@ schematised.</p>
 <code>with</code>-helper that references a real target, the edge <code>kept-def → real-target</code>
 is reconstructed by a closure pass (<code>contractIgnoredEdges</code>, same file).</p>
 <h2 id="ai-disclaimer">AI disclaimer</h2>
-<p>I used Claude Code to generate features on this project. Most are proofs of
-concept for visualizing and exploring Agda projects. Feel free to edit them.</p></div>
+<p>I used Claude Code to generate features on this project.
+Most are proofs of concept for visualizing and exploring Agda projects.</p></div>
 </div>
 </main>
 <footer class="site-footer"><div class="wrap">

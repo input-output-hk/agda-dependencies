@@ -18,17 +18,17 @@ module AgdaDeps.LibResolve
 
 import Control.Exception ( SomeException, try )
 import Data.Char ( isSpace )
-import Data.List ( isPrefixOf )
-import Data.Maybe ( catMaybes, fromMaybe, mapMaybe )
+import Data.Containers.ListUtils ( nubOrd )
+import Data.List ( dropWhileEnd, isPrefixOf )
+import Data.Maybe ( catMaybes, fromMaybe, listToMaybe, mapMaybe )
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import System.Directory
-  ( doesDirectoryExist, doesFileExist, getHomeDirectory, listDirectory )
+import System.Directory ( doesFileExist, getHomeDirectory )
 import System.Environment ( lookupEnv )
-import System.FilePath ( (</>), takeDirectory, takeExtension, isAbsolute )
+import System.FilePath ( (</>), takeDirectory, isAbsolute )
 import System.IO ( hPutStrLn, stderr )
 
-import AgdaDeps.Util ( dedupOrd )
+import AgdaDeps.Util ( agdaLibFilesIn, firstExistingFile )
 
 -- | True when @--resolve-deps@ appears anywhere in argv.
 wantsResolveDeps :: [String] -> Bool
@@ -49,7 +49,7 @@ resolveProjectDepsArgs
   -> FilePath           -- ^ project root (directory containing the @.agda-lib@)
   -> IO [String]
 resolveProjectDepsArgs say root = do
-  mLib <- findProjectLibFile root
+  mLib <- listToMaybe <$> agdaLibFilesIn root
   case mLib of
     Nothing -> do
       logWarn $
@@ -94,15 +94,6 @@ data LibFile = LibFile
   , libIncludes :: [FilePath]
   } deriving Show
 
-findProjectLibFile :: FilePath -> IO (Maybe FilePath)
-findProjectLibFile root = do
-  exists <- doesDirectoryExist root
-  if not exists then return Nothing else do
-    entries <- listDirectory root
-    case [ root </> e | e <- entries, takeExtension e == ".agda-lib" ] of
-      (p:_) -> return (Just p)
-      []    -> return Nothing
-
 readLibFile :: FilePath -> IO LibFile
 readLibFile path = do
   contents <- readFile path
@@ -134,7 +125,9 @@ parseLibContents = go . lines
       | otherwise = go lns
 
     isBlank = all isSpace
-    isContinuation s = not (null s) && isSpace (head s) && not (isBlank s)
+    isContinuation s = case s of
+      c : _ -> isSpace c && not (isBlank s)
+      []    -> False
     dropSpace = dropWhile isSpace
 
     splitField s = case break (== ':') s of
@@ -200,12 +193,7 @@ locateRegistryFile = do
                       Just x | not (null x) -> x </> "agda" </> "libraries"
                       _ -> home </> ".config" </> "agda" </> "libraries"
       return [xdgPath, home </> ".agda" </> "libraries"]
-  firstExisting candidates
-  where
-    firstExisting [] = return Nothing
-    firstExisting (p:ps) = do
-      ok <- doesFileExist p
-      if ok then return (Just p) else firstExisting ps
+  firstExistingFile candidates
 
 -- | One library path per line (absolute or @~/...@). Lines starting
 -- with @--@ are comments; blank lines are ignored.
@@ -217,7 +205,7 @@ parseRegistry = mapMaybe lineToPath . lines
       in if null s || "--" `isPrefixOf` s
            then Nothing
            else Just s
-    trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse
+    trim = dropWhile isSpace . dropWhileEnd isSpace
 
 -- ** Closure
 
@@ -225,7 +213,7 @@ parseRegistry = mapMaybe lineToPath . lines
 -- include directories. Cycles are guarded by a visited set.
 resolveClosure :: Registry -> LibFile -> IO [FilePath]
 resolveClosure registry root =
-  fmap (dedupOrd . concat) $ go Set.empty (libDepends root)
+  fmap (nubOrd . concat) $ go Set.empty (libDepends root)
   where
     go :: Set.Set String -> [String] -> IO [[FilePath]]
     go _ [] = return []

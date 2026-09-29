@@ -30,13 +30,13 @@ executable agda-deps
                        AgdaDeps.Layout
                        AgdaDeps.Options
                        AgdaDeps.MatchConstant
+                       AgdaDeps.NodeKey
                        AgdaDeps.Deps
                        AgdaDeps.FragmentCache
                        AgdaDeps.SerialiseCache
                        AgdaDeps.Backend.Dot
                        AgdaDeps.Backend.Wire
                        AgdaDeps.Backend.GraphJson
-                       AgdaDeps.Backend.Json
                        AgdaDeps.Backend
                        AgdaDeps.Doctor
                        AgdaDeps.Help
@@ -54,13 +54,11 @@ executable agda-deps
                        text,
                        containers,
                        unordered-containers,
-                       file-embed,
                        filepath,
                        graphviz >= 2999.20,
                        fgl,
                        directory,
                        mtl,
-                       transformers,
                        bytestring,
                        binary,
                        process >= 1.6 && < 2,

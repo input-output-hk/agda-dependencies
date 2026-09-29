@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 -- | Backend configuration: 'Options', its CLI parsers, and the
 -- supporting palette / output-format / def-state types.
@@ -55,33 +56,29 @@ module AgdaDeps.Options
   , isExcludedModule
   ) where
 
-import Control.DeepSeq ( NFData(..) )
+import Control.DeepSeq ( NFData )
 import Control.Monad.Except ( MonadError(throwError) )
 import Data.Binary ( Binary(..) )
 import qualified Data.Binary as B
 import Data.List ( intercalate, isPrefixOf )
 import Data.Word ( Word8 )
+import GHC.Generics ( Generic )
 
-import AgdaDeps.Util ( isValidHexColor )
+import AgdaDeps.Util ( fromCode, isValidHexColor )
 
 -- | DOT or JSON output. HTML rendering lives in @agda-plotter@, which
 -- reads the @graph.json@ this emits.
 data OutputFormat = FmtDot | FmtJson
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
 
 -- | How @--format=json@ emits the v2 graph. Packed: CSR adjacency +
 -- per-def state as base64 typed arrays. Expanded: definitions as records,
 -- edges as qname pairs.
 data JsonMode = JsonPacked | JsonExpanded
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
 
-instance NFData JsonMode where
-  rnf JsonPacked   = ()
-  rnf JsonExpanded = ()
-
-instance NFData OutputFormat where
-  rnf FmtDot  = ()
-  rnf FmtJson = ()
+instance NFData JsonMode
+instance NFData OutputFormat
 
 -- | Canonical CLI slug for an 'OutputFormat'.
 formatSlug :: OutputFormat -> String
@@ -106,8 +103,8 @@ allJsonModes = [JsonPacked, JsonExpanded]
 
 -- | Resolve a user-supplied slug against a canonical table, or produce the
 -- standard \"Unknown …\" diagnostic naming every accepted value. @what@ is
--- how the setting is spelled in the message (@\"--view\"@ for a CLI flag,
--- @\"view\"@ for the YAML key).
+-- how the setting is spelled in the message (@\"--format\"@ for a CLI flag,
+-- @\"format\"@ for the YAML key).
 parseSlug :: String -> (a -> String) -> [a] -> String -> Either String a
 parseSlug what slug vals s = case [ v | v <- vals, slug v == s ] of
   (v:_) -> Right v
@@ -119,14 +116,12 @@ parseSlug what slug vals s = case [ v | v <- vals, slug v == s ] of
 -- 'Failed' is synthetic: there is no real 'Definition' behind it. It
 -- tags a bare-module node emitted when Agda's type-checker raised a
 -- 'TCErr' under @--keep-going@ (see 'AgdaDeps.Backend.failedModulesRef').
+--
+-- Constructor order is the schema's @state@ enum order ('Bounded' /
+-- 'Enum' enumerate it); the numeric code is 'defStateCode', not
+-- 'fromEnum'.
 data DefState = Defined | Postulate | Hole | Failed
-  deriving (Show, Eq)
-
-instance NFData DefState where
-  rnf Defined   = ()
-  rnf Postulate = ()
-  rnf Hole      = ()
-  rnf Failed    = ()
+  deriving (Show, Eq, Enum, Bounded)
 
 -- | Stable numeric code shared by packed output and the fragment cache.
 defStateCode :: DefState -> Word8
@@ -138,12 +133,7 @@ defStateCode Failed    = 3
 -- | Tagged 'Word8' encoding for the @--incremental@ fragment cache.
 instance Binary DefState where
   put = B.putWord8 . defStateCode
-  get = B.getWord8 >>= \w -> case w of
-    0 -> pure Defined
-    1 -> pure Postulate
-    2 -> pure Hole
-    3 -> pure Failed
-    _ -> fail "DefState"
+  get = B.getWord8 >>= maybe (fail "DefState") pure . fromCode defStateCode
 
 -- | Hex (\"#rrggbb\") colours for each 'DefState'.
 data ColorPalette = ColorPalette
@@ -151,10 +141,9 @@ data ColorPalette = ColorPalette
   , colorPostulate :: String
   , colorHole      :: String
   , colorFailed    :: String
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Generic)
 
-instance NFData ColorPalette where
-  rnf (ColorPalette a b c d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` ()
+instance NFData ColorPalette
 
 defaultPalette :: ColorPalette
 defaultPalette = ColorPalette
@@ -221,17 +210,11 @@ data Options = Options
     -- (kind\/line\/access\/type\/subterm hashes) to the packed @defs@
     -- object, so packed carries what expanded does. Off by default
     -- (packed stays byte-identical); only affects @--json-mode=packed@.
-  }
+  } deriving (Generic)
 
-instance NFData Options where
-  rnf (Options d f c l e g k sa q ne jm li wth mtd wsig nsig simp inc cd pa) =
-        rnf d  `seq` rnf f  `seq` rnf c
-    `seq` rnf l  `seq` rnf e
-    `seq` rnf g  `seq` rnf k  `seq` rnf sa
-    `seq` rnf q  `seq` rnf ne `seq` rnf jm `seq` rnf li
-    `seq` rnf wth `seq` rnf mtd `seq` rnf wsig
-    `seq` rnf nsig `seq` rnf simp `seq` rnf inc `seq` rnf cd `seq` rnf pa
-    `seq` ()
+-- | Agda's backend interface requires 'NFData' for the options record;
+-- the 'Generic' default forces every field, so new fields need no edit.
+instance NFData Options
 
 defaultOptions :: Options
 defaultOptions = Options

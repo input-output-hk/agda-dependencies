@@ -49,8 +49,12 @@ import System.IO ( hPutStrLn, stderr )
 import AgdaDeps.Config
   ( ConfigOrigin, allThemes, describeOrigin, extractConfigArg
   , findConfigPath, themeSlug )
+import Agda.Utils.List ( editDistance )
+
+import AgdaDeps.Help ( isHelpRequest )
 import AgdaDeps.Options
-  ( allFormats, allJsonModes, formatSlug, jsonModeSlug )
+  ( Options(..), allFormats, allJsonModes, defaultOptions, formatSlug
+  , jsonModeSlug )
 import AgdaDeps.Util ( isValidHexColor )
 
 -- ---------------------------------------------------------------------------
@@ -112,7 +116,7 @@ about key msg = key ++ ": " ++ msg
 -- (leading @doctor@ included).
 runDoctor :: [String] -> IO ()
 runDoctor argv
-  | any (`elem` ["--help", "-h", "-?"]) argv = putStr doctorUsage >> exitSuccess
+  | any isHelpRequest argv = putStr doctorUsage >> exitSuccess
   | otherwise = do
       let (mCfgArg, rest) = extractConfigArg argv
           strict = "--strict" `elem` rest
@@ -241,6 +245,7 @@ type Domain a = a -> Maybe (Severity, String)
 data FieldTy
   = TyBool
   | TyStr     (Domain String)
+  | TyColor                    -- ^ a @#RRGGBB@ string
   | TyInt     (Domain Int)
   | TyEnum    [String]
   | TyStrList (Domain String)  -- ^ check applied per element
@@ -255,10 +260,10 @@ knownFields =
   [ field "out-dir"              (TyStr nonEmpty)
   , field "format"               (TyEnum (map formatSlug allFormats))
   , field "theme"                (TyEnum (map themeSlug allThemes))
-  , field "color-defined"        (TyStr hexColor)
-  , field "color-postulate"      (TyStr hexColor)
-  , field "color-hole"           (TyStr hexColor)
-  , field "color-failed"         (TyStr hexColor)
+  , field "color-defined"        TyColor
+  , field "color-postulate"      TyColor
+  , field "color-hole"           TyColor
+  , field "color-failed"         TyColor
   , field "lazy"                 TyBool
   , field "exclude"              (TyStrList modulePrefix)
   , field "gzip"                 TyBool
@@ -282,10 +287,6 @@ knownFields =
     nonEmpty s
       | null s    = Just (SevError, "is empty")
       | otherwise = Nothing
-    hexColor s
-      | isValidHexColor s = Nothing
-      | otherwise = Just
-          (SevError, show s ++ " is not a colour of the form \"#RRGGBB\"")
     modulePrefix s
       | null s = Just (SevWarning, "has an empty entry, which matches nothing")
       | ".agda" `isSuffixOf` s || "/" `isInfixOf` s = Just
@@ -303,8 +304,9 @@ knownKeys = map fst knownFields
 -- | Colour keys get an extra hint, because the usual way to get them
 -- wrong is a YAML one: an unquoted @#RRGGBB@ is a comment.
 isColorKey :: String -> Bool
-isColorKey k = k `elem` [ "color-defined", "color-postulate"
-                        , "color-hole", "color-failed" ]
+isColorKey k = case lookup k knownFields of
+  Just TyColor -> True
+  _            -> False
 
 -- ---------------------------------------------------------------------------
 -- Key + value checks
@@ -343,6 +345,7 @@ checkValue key ty v = case ty of
   TyStr dom -> case v of
     A.String t -> domain key (dom (T.unpack t))
     _ -> [wrongType key "a string" v Nothing]
+  TyColor -> checkValue key (TyStr hexColor) v
   TyInt dom -> case v of
     A.Number _ -> case A.fromJSON v :: A.Result Int of
       A.Success n -> domain key (dom n)
@@ -372,6 +375,10 @@ checkValue key ty v = case ty of
   where
     isString = \case A.String _ -> True; _ -> False
     domain k = maybe [] (\(sev, m) -> [Finding sev (about k m) Nothing])
+    hexColor s
+      | isValidHexColor s = Nothing
+      | otherwise = Just
+          (SevError, show s ++ " is not a colour of the form \"#RRGGBB\"")
 
 wrongType :: String -> String -> A.Value -> Maybe String -> Finding
 wrongType key expected v hint = err
@@ -404,16 +411,6 @@ nearest s candidates = case sortOn snd scored of
   where
     scored = [ (c, editDistance s c) | c <- candidates ]
     budget = max 1 (min 4 (length s `div` 3))
-
--- | Plain Levenshtein distance; the strings here are short config keys.
-editDistance :: String -> String -> Int
-editDistance a b = last (foldl step [0 .. length a] b)
-  where
-    step prev@(p : ps) c = scanl next (p + 1) (zip3 a prev ps)
-      where
-        next left (ca, diag, up) =
-          minimum [left + 1, up + 1, diag + if ca == c then 0 else 1]
-    step [] _ = []
 
 -- ---------------------------------------------------------------------------
 -- Coherence
@@ -510,12 +507,14 @@ checkCoherence o = catMaybes
       Nothing -> Just dflt
       Just s | s `elem` slugs -> Just s
              | otherwise      -> Nothing
-    mFmt      = resolve "format" "dot" (map formatSlug allFormats)
-    mJsonMode = resolve "json-mode" "packed" (map jsonModeSlug allJsonModes)
+    defaultFmt = formatSlug (optFormat defaultOptions)
+    mFmt       = resolve "format" defaultFmt (map formatSlug allFormats)
+    mJsonMode  = resolve "json-mode" (jsonModeSlug (optJsonMode defaultOptions))
+                   (map jsonModeSlug allJsonModes)
 
     -- 'fmt' is for the message text, and is only reached under a
     -- 'fmtIs' / 'fmtNot' guard, both of which imply @isJust mFmt@.
-    fmt          = fromMaybe "dot" mFmt
+    fmt          = fromMaybe defaultFmt mFmt
     fmtIs x      = mFmt == Just x
     fmtNot x     = maybe False (/= x) mFmt
     jsonModeIs x = mJsonMode == Just x

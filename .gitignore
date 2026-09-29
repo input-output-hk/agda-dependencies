@@ -8,7 +8,10 @@ dist-agda29
 *.o
 *.bak
 Res.dot
+# Generated run output next to the fixtures (the golden lives in test/golden/)
 test/deps.dot
+test/deps.json
+test/out-*/
 
 # agda-explore daemon's generated graph (default --out-dir)
 .agda-explore/

@@ -101,8 +101,10 @@ makeFragmentData defs (SideChannels ignored providers unsaturated) =
 --   v11: ArgUsage gained syntacticArity / occursInBody / partiallyApplied
 --        and ArgBinder a type; NodeRef gained nrArity; FragmentData gained
 --        the unsaturated-reference slice
+--   v12: subterm hashes encode name references by node key, not raw
+--        'prettyShow' (same shape, different values)
 fragmentFormatVersion :: Word64
-fragmentFormatVersion = 11
+fragmentFormatVersion = 12
 
 -- | Fingerprint of every option that changes fragment /content/.
 -- Serialisation-only options (format, colours, externals filtering,

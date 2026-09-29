@@ -21,10 +21,12 @@ module AgdaDeps.Precompute
   , precomputeFromArgs
   ) where
 
+import Control.DeepSeq ( force )
 import Control.Exception ( catch, evaluate, IOException )
 import Control.Monad ( foldM )
 
 import Data.Char ( isAlphaNum )
+import Data.Containers.ListUtils ( nubOrd )
 import Data.List ( foldl' )
 import qualified Data.Set as Set
 
@@ -33,7 +35,7 @@ import System.Directory
 import System.FilePath ( (</>), takeBaseName )
 
 import AgdaDeps.Logging ( info )
-import AgdaDeps.Util ( candidateDirs, dedupOrd, looksLikeAgdaSource )
+import AgdaDeps.Util ( candidateDirs, looksLikeAgdaSource )
 
 -- | Pre-computed module-level information discovered by scanning
 -- @.agda@ sources.
@@ -66,18 +68,18 @@ emptyGraph = PrecomputedGraph [] [] [] []
 -- (file count, module count, edge count).
 precomputeFromArgs :: [String] -> IO PrecomputedGraph
 precomputeFromArgs argv = do
-  let roots = dedupOrd (candidateDirs argv)
+  let roots = nubOrd (candidateDirs argv)
   if null roots
     then return emptyGraph
     else do
       files <- concat <$> mapM discoverAgdaFiles roots
-      let files' = dedupOrd files
+      let files' = nubOrd files
       modulesAndImports <- mapM scanFile files'
       let pairs       = zip files' modulesAndImports
           valid       = [ (p, m, is) | (p, Just (m, is)) <- pairs ]
-          mods        = dedupOrd [ m       | (_, m, _)  <- valid ]
-          imports     = dedupOrd [ (m, i)  | (_, m, is) <- valid, i <- is ]
-          moduleFiles = dedupOrd [ (m, p)  | (p, m, _)  <- valid ]
+          mods        = nubOrd [ m       | (_, m, _)  <- valid ]
+          imports     = nubOrd [ (m, i)  | (_, m, is) <- valid, i <- is ]
+          moduleFiles = nubOrd [ (m, p)  | (p, m, _)  <- valid ]
       info $
         "agda-deps: pre-compute: " ++ show (length files) ++ " source file(s), "
         ++ show (length mods)    ++ " module(s), "
@@ -113,12 +115,12 @@ scanFile path = do
                   return (Left e)
     case contentE of
       Left _  -> return Nothing
-      Right c -> do
-        -- Force the file so lazy 'readFile' closes its handle now; else
-        -- open handles accumulate across the corpus and exhaust the fd
-        -- limit.
-        _ <- evaluate (length c)
-        return (parseHeader path (stripBlockComments c))
+      -- Force the parse, not just the text: it reads to EOF, so lazy
+      -- 'readFile' closes its handle now (else open handles accumulate
+      -- across the corpus and exhaust the fd limit), and the file's
+      -- contents are dead once it returns instead of held until the
+      -- caller forces the result.
+      Right c -> evaluate (force (parseHeader path (stripBlockComments c)))
 
 -- Pull @(moduleName, [import])@ out of the file body. Line-based,
 -- over logical Agda lines outside line comments; block comments have

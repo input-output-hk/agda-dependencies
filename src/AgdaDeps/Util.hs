@@ -4,10 +4,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | Small, general-purpose helpers shared by the other AgdaDeps
 -- modules: with-function detection ('isWithFun'), case-tree leaf access
--- ('ccDone'), hex
--- colour parsing ('isValidHexColor', 'parseHexColor'), list dedup
--- ('dedupOrd'), JSON string escaping ('jsString'), and argv inspection
--- ('candidateDirs', 'looksLikeAgdaSource').
+-- ('ccDone'), hex colour parsing ('isValidHexColor', 'parseHexColor'),
+-- string splitting ('splitOn'), JSON encoding ('jsString', 'jArray',
+-- 'jObj'), argv inspection ('candidateDirs', 'looksLikeAgdaSource') and
+-- project discovery ('nearestAgdaLibAncestor', 'firstExistingFile').
 module AgdaDeps.Util
   ( -- * Agda with-function compatibility (2.8 / 2.9)
     isWithFun
@@ -17,16 +17,15 @@ module AgdaDeps.Util
   , isValidHexColor
   , parseHexColor
 
-    -- * List helpers
-  , dedupOrd
-
-    -- * Qualified-name helpers
-  , liftAnonSegments
+    -- * String / enum helpers
+  , splitOn
+  , fromCode
 
     -- * JSON helpers
   , jsString
   , jsB64Raw
   , jArray
+  , jObj
   , jStrArray
   , jStrMap
   , jStrArrMap
@@ -34,14 +33,21 @@ module AgdaDeps.Util
     -- * argv inspection (shared by Main + Precompute)
   , candidateDirs
   , looksLikeAgdaSource
+
+    -- * Project discovery (shared by Main, Config, LibResolve)
+  , agdaLibFilesIn
+  , nearestAgdaLibAncestor
+  , firstExistingFile
+  , underCwd
   ) where
 
 import Data.Char ( isHexDigit )
-import Data.List ( intercalate, isSuffixOf, stripPrefix )
-import qualified Data.Set as Set
+import Data.List ( intercalate, isPrefixOf, isSuffixOf, stripPrefix )
 import Data.Word ( Word8 )
 import Numeric ( readHex, showHex )
-import System.FilePath ( takeDirectory )
+import System.Directory
+  ( doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory )
+import System.FilePath ( (</>), normalise, takeDirectory, takeExtension )
 
 import Agda.TypeChecking.CompiledClause ( CompiledClauses', pattern Done )
 #if MIN_VERSION_Agda(2,9,0)
@@ -102,38 +108,25 @@ parseHexColor ('#':r1:r2:g1:g2:b1:b2:[]) =
       _          -> 0
 parseHexColor _ = (0, 0, 0)
 
--- | O(n log n) deduplication preserving first-occurrence order; a
--- drop-in for 'Data.List.nub' when 'Ord' is available.
-dedupOrd :: forall a. Ord a => [a] -> [a]
-dedupOrd = go Set.empty
-  where
-    go :: Set.Set a -> [a] -> [a]
-    go _    []     = []
-    go seen (x:xs)
-      | Set.member x seen = go seen xs
-      | otherwise         = x : go (Set.insert x seen) xs
+-- | Split on every occurrence of a separator: @splitOn '.' "A.B" ==
+-- ["A","B"]@, and @splitOn c ""  == [""]@.
+splitOn :: Char -> String -> [String]
+splitOn c s = case break (== c) s of
+  (chunk, [])       -> [chunk]
+  (chunk, _ : rest) -> chunk : splitOn c rest
 
--- | Drop bare-@_@ dot-segments from a dotted qualified name, lifting
--- @where@-block and parameterised-section defs (Agda desugars both into
--- anonymous @Parent._@ sub-modules) into their nearest named ancestor:
--- @"M._.N"@ ↦ @"M.N"@, @"M._"@ ↦ @"M"@. Only whole @"_"@ segments are
--- dropped, so mixfix names (@_+_@) survive. Load-bearing for node
--- identity: shared by 'AgdaDeps.Deps.nodeKey' and 'moduleKey'.
-liftAnonSegments :: String -> String
-liftAnonSegments = intercalate "." . filter (/= "_") . splitDots
-  where
-    splitDots :: String -> [String]
-    splitDots s = case break (== '.') s of
-      (seg, [])       -> [seg]
-      (seg, _ : rest) -> seg : splitDots rest
+-- | Invert an enum's code function by enumerating every constructor, so
+-- a decoder cannot drift from the encoder it mirrors.
+fromCode :: (Bounded a, Enum a, Eq c) => (a -> c) -> c -> Maybe a
+fromCode code c = lookup c [ (code x, x) | x <- [minBound .. maxBound] ]
 
 -- | JSON-escape a Haskell 'String' and wrap it in double quotes. The
--- escapes (including @<@ \/ @>@ \/ @&@) make the result safe inside
--- both a @<script>@ block and a standalone @.json@ file.
+-- @<@ \/ @>@ \/ @&@ \/ @'@ escapes are part of the wire bytes (consumers
+-- embed @graph.json@ in HTML @<script>@ blocks), so keep them.
 --
 -- A 'ShowS' fold: each unescaped char is one @cons@ and the closing
 -- quote is the base accumulator, so no trailing append pass. Sits on
--- every emitted JSON/HTML/DOT string, so it multiplies across output.
+-- every emitted JSON string, so it multiplies across output.
 jsString :: String -> String
 jsString s = '"' : foldr escS "\"" s
   where
@@ -170,19 +163,23 @@ jsB64Raw s = '"' : s ++ "\""
 jArray :: (a -> String) -> [a] -> String
 jArray f xs = "[" ++ intercalate "," (map f xs) ++ "]"
 
+-- | @{ "k": v, … }@ — a JSON object from already-encoded values, in the
+-- given association-list order (callers supply ascending where
+-- determinism matters). The @{…}@ counterpart of 'jArray'.
+jObj :: [(String, String)] -> String
+jObj kvs = "{" ++ intercalate "," [ jsString k ++ ":" ++ v | (k, v) <- kvs ] ++ "}"
+
 -- | @[ "s", … ]@ — a JSON array of (escaped) strings.
 jStrArray :: [String] -> String
 jStrArray = jArray jsString
 
--- | @{ "k": "v", … }@ — a JSON object of string values, in the given
--- association-list order (callers supply ascending where determinism
--- matters).
+-- | @{ "k": "v", … }@ — a JSON object of string values.
 jStrMap :: [(String, String)] -> String
-jStrMap kvs = "{" ++ intercalate "," [ jsString k ++ ":" ++ jsString v | (k, v) <- kvs ] ++ "}"
+jStrMap = jObj . map (fmap jsString)
 
 -- | @{ "k": [ "s", … ], … }@ — a JSON object of string-array values.
 jStrArrMap :: [(String, [String])] -> String
-jStrArrMap kvs = "{" ++ intercalate "," [ jsString k ++ ":" ++ jStrArray v | (k, v) <- kvs ] ++ "}"
+jStrArrMap = jObj . map (fmap jStrArray)
 
 -- | Directories worth scanning for project sources, lifted from a
 -- canonicalised argv: every @-i@ \/ @--include-path@ value, plus the
@@ -207,3 +204,34 @@ looksLikeAgdaSource p = any (`isSuffixOf` p)
   [ ".agda", ".lagda", ".lagda.md", ".lagda.rst", ".lagda.tex"
   , ".lagda.org", ".lagda.tree", ".lagda.typ"
   ]
+
+-- | The @*.agda-lib@ files directly inside @d@ (none if @d@ is missing).
+agdaLibFilesIn :: FilePath -> IO [FilePath]
+agdaLibFilesIn d = do
+  exists <- doesDirectoryExist d
+  if not exists then pure [] else
+    map (d </>) . filter ((== ".agda-lib") . takeExtension) <$> listDirectory d
+
+-- | The nearest ancestor of @d@ (@d@ itself included) that contains an
+-- @*.agda-lib@ file.
+nearestAgdaLibAncestor :: FilePath -> IO (Maybe FilePath)
+nearestAgdaLibAncestor d = do
+  libs <- agdaLibFilesIn d
+  let up = takeDirectory d
+  if not (null libs) then pure (Just d)
+    else if up == d then pure Nothing
+    else nearestAgdaLibAncestor up
+
+-- | The first path in the list that names an existing file.
+firstExistingFile :: [FilePath] -> IO (Maybe FilePath)
+firstExistingFile []       = pure Nothing
+firstExistingFile (p : ps) = do
+  e <- doesFileExist p
+  if e then pure (Just p) else firstExistingFile ps
+
+-- | A predicate for "this path lies under the current working directory"
+-- (the project root once 'Main' has settled cwd), by normalised prefix.
+underCwd :: IO (FilePath -> Bool)
+underCwd = do
+  root <- normalise <$> getCurrentDirectory
+  pure (\p -> root `isPrefixOf` normalise p)

@@ -230,7 +230,7 @@ partialBackendInteraction reportFailed mainFile backends setup check = do
 
 handleCheckError :: (String -> IO ()) -> TCErr -> TCM ()
 handleCheckError reportFailed err = do
-  modName <- fromMaybe (moduleFromRange err) <$> currentModuleName
+  modName <- failingModuleName err
   msg <- (prettyShow <$> prettyError err)
            `catchError` \_ -> return (show err)
   reportCheckFailure reportFailed modName msg

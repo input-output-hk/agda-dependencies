@@ -16,6 +16,7 @@ import RenamedReexport  -- R14 fixture. Qualified (no `open`) on purpose: `open`
 import Unsafe  -- R12 fixture (soundness escapes). Qualified (no `open`) to keep its names out of scope, same rationale as RenamedReexport above.
 import OptionEscapes  -- R15 fixture (file-level {-# OPTIONS #-} escapes). Qualified; --type-in-type is non-infective so Test stays unaffected.
 import ArgUsage  -- M1 fixture (never-used arguments). Qualified: its `Vec`/`Box`/`ident` names would otherwise collide with the corpus.
+import Access  -- access back-fill: an indented `private` block ends at its own indentation. Qualified, same rationale as above.
 
 variable a b : Set
 

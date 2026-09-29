@@ -50,12 +50,10 @@ import qualified Data.Yaml as Y
 
 import Data.List ( stripPrefix )
 import Data.Maybe ( fromMaybe )
-import System.Directory
-  ( doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory )
+import System.Directory ( doesFileExist, getCurrentDirectory )
 import System.Environment ( lookupEnv )
 import System.Exit ( die )
-import System.FilePath
-  ( (</>), takeDirectory, takeExtension )
+import System.FilePath ( (</>), takeExtension )
 
 import AgdaDeps.Options
   ( Options(..), OutputFormat(..), JsonMode(..)
@@ -63,6 +61,7 @@ import AgdaDeps.Options
   , formatSlug, jsonModeSlug
   , allFormats, allJsonModes, parseSlug
   )
+import AgdaDeps.Util ( firstExistingFile, nearestAgdaLibAncestor )
 
 -- | YAML config payload. Every field is 'Maybe' so an empty file
 -- (@{}@) is valid and individual omissions leave the underlying
@@ -463,31 +462,14 @@ findConfigPath Nothing = do
       mCwd <- findConfigIn cwd
       case mCwd of
         Just p  -> pure (Right (Just (p, OriginCwd)))
-        Nothing -> Right <$> walkUp cwd
+        Nothing -> nearestAgdaLibAncestor cwd >>= \case
+          Just root -> Right . fmap (\p -> (p, OriginProjectRoot root))
+                         <$> findConfigIn root
+          Nothing   -> pure (Right Nothing)
   where
-    walkUp d = do
-      hit <- hasAgdaLib d
-      if hit
-        then fmap (\p -> (p, OriginProjectRoot d)) <$> findConfigIn d
-        else do
-          let up = takeDirectory d
-          if up == d then pure Nothing else walkUp up
-
-    hasAgdaLib :: FilePath -> IO Bool
-    hasAgdaLib d = doesDirectoryExist d >>= \case
-      False -> pure False
-      True  -> any ((== ".agda-lib") . takeExtension) <$> listDirectory d
-
     findConfigIn :: FilePath -> IO (Maybe FilePath)
-    findConfigIn d = do
-      let candidates = [d </> ".agda-deps.yml", d </> ".agda-deps.yaml"]
-      firstExisting candidates
-
-    firstExisting :: [FilePath] -> IO (Maybe FilePath)
-    firstExisting []     = pure Nothing
-    firstExisting (p:ps) = do
-      e <- doesFileExist p
-      if e then pure (Just p) else firstExisting ps
+    findConfigIn d =
+      firstExistingFile [d </> ".agda-deps.yml", d </> ".agda-deps.yaml"]
 
 -- | 'findConfigPath' for the normal run: a named-but-missing file is
 -- fatal, and the provenance is discarded.
@@ -544,8 +526,6 @@ inferFormatFromOutput = pickValue
       | otherwise = pickValue rest
 
     matchExt :: FilePath -> Maybe String
-    matchExt v = case takeExtension v of
-      ".json" -> Just "json"
-      ".dot"  -> Just "dot"
-      _       -> Nothing
+    matchExt v = lookup (takeExtension v)
+      [ ('.' : slug, slug) | slug <- map formatSlug allFormats ]
 

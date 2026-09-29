@@ -5,7 +5,7 @@
 {-# LANGUAGE RecordWildCards #-}
 -- | Dependency analysis: walks each 'Definition' to extract its direct
 -- lemma/postulate/data dependencies ('computeDefAD' / 'compileDefAD'),
--- classifies it as 'Defined' / 'Postulate' / 'Hole' ('classifyDef'),
+-- classifies it as 'Defined' / 'Postulate' / 'Hole' ('classifyDefWith'),
 -- and filters compiler-generated definitions out of the graph
 -- ('ignoreDef'). Node identity is 'nodeKey' / 'hashQName'; edge
 -- provenance is 'EdgeProv' / 'tagOneWith'.
@@ -25,20 +25,14 @@ module AgdaDeps.Deps
   , ArgUsage(..)
   , ArgBinder(..)
   , BinderHiding(..)
-  , argUsageOf
 
-    -- * Module-level soundness escapes (file @OPTIONS@ pragmas)
-  , safetyRelevantOptionFlags
+    -- * Module-level soundness escapes and effective options
   , optionEscapes
-
-    -- * Module-level /effective/ options (actionability, not safety)
-  , actionabilityRelevantOptions
   , effectiveOptionFlags
 
     -- * Edge provenance
   , EdgeProv(..)
   , edgeProvCode
-  , provPrec
   , provTag
 
     -- * Hashing & node collection
@@ -51,65 +45,36 @@ module AgdaDeps.Deps
   , nodeKeyOfQ
   , moduleKeyOfQ
 
-    -- * Building 'ADDef's
-  , computeDefAD
+    -- * Building 'ADDef's (the backend's @compileDef@ hook)
   , compileDefAD
 
-    -- * Classification (for node colouring)
-  , classifyDef
-  , classifyKind
-  , isUnsolvedMetaName
-
     -- * Silent (non-interaction) unsolved metas
-  , srcLocOfQ
-  , markerIsSilent
   , unsolvedInterfaceLines
   , liveSilentMetaLines
 
-    -- * Filtering compiler-generated noise
-  , ignoreDef
-  , ignoreDependency
-
-    -- * Side-channel: edges through ignored defs
-  , IgnoredEdgeMap
-  , ignoredEdgesRef
-  , resetIgnoredEdges
-  , recordIgnoredDef
-  , readIgnoredEdges
-  , mergeIgnoredEdges
-  , expandThroughIgnored
+    -- * Post-passes over the collected defs
   , contractIgnoredEdges
+  , addInstanceMethodEdges
+  , partiallyAppliedSet
 
     -- * Side channels: one reset for all of them
+  , IgnoredEdgeMap
+  , UnsaturatedMap
+  , MethodProviderMap
   , SideChannels(..)
   , readSideChannels
+  , readUnsaturatedRefs
   , sideChannelDelta
   , mergeSideChannels
   , resetSideChannels
-
-    -- * Side-channel: unsaturated (partially applied) references
-  , UnsaturatedMap
-  , unsaturatedRefsRef
-  , readUnsaturatedRefs
-  , mergeUnsaturatedRefs
-  , partiallyAppliedSet
-
-    -- * Side-channel: instance-method providers
-  , MethodProviderMap
-  , methodProvidersRef
-  , resetMethodProviders
-  , recordMethodProviders
-  , readMethodProviders
-  , mergeMethodProviders
-  , addInstanceMethodEdges
   ) where
 
-import Control.DeepSeq ( NFData(..) )
 import Control.Monad ( filterM, unless, when )
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Data.Binary ( Binary )
 import qualified Data.Binary as B
 import Data.IORef ( IORef, modifyIORef', newIORef, readIORef, writeIORef )
+import Data.Containers.ListUtils ( nubOrd )
 import Data.List ( foldl', isInfixOf, isPrefixOf, sort )
 import Data.Maybe ( fromMaybe, isJust, mapMaybe, maybeToList )
 import Data.Map.Strict ( Map )
@@ -210,7 +175,9 @@ import Agda.Compiler.Backend ( IsMain )
 import AgdaDeps.Options ( Options(..), DefState(..), isExcludedModule )
 import AgdaDeps.MatchConstant ( matchConstantAnalysable, matchConstantOf )
 import AgdaDeps.TermCanon ( subtermHashes )
-import AgdaDeps.Util ( dedupOrd, isWithFun, liftAnonSegments )
+import AgdaDeps.NodeKey
+  ( bindingLineOfQ, moduleKeyOfQ, nodeKeyFromPretty, nodeKeyOfQ )
+import AgdaDeps.Util ( fromCode, isWithFun )
 
 -- | Structural classification of a definition, derived from its
 -- 'Defn' shape (e.g. record-field projections vs. regular functions).
@@ -223,10 +190,7 @@ data DefKind
   | DKPostulate
   | DKPrimitive
   | DKOther
-  deriving (Show, Eq)
-
-instance NFData DefKind where
-  rnf x = x `seq` ()
+  deriving (Show, Eq, Enum, Bounded)
 
 -- | Stable numeric code shared by packed output and the fragment cache.
 defKindCode :: DefKind -> Word8
@@ -245,11 +209,7 @@ defKindCode DKOther       = 7
 data DefAccess
   = AccPrivate
   | AccPublic
-  deriving (Show, Eq)
-
-instance NFData DefAccess where
-  rnf AccPrivate = ()
-  rnf AccPublic  = ()
+  deriving (Show, Eq, Enum, Bounded)
 
 -- | A soundness escape a definition uses /directly/. Orthogonal to
 -- 'DefState' (a 'Defined' def can carry escapes). Emitted as the optional
@@ -263,10 +223,7 @@ instance NFData DefAccess where
 data UnsafeTag
   = UNonTerminating
   | UTrustMe
-  deriving (Show, Eq, Ord)
-
-instance NFData UnsafeTag where
-  rnf x = x `seq` ()
+  deriving (Show, Eq, Ord, Enum, Bounded)
 
 -- | Arguments a definition never actually uses, read straight off the
 -- analysis Agda already ran for positivity\/polarity checking. Nothing is
@@ -332,11 +289,6 @@ data ArgUsage = ArgUsage
     -- is explicit.
   } deriving (Show, Eq)
 
-instance NFData ArgUsage where
-  rnf (ArgUsage r q o e a s p b) =
-    rnf r `seq` rnf q `seq` rnf o `seq` rnf e `seq` rnf a `seq` rnf s
-      `seq` rnf p `seq` rnf b
-
 -- | Surface facts about one binder, read off the syntactic 'Pi' spine of
 -- the definition's type: enough to name it in a report line without the
 -- consumer re-parsing the source signature.
@@ -384,9 +336,6 @@ data ArgBinder = ArgBinder
     -- head symbol that makes it recognisable.
   } deriving (Show, Eq)
 
-instance NFData ArgBinder where
-  rnf (ArgBinder h n t) = rnf h `seq` rnf n `seq` rnf t
-
 -- | How a binder is written, hence how a call site passes it. The
 -- distinction a report line cannot omit: \"argument 0\" of
 -- @{a : Set} -> List a -> List a@ reads as the first @List@ to almost
@@ -395,10 +344,7 @@ data BinderHiding
   = BHExplicit
   | BHImplicit
   | BHInstance
-  deriving (Show, Eq)
-
-instance NFData BinderHiding where
-  rnf x = x `seq` ()
+  deriving (Show, Eq, Enum, Bounded)
 
 -- | Per-argument \"never used\" verdict for a definition, or 'Nothing'
 -- when there is nothing to report (the overwhelmingly common case, so it
@@ -1035,7 +981,7 @@ reifyTypeLine opts ty = do
 actionabilityRelevantOptions :: [(String, PragmaOptions -> Bool)]
 actionabilityRelevantOptions = [ ("--erasure", optErasure) ]
 
--- | The 'actionabilityRelevantOptionFlags' a module's __effective__ options
+-- | The 'actionabilityRelevantOptions' a module's __effective__ options
 -- enable, ascending. Empty for a module that enables none.
 --
 -- Read from 'iOptionsUsed', NOT 'iFilePragmaOptions': the opposite of the
@@ -1117,10 +1063,9 @@ data EdgeProv
                 -- locally-scoped helper, not ownership. Wire tag: @module-local@.
   | EUnknown    -- ^ Catch-all: instance-method provider edges, or contracted
                 -- edges whose chain source provenance was indeterminate.
-  deriving (Show, Eq, Ord)
-
-instance NFData EdgeProv where
-  rnf x = x `seq` ()
+  deriving (Show, Eq, Ord, Enum, Bounded)
+  -- 'Enum' only enumerates the constructors (schema order); the numeric
+  -- code is 'edgeProvCode', which skips the retired code 3.
 
 -- | Combine two provenances by precedence, when contraction or
 -- instance-method extension reaches the same @(src, dst)@ pair twice.
@@ -1217,45 +1162,39 @@ instance Pretty ADDef where
 -- serialised with 'Data.Binary' — no Agda 'EmbPrj'. Enums are tagged
 -- 'Word8's; an out-of-range tag @fail@s the decode (a cache miss).
 
+-- | Decode an enum tag by inverting its code function ('fromCode').
+getCode :: (Bounded a, Enum a) => String -> (a -> Word8) -> B.Get a
+getCode what code = B.getWord8 >>= maybe (fail what) pure . fromCode code
+
 instance Binary EdgeProv where
   put = B.putWord8 . edgeProvCode
-  get = B.getWord8 >>= \case
-    0 -> pure ESignature
-    1 -> pure EBody
-    2 -> pure EModuleLocal
-    4 -> pure EUnknown
-    _ -> fail "EdgeProv"
+  get = getCode "EdgeProv" edgeProvCode
 
 instance Binary DefKind where
   put = B.putWord8 . defKindCode
-  get = B.getWord8 >>= \case
-    0 -> pure DKFunction
-    1 -> pure DKProjection
-    2 -> pure DKDatatype
-    3 -> pure DKRecord
-    4 -> pure DKConstructor
-    5 -> pure DKPostulate
-    6 -> pure DKPrimitive
-    7 -> pure DKOther
-    _ -> fail "DefKind"
+  get = getCode "DefKind" defKindCode
 
 instance Binary DefAccess where
-  put = B.putWord8 . \case
-    AccPrivate -> 0
-    AccPublic -> 1
-  get = B.getWord8 >>= \case
-    0 -> pure AccPrivate
-    1 -> pure AccPublic
-    _ -> fail "DefAccess"
+  put = B.putWord8 . accessCode
+  get = getCode "DefAccess" accessCode
 
 instance Binary UnsafeTag where
-  put = B.putWord8 . \case
-    UNonTerminating -> 0
-    UTrustMe -> 1
-  get = B.getWord8 >>= \case
-    0 -> pure UNonTerminating
-    1 -> pure UTrustMe
-    _ -> fail "UnsafeTag"
+  put = B.putWord8 . unsafeCode
+  get = getCode "UnsafeTag" unsafeCode
+
+-- | Fragment-cache codes for the enums with no packed-wire code.
+accessCode :: DefAccess -> Word8
+accessCode AccPrivate = 0
+accessCode AccPublic  = 1
+
+unsafeCode :: UnsafeTag -> Word8
+unsafeCode UNonTerminating = 0
+unsafeCode UTrustMe        = 1
+
+hidingCode :: BinderHiding -> Word8
+hidingCode BHExplicit = 0
+hidingCode BHImplicit = 1
+hidingCode BHInstance = 2
 
 instance Binary ADDef where
   -- '_deps' is derived (@M.keysSet _depsProv@), so it is not serialised but
@@ -1286,15 +1225,8 @@ instance Binary ArgBinder where
   get = ArgBinder <$> B.get <*> B.get <*> B.get
 
 instance Binary BinderHiding where
-  put = B.putWord8 . \case
-    BHExplicit -> 0
-    BHImplicit -> 1
-    BHInstance -> 2
-  get = B.getWord8 >>= \case
-    0 -> pure BHExplicit
-    1 -> pure BHImplicit
-    2 -> pure BHInstance
-    _ -> fail "BinderHiding"
+  put = B.putWord8 . hidingCode
+  get = getCode "BinderHiding" hidingCode
 
 -- | Precomputed, serialisable node identity carried through 'ADDef', the
 -- side-channels and the emitters. Everything downstream of the per-module
@@ -1337,10 +1269,6 @@ instance Show NodeRef where
   show = nrKey
 instance Pretty NodeRef where
   pretty = pretty . nrKey
-instance NFData NodeRef where
-  rnf (NodeRef a b c d e f g h i) =
-    rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` rnf e `seq` rnf f
-      `seq` rnf g `seq` rnf h `seq` rnf i
 instance Binary NodeRef where
   -- 'nrHash' is derived (@hashString nrKey@) and rebuilt on 'get'.
   -- 'nrWhereHelper' (h) IS serialised: 'nrKey' has the @._.@ marker
@@ -1356,47 +1284,23 @@ instance Binary NodeRef where
     pure (NodeRef a (hashString a) c d e f g h i)
 
 -- ** QName-level identity logic (producer boundary only)
-
--- | Canonical node-identity string for a 'QName'. Anonymous-module segments
--- (the @._.@ marker Agda uses for both @where@ helpers and @module _ (…)
--- where@ members) are lifted into the nearest named ancestor via
--- 'liftAnonSegments' (@Mod._.helper@ ↦ @Mod.helper@). Lifting collapses the
--- @_@ qualifier, so same-named helpers are disambiguated by binding line
--- (@Mod.helper\@15@); one with no binding site falls back to the lifted name.
 --
--- Single source of truth for node identity (stored as 'nrKey'; the wire
--- @"name"@ and edge endpoints are this string). Do not revert to bare
--- 'prettyShow': same-named @where@-helpers collapse onto one node and lose
--- their edges. 'moduleKeyOfQ' is the matching module-attribution function.
-nodeKeyOfQ :: QName -> String
-nodeKeyOfQ qn = nodeKeyFromPretty (prettyShow qn) (bindingLineOfQ qn)
-
--- | 'nodeKeyOfQ' with the @prettyShow@ string and binding line supplied by
--- 'mkRef', which already has both for other fields.
-nodeKeyFromPretty :: String -> Maybe Int -> String
-nodeKeyFromPretty raw mbLine
-  | "._." `isInfixOf` raw          -- where-helper marker (cf. 'nrWhereHelper')
-  , Just ln <- mbLine = lifted ++ "@" ++ show ln
-  | otherwise         = lifted
-  where lifted = liftAnonSegments raw
-
--- | Canonical owning-module string for a 'QName', with anonymous sub-modules
--- lifted away via 'liftAnonSegments' so attribution lands on the nearest
--- named module (@Mod._@ ↦ @Mod@). Every QName→module derivation must route
--- through this, or phantom @Mod._@ nodes surface and set membership drifts.
-moduleKeyOfQ :: QName -> String
-moduleKeyOfQ = liftAnonSegments . prettyShow . qnameModule
+-- 'nodeKeyOfQ' / 'moduleKeyOfQ' live in "AgdaDeps.NodeKey" (shared with
+-- the subterm hasher) and are re-exported from here.
 
 -- | @(source file, 1-indexed line)@ of a 'QName''s binding occurrence.
 -- Surfaced on the wire as 'nrSrcLoc'.
 srcLocOfQ :: QName -> Maybe (FilePath, Word32)
-srcLocOfQ qn = do
+srcLocOfQ qn = (\(file, ln, _) -> (file, ln)) <$> bindingSiteOf qn
+
+-- | A 'QName''s binding site as (source file, start line, start character
+-- offset), when Agda recorded both a file and a position.
+bindingSiteOf :: QName -> Maybe (FilePath, Word32, Word32)
+bindingSiteOf qn = do
   let bindRange = nameBindingSite (qnameName qn)
-  rf <- case rangeFile bindRange of
-          Strict.Just rf -> Just rf
-          Strict.Nothing -> Nothing
+  rf <- Strict.toLazy (rangeFile bindRange)
   p  <- rStart bindRange
-  return (filePath (rangeFilePath rf), posLine p)
+  return (filePath (rangeFilePath rf), posLine p, posPos p)
 
 -- | Build the precomputed 'NodeRef' for a 'QName', memoised per 'QName'.
 -- A 'NodeRef' is a deterministic function of its 'QName' (its one impure
@@ -1522,15 +1426,18 @@ computeDefAD opts def@Defn{..} = do
   let excludes = optExcludeModules opts
       -- Walk 'defType' and 'theDef' separately to record which set each
       -- name came from. Raw walks are shared with 'classifyDefWith' (one
-      -- traversal each); 'ignoreDependency' is applied later in
+      -- traversal each); 'ignoreDef' is applied later in
       -- 'contractIgnoredEdges'.
       !rawSig    = namesIn defType
       !rawBody   = namesIn theDef
       (!sigNames, !bodyNames) =
         filteredDependencySets excludes rawSig rawBody
+      -- Distinct raw names: the per-name string tests below ('prettyShow'
+      -- each) run once per name, not once per occurrence.
+      rawNames = nubOrd (rawSig ++ rawBody)
   -- Reuse the raw (pre-exclude) name walks: a synthetic @unsolved#meta.*@
   -- name in an excluded module must still flip the Hole classification.
-  (st, silentMetas) <- classifyDefWith rawSig rawBody def
+  (st, silentMetas) <- classifyDefWith rawNames def
   let !kd      = classifyKind def
       !termPairs = if optWithTermHashes opts
                      then Just (concatMap (subtermHashes (optMinTermDepth opts))
@@ -1554,7 +1461,7 @@ computeDefAD opts def@Defn{..} = do
   let termTag = case theDef of
         Function{ funTerminates = Just False } -> [UNonTerminating]
         _                                      -> []
-      usesTrustMe = any ((== trustMeNodeKey) . nodeKeyOfQ) (rawSig ++ rawBody)
+      usesTrustMe = any ((== trustMeNodeKey) . nodeKeyOfQ) rawNames
       !unsafeTags = termTag ++ [ UTrustMe | usesTrustMe ]
   -- Never-used arguments, read off Agda's positivity/polarity analysis.
   -- The state read inside only fires for a def that has a finding.
@@ -1575,7 +1482,7 @@ computeDefAD opts def@Defn{..} = do
     , _state  = st
     , _kind   = kd
     , _line   = nrLine nameRef
-    , _access = Nothing  -- back-filled in postCompile from iScope
+    , _access = Nothing  -- back-filled in postCompile from the source's private blocks
     , _subtermHashes = termHs
     , _subtermDepths = termDs
     , _sig    = sigStr
@@ -1612,13 +1519,6 @@ tagOneWith sigNames bodyNames qn isWhere
   | qn `S.member` bodyNames       = EBody
   | otherwise                     = EUnknown
 
--- | 1-indexed start line of a 'QName''s binding site, if Agda recorded a
--- usable range. Synthetic names (e.g. @unsolved#meta.*@) return 'Nothing'.
-bindingLineOfQ :: QName -> Maybe Int
-bindingLineOfQ qn =
-  let r = nameBindingSite (qnameName qn)
-  in fromIntegral . posLine <$> rStart r
-
 -- | Per-definition entry point used by the Agda backend hook.
 --
 -- For *ignored* definitions (with-helpers, pattern lambdas, Kan ops,
@@ -1636,7 +1536,7 @@ compileDefAD opts _ _ def@Defn{..}
       -- with-helper or a pattern lambda is still a partial application of
       -- its target, and those bodies live nowhere else.
       recordUnsaturatedOf def
-      -- Record raw out-edges without applying 'ignoreDependency' (refs to
+      -- Record raw out-edges without applying 'ignoreDef' (refs to
       -- other ignored defs are kept so the closure pass can chain through).
       -- Module-exclusion still applies.
       let !rawSig  = namesIn defType
@@ -1938,28 +1838,13 @@ addInstanceMethodEdges defs = do
       let !extra = S.foldl' (collect providers) S.empty (_deps d)
       in if S.null extra
            then d
-           else
-             let !newDeps = S.union (_deps d) extra
-                 !newProv = M.union (_depsProv d)
-                                    (M.fromSet (const EUnknown) extra)
-             in d { _deps = newDeps, _depsProv = newProv }
+           else withDependencyProvenance
+                  (M.union (_depsProv d) (M.fromSet (const EUnknown) extra)) d
 
     collect :: MethodProviderMap -> Set NodeRef -> NodeRef -> Set NodeRef
     collect providers !acc qn = case M.lookup qn providers of
       Nothing -> acc
       Just bs -> foldl' (flip S.insert) acc bs
-
--- | Closure pass over a set of 'QName's against the side-channel of
--- ignored-def out-edges: every QName that's an ignored-def key is
--- replaced by its own out-edges (recursively), and every other QName is
--- kept. Hidden defs are contracted through, not emitted.
---
--- Thin wrapper around 'bfsClosure'. Production code uses
--- 'contractIgnoredEdges' instead, which memoises across many calls.
-expandThroughIgnored :: MonadIO m => Set NodeRef -> m (Set NodeRef)
-expandThroughIgnored frontier0 = do
-  hidden <- liftIO $ readIORef ignoredEdgesRef
-  pure $ bfsClosure hidden frontier0
 
 -- | Post-pass: rewrite each 'ADDef'@._deps@ + @._depsProv@ by contracting
 -- through the side-channel of ignored defs, then drop leaf deps that
@@ -2013,8 +1898,8 @@ contractIgnoredEdges defs = do
                      acc extra
             | otherwise -> M.insertWith provPrec qn provFromSrc acc
 
--- | Standalone BFS closure, used by 'expandThroughIgnored' and as the
--- fallback in 'contractIgnoredEdges'. @frontier0@ is the set of
+-- | Standalone BFS closure, the fallback in 'contractIgnoredEdges' and
+-- 'buildIgnoredClosure' (cycle members). @frontier0@ is the set of
 -- starting QNames; the result is every reachable QName that's *not* an
 -- ignored-def key. 'EdgeProv' tags inside the closure are discarded.
 bfsClosure :: IgnoredEdgeMap -> Set NodeRef -> Set NodeRef
@@ -2158,13 +2043,9 @@ classifyKind Defn{ theDef = d } = case d of
 -- Holes: an open 'MetaV' left in 'defType'/'theDef', a reference to an
 -- @unsolved#meta.*@ name (Agda's @openMetasToPostulates@ output under
 -- @--allow-unsolved-metas@), or the def's own name being such a marker.
-classifyDef :: Definition -> TCM DefState
-classifyDef def@Defn{..} =
-  fst <$> classifyDefWith (namesIn defType) (namesIn theDef) def
-
--- | 'classifyDef' with the @defType@/@theDef@ name walks supplied by the
--- caller, so 'computeDefAD' avoids a second traversal. The lists must be
--- the *raw* (pre-exclude-filter) names.
+-- The caller supplies the distinct names of the @defType@/@theDef@ walks,
+-- so 'computeDefAD' avoids a second traversal. They must be the *raw*
+-- (pre-exclude-filter) names.
 --
 -- Also returns the def's /silent/ unsolved-meta count ('_unsolvedMetas'):
 -- distinct referenced @unsolved#meta.*@ markers that are silent
@@ -2174,14 +2055,14 @@ classifyDef def@Defn{..} =
 -- assigned ('Hole', or 'Postulate' for an 'Axiom'-typed def); the count is
 -- the additive discriminator between an honest @?@ and silently-missing
 -- evidence (missing record field, failed instance search, unsolved @_@).
-classifyDefWith :: [QName] -> [QName] -> Definition -> TCM (DefState, Int)
-classifyDefWith sigRaw bodyRaw Defn{..}
+classifyDefWith :: [QName] -> Definition -> TCM (DefState, Int)
+classifyDefWith rawNames Defn{..}
   | isUnsolvedMetaName defName = do
       silent <- markerIsSilent defName
       return (Hole, if silent then 1 else 0)
   | otherwise = do
-      let markers = dedupOrd (filter isUnsolvedMetaName (sigRaw ++ bodyRaw))
-          metas   = dedupOrd (allMetasList defType ++ metasInDefn theDef)
+      let markers = filter isUnsolvedMetaName rawNames
+          metas   = nubOrd (allMetasList defType ++ metasInDefn theDef)
       openMs     <- filterM isMetaUnsolved metas
       silentRefs <- filterM markerIsSilent markers
       silentOpen <-
@@ -2311,13 +2192,9 @@ markerIsSilent :: QName -> TCM Bool
 markerIsSilent qn = do
   spansByFile <- getSilentSpansByFile
   return $ fromMaybe False $ do
-    let bindRange = nameBindingSite (qnameName qn)
-    rf <- case rangeFile bindRange of
-            Strict.Just rf -> Just rf
-            Strict.Nothing -> Nothing
-    p  <- rStart bindRange
-    spans <- M.lookup (filePath (rangeFilePath rf)) spansByFile
-    let off = fromIntegral (posPos p)
+    (file, _, pos) <- bindingSiteOf qn
+    spans <- M.lookup file spansByFile
+    let off = fromIntegral pos
     pure (any (\(a, b) -> off >= a && off < b) spans)
 
 -- | Per-interface rollup: @(silent unsolved-meta lines, unsolved-constraint
@@ -2334,7 +2211,7 @@ unsolvedInterfaceLines iface = do
   silent <- filterM markerIsSilent markers
   let metaLs = sort [ fromIntegral ln | q <- silent
                                       , (_, ln) <- maybeToList (srcLocOfQ q) ]
-      conLs  = dedupOrd
+      conLs  = nubOrd
         [ offsetToLine (iSource iface) a
         | (a, _) <- aspectSpans UnsolvedConstraint (iHighlighting iface)
         ]
@@ -2355,11 +2232,6 @@ liveSilentMetaLines = do
   return $ sort [ fromIntegral (posLine p) | r <- rs, p <- maybeToList (rStart r) ]
 
 -- ** filtering
-
-ignoreDependency :: QName -> TCM Bool
-ignoreDependency qn = do
-  def <- getConstInfo qn
-  return $ ignoreDef def
 
 -- | True for the defs Agda synthesises for a @variable@ block (the
 -- @GeneralizeTel@ record, its @mkGeneralizeTel@ constructor, and
