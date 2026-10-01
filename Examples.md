@@ -177,7 +177,8 @@ Adds the per-def analytical fields (kind, line, access, unsafe, unsolved-meta
 count, type, subterm hashes) to packed's `defs` as base64 typed arrays, so a
 downstream tool keeps packed's size win *and* expanded's fidelity — a decoded
 graph is node-for-node identical to expanded. Off by default; only affects
-`--json-mode=packed`.
+`--json-mode=packed`. With `--lazy`, the `defs` object in every per-module
+detail file carries the corresponding local arrays.
 
 ## A YAML config, checked before use
 

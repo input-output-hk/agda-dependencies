@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP #-}
--- | Custom @--help@ output that lists only @agda-deps@ backend options
--- (the backend's 'commandLineFlags' plus a short list of commonly
--- combined Agda CLI flags), and version handling.
+-- | Custom @--help@ output that lists only @agda-deps@'s own flags (the
+-- backend's 'commandLineFlags' plus the ones "Main" handles before Agda
+-- runs) and points to the README for details; and version handling.
 --
 -- "Main" intercepts @--help@ \/ @-h@ \/ @-?@ and routes to 'printHelp';
 -- @--agda-help@ is rewritten to a plain @--help@ for Agda's full help.
@@ -23,7 +23,7 @@ import Paths_agda_deps ( version )
 import BuildInfo ( buildFingerprint )
 
 import Agda.Compiler.Backend ( commandLineFlags )
-import Agda.Utils.GetOpt ( OptDescr, usageInfo )
+import Agda.Utils.GetOpt ( OptDescr(Option), ArgDescr(NoArg), usageInfo )
 
 import AgdaDeps.Backend ( backend )
 
@@ -57,60 +57,38 @@ printVersion numericOnly
   | numericOnly = putStrLn (showVersion version)
   | otherwise   = putStrLn buildFingerprint
 
--- | Print a help message listing only the @agda-deps@ backend options,
--- plus a brief reminder of the Agda CLI flags routinely combined with
--- it.
+-- | Print a short help message: usage, one line per @agda-deps@ flag,
+-- and a pointer to the README for details.
 printHelp :: IO ()
 printHelp = putStr $ unlines
   [ "agda-deps " ++ showVersion version
+      ++ ": dependency graphs of Agda definitions, as DOT or JSON."
   , ""
-  , "Usage: agda-deps [OPTIONS...] FILE.agda"
-  , "       agda-deps doctor [--config=PATH] [--strict]"
-  , ""
-  , "An Agda compiler backend that emits a dependency graph (DOT/JSON) of"
-  , "every definition reachable from FILE.agda. To render the JSON as an"
-  , "interactive HTML page, feed it to `agda-plotter`."
+  , "Usage: agda-deps [OPTIONS] FILE.agda"
+  , "       agda-deps doctor [--config=PATH] [--strict]   check a config file"
   ]
-    -- 2.9 added a leading column-width argument to 'usageInfo'.
+    -- 2.9 added a leading minimum-column-width argument to 'usageInfo';
+    -- 0 keeps 2.8's layout (column as wide as the longest flag).
 #if MIN_VERSION_Agda(2,9,0)
-  ++ usageInfo 40 "\nagda-deps backend options:\n" backendOpts
+  ++ usageInfo 0 "\nOptions:" opts
 #else
-  ++ usageInfo "\nagda-deps backend options:\n" backendOpts
+  ++ usageInfo "\nOptions:" opts
 #endif
   ++ unlines
   [ ""
-  , "Commands (handled by agda-deps; no Agda run):"
-  , ""
-  , "  doctor     Check the YAML config file and exit: unknown keys, invalid"
-  , "             values, and settings that do nothing in combination."
-  , "             Takes --config=PATH to check a specific file, and --strict"
-  , "             to exit non-zero on warnings as well as errors."
-  , ""
-  , "Other backend flags (handled by agda-deps before Agda starts):"
-  , ""
-  , "  --version, -V, --numeric-version"
-  , "             Print the agda-deps version and exit."
-  , "  --emit-schema"
-  , "             Print the JSON Schema for expanded graph.json and exit."
-  , "  --show-defaults"
-  , "             Print a commented sample .agda-deps.yml with every option"
-  , "             at its default value, then exit. Seed a config file with"
-  , "             'agda-deps --show-defaults > .agda-deps.yml'."
-  , "  --agda-help"
-  , "             Show Agda's own full help instead of just the backend's."
-  , ""
-  , "Frequently-used Agda CLI flags (forwarded to the Agda frontend):"
-  , ""
-  , "  -i DIR     Add DIR to the Agda module search path. Repeatable."
-  , "  -l LIB     Use Agda library LIB."
-  , "  --library-file=FILE"
-  , "             Use FILE instead of the standard libraries file."
-  , "  --no-libraries"
-  , "             Don't consult any .agda-libraries file."
-  , ""
-  , "Use --agda-help to see Agda's full option list."
+  , "Agda flags (-i DIR, -l LIB, --no-libraries, ...) are passed to Agda."
+  , "Details: README.md and Examples.md, or"
+  , "https://github.com/input-output-hk/agda-dependencies#readme"
   ]
   where
-    -- Discard the 'Flag' parser inside each 'OptDescr'.
-    backendOpts :: [OptDescr ()]
-    backendOpts = map (fmap (const ())) (commandLineFlags backend)
+    -- One table, so every flag lines up: the backend's own flags (with
+    -- their 'Flag' parsers discarded), then those "Main" handles itself.
+    opts :: [OptDescr ()]
+    opts = map (fmap (const ())) (commandLineFlags backend) ++
+      [ Option ['h'] ["help"]            (NoArg ()) "Show this help"
+      , Option []    ["agda-help"]       (NoArg ()) "Show Agda's full help"
+      , Option ['V'] ["version"]         (NoArg ()) "Print the version"
+      , Option []    ["numeric-version"] (NoArg ()) "Print the version number"
+      , Option []    ["emit-schema"]     (NoArg ()) "Print the expanded JSON Schema"
+      , Option []    ["show-defaults"]   (NoArg ()) "Print a sample .agda-deps.yml"
+      ]

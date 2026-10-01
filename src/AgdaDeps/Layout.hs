@@ -27,7 +27,7 @@ module AgdaDeps.Layout
   , sfdpTimeoutSec
   ) where
 
-import Control.Exception ( SomeException, try )
+import Control.Exception ( SomeException, displayException, try )
 
 import Data.Containers.ListUtils ( nubInt )
 import qualified Data.IntMap.Strict as IM
@@ -91,17 +91,30 @@ computePositions nodesByModule edges
           | Just positions <- parsePlain nodeIds out -> do
               info "agda-deps: layout: sfdp done."
               return positions
-        Just _ -> do
-          info $
-            "agda-deps: layout: sfdp not available or failed; "
-            ++ "falling back to module-grouped grid."
-          return (moduleGrouped nodesByModule)
+        Just (Right (ExitSuccess, _out, err)) ->
+          fallback ("sfdp returned unparseable plain output" ++ stderrNote err)
+        Just (Right (code, _out, err)) ->
+          fallback ("sfdp exited with " ++ show code ++ stderrNote err)
+        Just (Left exc) ->
+          fallback ("could not run sfdp: " ++ displayException exc)
         Nothing -> do
           info $
             "agda-deps: layout: sfdp exceeded "
             ++ show sfdpTimeoutSec
             ++ "s timeout; falling back to module-grouped grid."
           return (moduleGrouped nodesByModule)
+
+    fallback reason = do
+      info $
+        "agda-deps: layout: " ++ reason ++ "; "
+        ++ "falling back to module-grouped grid."
+      return (moduleGrouped nodesByModule)
+
+    -- Graphviz diagnostics can be verbose; one bounded line is enough to
+    -- distinguish a missing executable, a crash, and malformed output.
+    stderrNote err = case take 240 (unwords (lines err)) of
+      "" -> ""
+      s  -> " (stderr: " ++ s ++ ")"
 
 -- | Emit a minimal DOT representation suitable for @sfdp -Tplain@.
 renderDot :: [Int] -> [(Int, Int)] -> String
@@ -170,7 +183,7 @@ moduleGrouped nodes =
                  (cx - half + fromIntegral (i `mod` side) * sp)
                  (cy - half + fromIntegral (i `div` side) * sp)
              )
-           | (i, nid) <- zip [0..] ids
+           | (i, nid) <- zip [0 :: Int ..] ids
            ]
 
       -- Single O(V log V) build. Node ids are globally distinct

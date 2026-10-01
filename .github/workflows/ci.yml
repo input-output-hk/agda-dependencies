@@ -60,6 +60,9 @@ jobs:
       # Agda 2.8.0 from Hackage; first run builds it, then cache hits.
       run: cabal build
 
+    - name: Run behavior-preserving hardening tests
+      run: cabal test hardening
+
     - name: Run agda-deps on the bundled test corpus (every output shape)
       run: |
         mkdir -p ci-out
@@ -160,8 +163,12 @@ jobs:
         cabal run -v0 agda-deps -- --format=json --json-mode=packed \
           --packed-analytical --with-signatures --with-term-hashes \
           -i test/ -o ci-out/packed test/Test.agda
+        rm -rf test/*.agdai test/_build
+        cabal run -v0 agda-deps -- --format=json --json-mode=packed --lazy \
+          --packed-analytical --with-signatures --with-term-hashes \
+          -i test/ -o ci-out/packed-lazy test/Test.agda
         python3 schema/packed_analytical_check.py \
-          ci-out/packed/deps.json ci-out/expanded/deps.json
+          ci-out/packed/deps.json ci-out/expanded/deps.json ci-out/packed-lazy
 
     - name: keep-going emits a graph on a broken corpus
       # Locks the --keep-going best-effort guarantee: one module whose
@@ -505,6 +512,11 @@ jobs:
     - name: Build agda-deps against Agda 2.9
       # First time through this is slow (Agda 2.9 from git source).
       run: cabal build --project-file=cabal.project.agda29 --builddir=dist-agda29
+
+    - name: Run behavior-preserving hardening tests (Agda 2.9)
+      run: |
+        cabal test --project-file=cabal.project.agda29 \
+          --builddir=dist-agda29 hardening
 
     - name: Expanded output matches the golden (2.8/2.9 parity)
       # Must run cold (dead-private recovery) — see the 2.8 job's note.

@@ -69,6 +69,7 @@ module AgdaDeps.Deps
   , resetSideChannels
   ) where
 
+import Prelude hiding ( foldl' )
 import Control.Monad ( filterM, unless, when )
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Data.Binary ( Binary )

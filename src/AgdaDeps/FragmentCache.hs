@@ -56,6 +56,7 @@ import AgdaDeps.Deps
   , SideChannels(..), nodeKeyVersion )
 import AgdaDeps.Logging ( info )
 import AgdaDeps.Options ( Options(..) )
+import AgdaDeps.AtomicWrite ( atomicWriteLazyBytes )
 
 -- | One module's cached compile result.
 data FragmentData = FragmentData
@@ -194,8 +195,9 @@ readFragment path fingerprint fullHash = liftIO $ do
       Right (rest, _, hdr)
         | hdr == header fingerprint fullHash ->
             case runGetOrFail B.get rest of
-              Right (_, _, frag) -> pure (Just frag)
-              _                  -> pure Nothing
+              Right (trailing, _, frag)
+                | L.null trailing -> pure (Just frag)
+              _ -> pure Nothing
       _ -> pure Nothing
 
 -- | Write a fragment. Failures are reported as an info-channel
@@ -212,7 +214,7 @@ writeFragment path fingerprint fullHash frag = do
     ( do createDirectoryIfMissing True (takeDirectory path)
          -- 'B.encode' is total; force the bytes inside the guard so any
          -- exception (e.g. disk-full on write) degrades to a breadcrumb.
-         L.writeFile path (B.encode (header fingerprint fullHash, frag))
+         atomicWriteLazyBytes path (B.encode (header fingerprint fullHash, frag))
          pure True
     ) `E.catch` \ (_ :: E.SomeException) -> pure False
   if ok then pure () else

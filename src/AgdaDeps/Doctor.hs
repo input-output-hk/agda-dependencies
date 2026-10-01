@@ -93,11 +93,15 @@ sevLabel SevError   = "error"
 sevLabel SevWarning = "warning"
 sevLabel SevNote    = "note"
 
+-- Positional fields avoid generating unused selectors for the message and
+-- hint; every consumer already pattern-matches the complete finding.
 data Finding = Finding
-  { fSev  :: !Severity
-  , fMsg  :: !String          -- ^ one-line statement of the problem
-  , fHint :: !(Maybe String)  -- ^ one-line remedy
-  }
+  !Severity
+  !String          -- ^ one-line statement of the problem
+  !(Maybe String)  -- ^ one-line remedy
+
+findingSeverity :: Finding -> Severity
+findingSeverity (Finding sev _ _) = sev
 
 err, warn, note :: String -> Maybe String -> Finding
 err  m h = Finding SevError   m h
@@ -178,9 +182,9 @@ checkFile strict path origin = do
       [ err ("the top level is " ++ describeValue v ++ ", not a mapping")
             (Just "the file must be a mapping: one `key: value` per line") ]
 
-  let ranked = sortOn fSev findings
-      nErr   = length [ () | f <- ranked, fSev f == SevError ]
-      nWarn  = length [ () | f <- ranked, fSev f == SevWarning ]
+  let ranked = sortOn findingSeverity findings
+      nErr   = length [ () | f <- ranked, findingSeverity f == SevError ]
+      nWarn  = length [ () | f <- ranked, findingSeverity f == SevWarning ]
 
   unless (null ranked) $ do
     putStrLn ""

@@ -30,6 +30,7 @@ module AgdaDeps.Backend.GraphJson
   , buildExpandedJson
   ) where
 
+import Prelude hiding ( foldl' )
 import Data.Bits ( (.|.) )
 import Data.Char ( isAlphaNum, toLower )
 import Data.Int ( Int32, Int8 )
@@ -67,6 +68,41 @@ import AgdaDeps.Backend.Wire
 -- | Strict per-module {defined, postulate, hole, failed} accumulator
 -- used by 'moduleStateCounts'.
 data Counts = Counts !Int !Int !Int !Int
+
+-- | Structured form of the optional packed analytical arrays.  Keeping this
+-- separate from the renderer lets lazy detail epochs fingerprint the values
+-- without first allocating their base64/JSON representation.
+data PackedAnalytical = PackedAnalytical
+  [Int8]                         -- kinds
+  [Int32]                        -- lines
+  [Int8]                         -- access
+  [Int8]                         -- unsafe bitmasks
+  [Int32]                        -- unsolved metas
+  (Maybe [Maybe String])         -- types
+  (Maybe ([Int32], [Word64], [Int32])) -- subterm offsets/hashes/depths
+  deriving (Show)
+
+-- | Corpus-wide lookups shared by every lazy module.  Constructing these once
+-- avoids turning lazy analytical emission into O(modules * definitions).
+data PackedAnalyticalLookup = PackedAnalyticalLookup
+  (NodeRef -> DefKind)
+  (NodeRef -> Maybe Int)
+  (NodeRef -> Maybe DefAccess)
+  (NodeRef -> Maybe String)
+  (NodeRef -> [UnsafeTag])
+  (NodeRef -> Int)
+  (M.Map NodeRef [Word64])
+  (M.Map NodeRef [Int])
+
+-- | Structured inputs for one non-placeholder lazy detail file.  The
+-- analytical component is absent unless @--packed-analytical@ was requested.
+data ModuleDetailInput = ModuleDetailInput
+  [String]
+  [Int8]
+  [Float]
+  [Float]
+  [(Int, Int, Int)]
+  (Maybe PackedAnalytical)
 
 -- | Diagnostic summary of the external modules that @--no-externals@
 -- stripped from the graph. Emitted at the top level as
@@ -154,8 +190,8 @@ data GraphInput = GraphInput
   , giPackedAnalytical :: !Bool
     -- ^ @--packed-analytical@: augment the packed @defs@ object with the
     -- per-definition analytical arrays (kind / line / access / type /
-    -- subterm hashes). Packed (non-lazy) path only; 'False' leaves
-    -- packed output byte-identical.
+    -- subterm hashes). In lazy mode the same arrays live in each module
+    -- detail file. 'False' leaves packed output byte-identical.
   , giModuleOptionEscapes :: ![(String, [String])]
     -- ^ Per module, the file-level @{-# OPTIONS ⋯ #-}@ soundness escapes
     -- ('AgdaDeps.Deps.optionEscapes'), ascending by module; only modules
@@ -523,7 +559,7 @@ buildGraphJson GraphInput{..} =
       externalModuleIdxs :: [Int32]
       externalModuleIdxs =
         [ fromIntegral i
-        | (i, m) <- zip [0..] modules
+        | (i, m) <- zip [0 :: Int ..] modules
         , S.member m giExternalModules
         ]
 
@@ -549,7 +585,7 @@ buildGraphJson GraphInput{..} =
       moduleDetails :: [ModuleDetailJson]
       moduleDetails
         | giLazy = buildModuleDetails
-                     defsList moduleOf adjList
+                     defsList giDefs giPackedAnalytical moduleOf adjList
                      defStateBytes defXs defYs moduleIndexMap
                      giExternalModules giFailedModules giExternalsSummary
         | otherwise = []
@@ -652,6 +688,8 @@ buildGraphJson GraphInput{..} =
 --   'ExternalsSummary' tagged. Absent otherwise.
 buildModuleDetails
   :: [NodeRef]
+  -> [ADDef]
+  -> Bool                  -- ^ Include packed analytical arrays.
   -> (NodeRef -> Int)
   -> [(Int, [Int])]
   -> [Int8]
@@ -662,10 +700,15 @@ buildModuleDetails
   -> S.Set String           -- ^ failedModules (from 'GraphInput').
   -> Maybe ExternalsSummary -- ^ for @"externalPostulates"@ on stubs.
   -> [ModuleDetailJson]
-buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
+buildModuleDetails defsList defs includeAnalytical moduleOfQ adjList stateBytes xs ys moduleIndexMap
                    externalMods failedMods mExtSummary =
   let defsArr     :: IM.IntMap NodeRef
       defsArr     = IM.fromList (zip [0..] defsList)
+
+      analyticalLookup :: Maybe PackedAnalyticalLookup
+      analyticalLookup
+        | includeAnalytical = Just (mkPackedAnalyticalLookup defs)
+        | otherwise         = Nothing
 
       statesArr   :: IM.IntMap Int8
       statesArr   = IM.fromList (zip [0..] stateBytes)
@@ -697,10 +740,11 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
       -- Structured inputs to a real module's detail file, shared by the
       -- content renderer and the cheap epoch so the epoch fingerprints
       -- exactly what gets written.
-      realInputs :: [Int] -> ([String], [Int8], [Float], [Float], [(Int, Int, Int)])
+      realInputs :: [Int] -> ModuleDetailInput
       realInputs giList =
         let sortedGis = sort giList
-            names  = [ nodeKey (defsArr IM.! gi) | gi <- sortedGis ]
+            qnames = [ defsArr IM.! gi | gi <- sortedGis ]
+            names  = map nodeKey qnames
             stsM   = [ statesArr IM.! gi | gi <- sortedGis ]
             xsM    = [ xsArr     IM.! gi | gi <- sortedGis ]
             ysM    = [ ysArr     IM.! gi | gi <- sortedGis ]
@@ -710,27 +754,33 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
                 ]
               | (li, srcGi) <- zip [0..] sortedGis
               ]
-        in (names, stsM, xsM, ysM, outEs)
+            analytical
+              = packedAnalyticalDataFrom qnames <$> analyticalLookup
+        in ModuleDetailInput names stsM xsM ysM outEs analytical
 
-      renderReal :: ([String], [Int8], [Float], [Float], [(Int, Int, Int)]) -> String
-      renderReal (names, stsM, xsM, ysM, outEs) =
+      renderReal :: ModuleDetailInput -> String
+      renderReal (ModuleDetailInput names stsM xsM ysM outEs analytical) =
         "{\"defs\":" ++ defsObjectJsonModule names stsM xsM ysM
+                           (maybe "" packedAnalyticalDataJson analytical)
         ++ ",\"outEdges\":" ++ outEdgesJson outEs
         ++ "}"
 
       -- Cheap content fingerprint of a real module's detail file (hashes
       -- the structured inputs, no base64/JSON assembly). Separators keep
       -- distinct field contents from colliding.
-      realEpoch :: ([String], [Int8], [Float], [Float], [(Int, Int, Int)]) -> Word64
-      realEpoch (names, stsM, xsM, ysM, outEs) =
+      realEpoch :: ModuleDetailInput -> Word64
+      realEpoch (ModuleDetailInput names stsM xsM ysM outEs analytical) =
         hashString $ concat
           [ "R\f", intercalate "\f" names
           , "\v", show stsM, "\v", show xsM, "\v", show ysM
-          , "\v", show outEs ]
+          , "\v", show outEs
+          , maybe "" (\a -> "\vA\v" ++ show a) analytical ]
 
-      placeholderEpoch :: String -> String -> [String] -> Word64
-      placeholderEpoch m reason ps =
-        hashString $ concat [ "P\f", m, "\v", reason, "\v", intercalate "\f" ps ]
+      placeholderEpoch :: String -> String -> [String] -> Maybe PackedAnalytical -> Word64
+      placeholderEpoch m reason ps analytical =
+        hashString $ concat
+          [ "P\f", m, "\v", reason, "\v", intercalate "\f" ps
+          , maybe "" (\a -> "\vA\v" ++ show a) analytical ]
 
       realDetails :: [ModuleDetailJson]
       !realDetails =
@@ -762,6 +812,9 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
           M.findWithDefault [] m byMod
         Nothing -> []
 
+      emptyAnalytical :: Maybe PackedAnalytical
+      emptyAnalytical = packedAnalyticalDataFrom [] <$> analyticalLookup
+
       renderPlaceholder :: String -> String
       renderPlaceholder m =
         let !reason = classifyEmpty m
@@ -770,6 +823,7 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
               | null ps   = ""
               | otherwise = ",\"externalPostulates\":" ++ jStrArray ps
         in "{\"defs\":"     ++ defsObjectJsonModule [] [] [] []
+                                  (maybe "" packedAnalyticalDataJson emptyAnalytical)
         ++ ",\"outEdges\":" ++ outEdgesJson []
         ++ ",\"placeholder\":true"
         ++ ",\"module\":"   ++ jsString m
@@ -781,7 +835,8 @@ buildModuleDetails defsList moduleOfQ adjList stateBytes xs ys moduleIndexMap
       !placeholderDetails =
         [ ModuleDetailJson
             { mdjFileName   = moduleDetailFilename m
-            , mdjEpoch      = placeholderEpoch m (classifyEmpty m) (externalPostulatesFor m)
+            , mdjEpoch      = placeholderEpoch m (classifyEmpty m)
+                                (externalPostulatesFor m) emptyAnalytical
             , mdjContent    = renderPlaceholder m
             }
         | (m, mi) <- M.toAscList moduleIndexMap
@@ -813,40 +868,42 @@ defsObjectJson names mods states xs ys analytical =
 -- omission of those keys.
 packedAnalyticalJson :: [NodeRef] -> [ADDef] -> String
 packedAnalyticalJson defsList defs =
-  ",\"kinds\":"  ++ jsB64Int8  kinds
-  ++ ",\"lines\":"  ++ jsB64Int32 lns
-  ++ ",\"access\":" ++ jsB64Int8  accs
-  ++ ",\"unsafe\":" ++ jsB64Int8  unsafes
-  ++ ",\"unsolvedMetas\":" ++ jsB64Int32 unsolveds
-  ++ typesField
-  ++ subtermFields
-  where
-    defKind   = mkDefKind   defs
-    defLine   = mkDefLine   defs
-    defAccess = mkDefAccess defs
-    defSig    = mkDefSig    defs
-    defUnsafe = mkDefUnsafe defs
-    defUnsolved = mkDefUnsolvedMetas defs
-    hashesByQ = mkDefHashes defs
-    depthsByQ = mkDefDepths defs
+  packedAnalyticalDataJson (packedAnalyticalData defsList defs)
 
+-- | Compute packed analytical values once for either the monolithic definition
+-- table or one lazy module's local definition table.
+packedAnalyticalData :: [NodeRef] -> [ADDef] -> PackedAnalytical
+packedAnalyticalData defsList defs =
+  packedAnalyticalDataFrom defsList (mkPackedAnalyticalLookup defs)
+
+mkPackedAnalyticalLookup :: [ADDef] -> PackedAnalyticalLookup
+mkPackedAnalyticalLookup defs = PackedAnalyticalLookup
+  (mkDefKind defs)
+  (mkDefLine defs)
+  (mkDefAccess defs)
+  (mkDefSig defs)
+  (mkDefUnsafe defs)
+  (mkDefUnsolvedMetas defs)
+  (mkDefHashes defs)
+  (mkDefDepths defs)
+
+packedAnalyticalDataFrom :: [NodeRef] -> PackedAnalyticalLookup -> PackedAnalytical
+packedAnalyticalDataFrom defsList
+  (PackedAnalyticalLookup defKind defLine defAccess defSig defUnsafe
+                          defUnsolved hashesByQ depthsByQ) =
+  PackedAnalytical kinds lns accs unsafes unsolveds types subterms
+  where
     kinds = [ encodeDefKind (defKind qn) | qn <- defsList ]
     lns   = [ maybe (-1) fromIntegral (defLine qn) | qn <- defsList ] :: [Int32]
     accs  = [ encodeDefAccess (defAccess qn) | qn <- defsList ]
-    -- One Int8 bitmask per def, always present; 0 = no escapes. Bit
-    -- layout in 'encodeUnsafeByte' (MUST match packed_analytical_check.py).
     unsafes = [ encodeUnsafeByte (defUnsafe qn) | qn <- defsList ] :: [Int8]
-    -- Silent unsolved-meta count per def; 0 round-trips to expanded's
-    -- omission of the per-def @unsolvedMetas@ field.
     unsolveds = [ fromIntegral (defUnsolved qn) | qn <- defsList ] :: [Int32]
     sigs  = [ defSig qn | qn <- defsList ]
-
-    typesField
-      | any isJust sigs = ",\"types\":" ++ stringOrNullArrayJson sigs
-      | otherwise       = ""
-
-    subtermFields
-      | M.null hashesByQ = ""
+    types
+      | any isJust sigs = Just sigs
+      | otherwise       = Nothing
+    subterms
+      | M.null hashesByQ = Nothing
       | otherwise =
           let perHashes = [ M.findWithDefault [] qn hashesByQ | qn <- defsList ]
               perDepths = [ M.findWithDefault [] qn depthsByQ | qn <- defsList ]
@@ -854,20 +911,35 @@ packedAnalyticalJson defsList defs =
                        (map (fromIntegral . length) perHashes) :: [Int32]
               flatH = concat perHashes :: [Word64]
               flatD = map fromIntegral (concat perDepths) :: [Int32]
-          in ",\"subtermOffsets\":" ++ jsB64Int32 offs
-          ++ ",\"subtermHashes\":"  ++ jsB64Raw (encodeWord64LE flatH)
-          ++ ",\"subtermDepths\":"  ++ jsB64Int32 flatD
+          in Just (offs, flatH, flatD)
+
+packedAnalyticalDataJson :: PackedAnalytical -> String
+packedAnalyticalDataJson
+  (PackedAnalytical kinds lns accs unsafes unsolveds types subterms) =
+  ",\"kinds\":"  ++ jsB64Int8  kinds
+  ++ ",\"lines\":"  ++ jsB64Int32 lns
+  ++ ",\"access\":" ++ jsB64Int8  accs
+  ++ ",\"unsafe\":" ++ jsB64Int8  unsafes
+  ++ ",\"unsolvedMetas\":" ++ jsB64Int32 unsolveds
+  ++ maybe "" (\sigs -> ",\"types\":" ++ stringOrNullArrayJson sigs) types
+  ++ maybe "" renderSubterms subterms
+  where
+    renderSubterms (offs, flatH, flatD) =
+      ",\"subtermOffsets\":" ++ jsB64Int32 offs
+      ++ ",\"subtermHashes\":"  ++ jsB64Raw (encodeWord64LE flatH)
+      ++ ",\"subtermDepths\":"  ++ jsB64Int32 flatD
 
 -- | JSON array of strings-or-@null@ (one per def, parallel to names).
 stringOrNullArrayJson :: [Maybe String] -> String
 stringOrNullArrayJson = jArray (maybe "null" jsString)
 
-defsObjectJsonModule :: [String] -> [Int8] -> [Float] -> [Float] -> String
-defsObjectJsonModule names states xs ys =
+defsObjectJsonModule :: [String] -> [Int8] -> [Float] -> [Float] -> String -> String
+defsObjectJsonModule names states xs ys analytical =
   "{\"names\":"      ++ jStrArray names
   ++ ",\"states\":"  ++ jsB64Int8    states
   ++ ",\"x\":"       ++ jsB64Float32 xs
   ++ ",\"y\":"       ++ jsB64Float32 ys
+  ++ analytical
   ++ "}"
 
 edgesObjectJson :: [Int32] -> [Int32] -> [Int32] -> [Int32] -> String
@@ -1294,7 +1366,7 @@ buildModuleDagLayout nMods edges
                   (\ !m (i, mi) ->
                     IM.insert mi (step i, yOff, podWidth, podHeight) m)
                   acc
-                  (zip [0..] sorted)
+                  (zip [0 :: Int ..] sorted)
                 yOff'   = yOff + podHeight + podRowGap
             in (yOff', acc')
       in concatMap

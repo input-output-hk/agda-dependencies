@@ -19,19 +19,19 @@
 <main><div class="layout">
 <aside class="toc"><div class="toc-inner">
 <div class="toc-title">On this page</div>
-<nav><a class="lvl2" href="#prerequisites">Prerequisites</a><a class="lvl2" href="#build">Build</a><a class="lvl2" href="#quick-start">Quick start</a><a class="lvl2" href="#backend-flags">Backend flags</a><a class="lvl2" href="#node-colours">Node colours</a><a class="lvl2" href="#yaml-config">YAML config</a><a class="lvl3" href="#checking-a-config-agda-deps-doctor">Checking a config: agda-deps doctor</a><a class="lvl2" href="#large-projects-lazy-output">Large projects: lazy output</a><a class="lvl2" href="#consuming-the-json-output">Consuming the JSON output</a><a class="lvl3" href="#expanded-top-level-fields">Expanded top-level fields</a><a class="lvl2" href="#what-gets-filtered-out">What gets filtered out</a><a class="lvl2" href="#ai-disclaimer">AI disclaimer</a></nav>
+<nav><a class="lvl2" href="#prerequisites">Prerequisites</a><a class="lvl2" href="#build">Build</a><a class="lvl2" href="#quick-start">Quick start</a><a class="lvl2" href="#backend-flags">Backend flags</a><a class="lvl2" href="#yaml-config">YAML config</a><a class="lvl3" href="#checking-a-config-agda-deps-doctor">Checking a config: agda-deps doctor</a><a class="lvl2" href="#large-projects-lazy-output">Large projects: lazy output</a><a class="lvl2" href="#consuming-the-json-output">Consuming the JSON output</a><a class="lvl3" href="#expanded-top-level-fields">Expanded top-level fields</a><a class="lvl2" href="#what-gets-filtered-out">What gets filtered out</a><a class="lvl2" href="#ai-disclaimer">AI disclaimer</a><a class="lvl2" href="#legal-disclaimer">Legal Disclaimer</a></nav>
 </div></aside>
 <div class="prose"><h1 id="agda-deps-an-agda-dependency-graph-generator">agda-deps: an Agda dependency graph generator</h1>
-<p><code>agda-deps</code> is an Agda compiler backend that emits a dependency graph relating
+<p><code>agda-deps</code> explores Agda projects and emits dependency graphs relating
 definitions, postulates, and incomplete definitions/expressions plus their
 relation.</p>
-<p>It writes two things:</p>
+<p>It can write two things:</p>
 <ul>
-<li>a stable <strong>JSON</strong> artifact (see
+<li>a <strong>JSON</strong> artifact (see
   <a href="#consuming-the-json-output">Consuming the JSON output</a>),</li>
 <li>a Graphviz <strong>DOT</strong> file, for a quick static picture.</li>
 </ul>
-<p>We also built two other tools consuming generated JSON files:</p>
+<p>Based on the dependency graph of libraries, we also built two other tools:</p>
 <table>
 <thead>
 <tr>
@@ -50,8 +50,7 @@ relation.</p>
 </tr>
 </tbody>
 </table>
-<p>Neither links Agda, so both build from Hackage in minutes. For an interactive
-page, see the <a href="https://github.com/input-output-hk/agda-plotter#readme"><code>agda-plotter</code> README</a>.</p>
+<p>For an interactive page, see the <a href="https://github.com/input-output-hk/agda-plotter#readme"><code>agda-plotter</code> README</a>.</p>
 <p>Each node is coloured by the state of its definition:</p>
 <table>
 <thead>
@@ -113,7 +112,7 @@ Standard Agda flags are accepted — <code>-i DIR</code> (include path), <code>-
 <code>--library-file=FILE</code>, <code>--no-libraries</code>, and the trailing positional module.
 <code>--help</code> lists the backend's options; <code>--agda-help</code> shows Agda's.</p>
 <p>There is one subcommand, <code>agda-deps doctor</code>, which checks the YAML config file
-and exits — see <a href="#checking-a-config-agda-deps-doctor">Checking a config</a>.</p>
+and exits, see <a href="#checking-a-config-agda-deps-doctor">Checking a config</a>.</p>
 <ul>
 <li><code>-o DIR</code> / <code>--out-dir=DIR</code> — output directory (<code>deps.dot|json</code>). Without it,
   output goes to stdout; <code>--lazy</code> requires it. A value ending in
@@ -133,9 +132,14 @@ and exits — see <a href="#checking-a-config-agda-deps-doctor">Checking a confi
 <li><code>--lenient-imports</code> — forward <code>--allow-unsolved-metas</code> to Agda, for projects
   that deliberately commit <code>?</code> holes; combine with <code>--keep-going</code>. Under this
   flag a module with unsolved metas <em>succeeds</em> (they become <code>unsolved#meta.*</code>
-  postulates).</li>
+  postulates). Agda applies the flag globally, so a <code>--safe</code> dependency (such
+  as the standard library) rejects it with <code>[SafeFlagPragma]</code>; there, use
+  <code>--keep-going</code> alone.</li>
 <li><code>--resolve-deps</code> — constrain Agda's search path to the project's <code>.agda-lib</code>
-  <code>depend:</code> closure.</li>
+  <code>depend:</code> closure (it expands to <code>--no-libraries -i DIR ...</code>). Use it when
+  two registered libraries share a module name and Agda reports
+  <code>[AmbiguousTopLevelModuleName]</code>. With no <code>.agda-lib</code>, or if resolution
+  fails, it warns and leaves the arguments unchanged.</li>
 <li><code>--no-externals</code> — drop everything outside the project root (nodes and edges).
   JSON keeps a top-level <code>externals_summary</code> of what was dropped.</li>
 <li><code>--json-mode=packed|expanded</code> — the <code>--format=json</code> shape (default <code>packed</code>).
@@ -143,7 +147,7 @@ and exits — see <a href="#checking-a-config-agda-deps-doctor">Checking a confi
 <li><code>--packed-analytical</code> — add the per-def analytical arrays (<code>kinds</code>/<code>lines</code>/
   <code>access</code>/<code>unsafe</code>/<code>unsolvedMetas</code>, plus <code>types</code> and subterm arrays when those
   are enabled) to packed, so a decoded packed graph is node-for-node identical
-  to expanded.</li>
+  to expanded. With <code>--lazy</code>, each module detail file carries its local slice.</li>
 <li><code>--with-term-hashes</code> — emit a <code>Word64</code> fingerprint per definition subterm
   (<code>definitionSubtermHashes</code> + <code>definitionSubtermDepths</code>) in expanded JSON.</li>
 <li><code>--min-term-depth=N</code> — drop subterms below AST depth <code>N</code> (default <code>3</code>; <code>1</code>
@@ -178,16 +182,6 @@ and exits — see <a href="#checking-a-config-agda-deps-doctor">Checking a confi
 <p>Every run also scans sources for <code>module</code> / <code>import</code> declarations and unions
 that module-level graph into the output, so modules that never type-checked
 (under <code>--keep-going</code>) still appear with their import wiring.</p>
-<h2 id="node-colours">Node colours</h2>
-<p>The four state colours apply to DOT output here, and to HTML output in
-<code>agda-plotter</code>, which takes the same flag names and the same defaults:</p>
-<pre><code>cabal run agda-deps -- --format=dot \
-  --color-defined=#0288d1 --color-postulate=#d32f2f --color-hole=#fbc02d \
-  -i test/ -o test/ test/Test.agda
-</code></pre>
-<p>They are not carried in <code>graph.json</code> — each renderer keeps its own copy — so
-changing one here does not change what <code>agda-plotter</code> draws. Pass the same
-flags to both, or set them once in a shared <code>.agda-deps.yml</code>.</p>
 <h2 id="yaml-config">YAML config</h2>
 <p><code>agda-deps</code> reads an optional YAML config.
 Keys mirror the CLI flags in kebab-case (<code>--no-externals</code> ↔ <code>no-externals</code>).
@@ -212,7 +206,6 @@ exclude:
   - Agda.Builtin
   - Data
 </code></pre>
-<p>Run <code>agda-deps doctor</code> to check a file before relying on it.</p>
 <h3 id="checking-a-config-agda-deps-doctor">Checking a config: <code>agda-deps doctor</code></h3>
 <pre><code>agda-deps doctor [--config=PATH] [--strict]
 </code></pre>
@@ -255,7 +248,8 @@ cd out &amp;&amp; python3 -m http.server 8000     # http://localhost:8000/deps.h
 <pre><code>graph.json             ← module-level skeleton:
                        ·   modules, moduleEdges (compact A→B pairs)
                        ·   moduleFiles: name → modules/&lt;Module&gt;.json  (the manifest)
-modules/&lt;Module&gt;.json  ← that module's leaves + edges (detail-&lt;hash&gt;.json for non-safe names)
+modules/&lt;Module&gt;.json  ← that module's leaves + edges, plus requested analytical arrays
+                         (detail-&lt;hash&gt;.json for non-safe names)
 deps.html              ← small shell, no inlined data   (written by agda-plotter)
 </code></pre>
 <p>Without <code>--lazy</code>, <code>--format=json</code> writes one <code>deps.json</code> and <code>agda-plotter</code>
@@ -268,7 +262,7 @@ inlines it into a self-contained page that opens straight off disk.</p>
   carries <code>names</code>/<code>modules</code>/<code>states</code>/<code>x</code>/<code>y</code> unless
   <a href="#backend-flags"><code>--packed-analytical</code></a> adds the <code>kinds</code>/<code>lines</code>/<code>access</code>/
   <code>unsafe</code>/<code>unsolvedMetas</code> (and <code>types</code>/<code>subterm*</code>) arrays. Best for tens of
-  thousands of nodes.</li>
+  thousands of nodes. Lazy detail files carry the same fields, locally indexed.</li>
 <li><strong>expanded</strong> — arrays of records keyed by qname / module name, no base64.
   Carries <code>"schemaVersion": 2</code> and <code>"mode": "expanded"</code>. Best for small
   fixtures and ad-hoc tooling.</li>
@@ -397,7 +391,16 @@ schematised.</p>
 is reconstructed by a closure pass (<code>contractIgnoredEdges</code>, same file).</p>
 <h2 id="ai-disclaimer">AI disclaimer</h2>
 <p>I used Claude Code to generate features on this project.
-Most are proofs of concept for visualizing and exploring Agda projects.</p></div>
+Most are proofs of concept for visualizing and exploring Agda projects.</p>
+<h2 id="legal-disclaimer">Legal Disclaimer</h2>
+<p><em>Important disclaimer &amp; acceptance of risk</em>.
+This is a proof-of-concept implementation that has not undergone security
+auditing. This code is provided "as is" for research and educational purposes
+only. It has not been subjected to a formal security review or audit and may
+contain vulnerabilities. Do not use this code in production systems, or any
+environment where security is critical, without conducting your own thorough
+security assessment. By using this code, you acknowledge and accept all
+associated risks, and our company disclaims any liability for damages or losses.</p></div>
 </div>
 </main>
 <footer class="site-footer"><div class="wrap">

@@ -478,21 +478,64 @@ expandedSchemaJson = jObj
 encodeExpanded :: ExpandedGraph -> String
 encodeExpanded = encodeObject expandedFields
 
--- | Structural invariants the JSON Schema cannot express: the parallel
--- arrays line up, and every edge endpoint names a definition. Returns
+-- | Structural invariants the JSON Schema cannot express: identities are
+-- unique, parallel arrays line up, and every edge endpoint names a node in
+-- its corresponding node table. Returns
 -- human-readable violations ('[]' = valid); 'buildExpandedJson' aborts
 -- on a non-empty result rather than emit a malformed graph.
 validateExpanded :: ExpandedGraph -> [String]
 validateExpanded eg = concat
-  [ ck (length (egDefEdgeProv eg) == length (egDefEdges eg))
+  [ ck (null duplicateModules)
+       ("duplicate module names, e.g. " ++ show (take 3 duplicateModules))
+  , ck (null duplicateDefNames)
+       ("duplicate definition names, e.g. " ++ show (take 3 duplicateDefNames))
+  , ck (null duplicateDefIds)
+       ("duplicate definition ids, e.g. " ++ show (take 3 duplicateDefIds))
+  , ck (all ((>= 0) . wdId) (egDefs eg))
+       "negative definition id"
+  , ck (length (egDefEdgeProv eg) == length (egDefEdges eg))
        "definitionEdgesProvenance length /= definitionEdges length"
   , maybe [] (\hs -> ck (length hs == nDefs)
        "definitionSubtermHashes length /= definitions length") (egSubtermHashes eg)
   , maybe [] (\ds -> ck (length ds == nDefs)
        "definitionSubtermDepths length /= definitions length") (egSubtermDepths eg)
+  , ck (sameOptionalShape (egSubtermHashes eg) (egSubtermDepths eg))
+       "definitionSubtermHashes/definitionSubtermDepths presence differs"
+  , ck (null subtermRowMismatches)
+       ("subterm hash/depth row lengths differ at definition indices, e.g. "
+        ++ show (take 3 subtermRowMismatches))
   , ck (null danglers)
        ("definitionEdges endpoints absent from definitions, e.g. "
         ++ show (take 3 danglers))
+  , ck (null moduleDanglers)
+       ("module edge endpoints absent from modules, e.g. "
+        ++ show (take 3 moduleDanglers))
+  , ck (null transitiveModuleDanglers)
+       ("transitive module edge endpoints absent from modules, e.g. "
+        ++ show (take 3 transitiveModuleDanglers))
+  , ck (null defModuleDanglers)
+       ("definition modules absent from modules, e.g. "
+        ++ show (take 3 defModuleDanglers))
+  , ck (maybe True (`S.member` modules) (egEntryModule eg))
+       "entryModule absent from modules"
+  , ck (null externalDanglers)
+       ("externalModules entries absent from modules, e.g. "
+        ++ show (take 3 externalDanglers))
+  , ck (null failedDanglers)
+       ("failedModules entries absent from modules, e.g. "
+        ++ show (take 3 failedDanglers))
+  , ck (null duplicateModuleFileKeys)
+       ("duplicate moduleFiles keys, e.g. "
+        ++ show (take 3 duplicateModuleFileKeys))
+    -- Module-only --skip-agda currently has a known --no-externals metadata
+    -- bug (BUGS.md). Enforce the subset on definition graphs now without
+    -- turning that already-documented mode into a runtime crash.
+  , ck (nDefs == 0 || null moduleFileDanglers)
+       ("moduleFiles keys absent from modules, e.g. "
+        ++ show (take 3 moduleFileDanglers))
+  , ck (null metadataModuleDanglers)
+       ("module metadata keys absent from modules, e.g. "
+        ++ show (take 3 metadataModuleDanglers))
   , ck (null auBad)
        ("argUsage cross-field invariants violated, e.g. "
         ++ show (take 3 auBad))
@@ -500,8 +543,33 @@ validateExpanded eg = concat
   where
     nDefs    = length (egDefs eg)
     names    = S.fromList (map wdName (egDefs eg))
+    modules  = S.fromList (egModules eg)
+    duplicateModules = duplicates (egModules eg)
+    duplicateDefNames = duplicates (map wdName (egDefs eg))
+    duplicateDefIds = duplicates (map wdId (egDefs eg))
     danglers = [ (s, t) | WireEdge (s, t) <- egDefEdges eg
                         , not (S.member s names) || not (S.member t names) ]
+    moduleDanglers = edgeDanglers modules (egModuleEdges eg)
+    transitiveModuleDanglers = edgeDanglers modules (egTransModEdges eg)
+    defModuleDanglers = [ wdModule d | d <- egDefs eg
+                                     , not (S.member (wdModule d) modules) ]
+    externalDanglers = filter (`S.notMember` modules) (egExternals eg)
+    failedDanglers = filter (`S.notMember` modules) (egFailed eg)
+    moduleFileKeys = map fst (egModuleFiles eg)
+    duplicateModuleFileKeys = duplicates moduleFileKeys
+    moduleFileDanglers = filter (`S.notMember` modules) moduleFileKeys
+    metadataModuleDanglers =
+      [ m
+      | m <- map fst (egModuleOptionEscapes eg)
+          ++ map fst (egModuleEffectiveOptions eg)
+          ++ map fst (egUnsolvedModules eg)
+      , S.notMember m modules
+      ]
+    subtermRowMismatches = case (egSubtermHashes eg, egSubtermDepths eg) of
+      (Just hs, Just ds) ->
+        [ i | (i, (h, d)) <- zip [0 :: Int ..] (zip hs ds)
+            , length h /= length d ]
+      _ -> []
     -- The rules the schema can only state in prose. Worth asserting rather
     -- than describing: the riskiest code behind this field is the four-way
     -- re-index in 'AgdaDeps.Deps.dropSectionPrefix', and a mis-shift there
@@ -512,6 +580,21 @@ validateExpanded eg = concat
             , why <- argUsageProblems au
             ]
     ck cond msg = if cond then [] else [msg]
+
+    sameOptionalShape Nothing  Nothing  = True
+    sameOptionalShape (Just _) (Just _) = True
+    sameOptionalShape _        _        = False
+
+    edgeDanglers allowed edges =
+      [ (s, t) | WireEdge (s, t) <- edges
+               , S.notMember s allowed || S.notMember t allowed ]
+
+    duplicates xs = S.toList (go S.empty S.empty xs)
+      where
+        go _seen dup [] = dup
+        go seen dup (x:rest)
+          | S.member x seen = go seen (S.insert x dup) rest
+          | otherwise       = go (S.insert x seen) dup rest
 
 -- | The cross-field 'ArgUsage' invariants the JSON Schema cannot express:
 -- every index addresses an existing argument, @removableRequires@ relates

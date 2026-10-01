@@ -145,7 +145,8 @@ own interface load, which a backend can't avoid.</p>
 count, type, subterm hashes) to packed's <code>defs</code> as base64 typed arrays, so a
 downstream tool keeps packed's size win <em>and</em> expanded's fidelity — a decoded
 graph is node-for-node identical to expanded. Off by default; only affects
-<code>--json-mode=packed</code>.</p>
+<code>--json-mode=packed</code>. With <code>--lazy</code>, the <code>defs</code> object in every per-module
+detail file carries the corresponding local arrays.</p>
 <h2 id="a-yaml-config-checked-before-use">A YAML config, checked before use</h2>
 <pre><code class="language-bash">agda-deps --show-defaults &gt; .agda-deps.yml   # seed (fully commented out)
 agda-deps doctor                             # unknown keys, bad values, no-op combinations

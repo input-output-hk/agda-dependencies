@@ -14,11 +14,17 @@ absent from that list: ``reexports`` and ``argUsage``. Both are nested
 variable-length objects, which have no typed-array shape for the packed
 form to carry. Their absence from packed is by design, not a gap.
 
+When a lazy output directory is supplied, every file named by its
+``graph.json`` manifest is decoded and the union is checked against the same
+expanded graph.  This pins the lazy detail-file contract as well as the
+monolithic packed form.
+
 Usage:
-    packed_analytical_check.py <packed.json> <expanded.json>
+    packed_analytical_check.py <packed.json> <expanded.json> [<lazy-dir>]
 """
 import base64
 import json
+from pathlib import Path
 import struct
 import sys
 
@@ -102,18 +108,34 @@ def decode_expanded(g):
     return out, (sh is not None)
 
 
-def main():
-    packed = json.load(open(sys.argv[1]))
-    expanded = json.load(open(sys.argv[2]))
-    pdefs, p_has_sub, p_has_types = decode_packed(packed)
-    edefs, e_has_sub = decode_expanded(expanded)
+def decode_lazy(root):
+    root = Path(root)
+    graph = json.load(open(root / "graph.json"))
+    out = {}
+    has_sub = False
+    has_types = False
+    for module, relpath in sorted(graph["moduleFiles"].items()):
+        detail = json.load(open(root / relpath))
+        defs, detail_sub, detail_types = decode_packed(detail)
+        overlap = set(out).intersection(defs)
+        assert not overlap, f"duplicate lazy definitions in {module}: {sorted(overlap)[:5]}"
+        out.update(defs)
+        has_sub = has_sub or detail_sub
+        has_types = has_types or detail_types
+    return out, has_sub, has_types
+
+
+def check(label, pdefs, p_has_sub, p_has_types, edefs, e_has_sub):
 
     if set(pdefs) != set(edefs):
         only_p = sorted(set(pdefs) - set(edefs))[:5]
         only_e = sorted(set(edefs) - set(pdefs))[:5]
-        sys.exit(f"node-set mismatch: packed-only={only_p} expanded-only={only_e}")
+        sys.exit(f"{label} node-set mismatch: packed-only={only_p} expanded-only={only_e}")
 
     mismatches = []
+    if p_has_sub != e_has_sub:
+        mismatches.append(
+            f"subterm presence: packed={p_has_sub} expanded={e_has_sub}")
     for name in pdefs:
         p, e = pdefs[name], edefs[name]
         for f in ("kind", "line", "access", "type", "unsafe", "unsolvedMetas"):
@@ -126,13 +148,27 @@ def main():
                 mismatches.append(f"{name}.depths: {p['depths']} != {e['depths']}")
 
     if mismatches:
-        print(f"MISMATCH ({len(mismatches)}):")
+        print(f"{label} MISMATCH ({len(mismatches)}):")
         for m in mismatches[:30]:
             print("  " + m)
         sys.exit(1)
-    print(f"OK: packed-analytical ≡ expanded over {len(pdefs)} defs "
+    print(f"OK: {label} packed-analytical ≡ expanded over {len(pdefs)} defs "
           f"(subterms={'yes' if p_has_sub else 'no'}, "
           f"types={'yes' if p_has_types else 'no'}).")
+
+
+def main():
+    if len(sys.argv) not in (3, 4):
+        sys.exit("usage: packed_analytical_check.py "
+                 "<packed.json> <expanded.json> [<lazy-dir>]")
+    packed = json.load(open(sys.argv[1]))
+    expanded = json.load(open(sys.argv[2]))
+    pdefs, p_has_sub, p_has_types = decode_packed(packed)
+    edefs, e_has_sub = decode_expanded(expanded)
+    check("monolithic", pdefs, p_has_sub, p_has_types, edefs, e_has_sub)
+    if len(sys.argv) == 4:
+        ldefs, l_has_sub, l_has_types = decode_lazy(sys.argv[3])
+        check("lazy", ldefs, l_has_sub, l_has_types, edefs, e_has_sub)
 
 
 if __name__ == "__main__":

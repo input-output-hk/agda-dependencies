@@ -21,6 +21,7 @@ module AgdaDeps.Backend
   , noSerialiseCtx
   ) where
 
+import Prelude hiding ( foldl' )
 import Control.Monad ( foldM, when, unless, forM, forM_ )
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Control.DeepSeq ( force )
@@ -115,6 +116,8 @@ import AgdaDeps.SerialiseCache
   ( Manifest, readManifest, writeManifest, manifestLookup, manifestFromList
   , Epoch, combineEpochs, hashEpoch )
 import AgdaDeps.Deps ( nodeKeyVersion )
+import AgdaDeps.AtomicWrite
+  ( atomicWriteString, atomicWriteLazyText, atomicWriteLazyBytes )
 import BuildInfo ( buildFingerprint )
 import AgdaDeps.Layout ( Position, computePositions )
 import AgdaDeps.Options
@@ -139,7 +142,6 @@ import AgdaDeps.Util ( underCwd )
 import qualified Codec.Compression.GZip as GZip
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
-import qualified Data.ByteString.Lazy as BL
 import AgdaDeps.Backend.Dot  ( renderDot )
 import AgdaDeps.Backend.GraphJson
   ( GraphInput(..), GraphJsonOutput(..), ExternalsSummary
@@ -181,68 +183,67 @@ backendWithSeed seed = Backend'
   { backendName           = "agda-deps"
   , backendVersion        = Just . T.pack . showVersion $ version
   , options               = seed
+    -- One line per flag, grouped by purpose; this order is the @--help@
+    -- order (parsing ignores it). README.md § Backend flags holds the
+    -- details.
   , commandLineFlags      =
       [ Option ['o'] ["out-dir"] (ReqArg outdirOpt "DIR")
-        "Write output files to DIR (deps.dot / deps.json).\nWithout it, output goes to stdout; --lazy requires it. A DIR\nending in .json / .dot also selects the format unless\n--format is given."
+        "Output directory (default: stdout)"
       , Option []    ["format"]  (ReqArg formatOpt "FORMAT")
-        "Output format: dot (default) or json. HTML rendering moved to\n`agda-plotter`, which reads the JSON this emits."
-      , Option []    ["theme"]   (ReqArg themeOpt "THEME")
-        "Colour preset for DOT output: default (=light), dark, or\ncolorblind. Individual --color-* flags override the corresponding\nslot. `agda-plotter` takes the same flags for HTML."
+        "Output format: dot (default) or json"
+      , Option []    ["json-mode"] (ReqArg jsonModeOpt "MODE")
+        "JSON shape: packed (default) or expanded"
       , Option []    ["config"]  (ReqArg configOpt "PATH")
-        "Load a YAML config file (kebab-case keys mirror CLI flag\nnames). CLI flags override config values. The flag is also\nresolved from $AGDA_DEPS_CONFIG or a .agda-deps.yml next to\nthe nearest .agda-lib."
+        "Load a YAML config file"
+      , Option []    ["exclude"] (ReqArg excludeOpt "PREFIX")
+        "Drop PREFIX and its submodules; repeatable"
+      , Option []    ["no-externals"] (NoArg noExternalsOpt)
+        "Drop modules outside the project root"
+      , Option []    ["lazy"] (NoArg lazyOpt)
+        "Split JSON into per-module files (needs -o)"
+      , Option []    ["gzip"] (NoArg gzipOpt)
+        "Also write .gz files (with --lazy)"
+      , Option []    ["keep-going"] (NoArg keepGoingOpt)
+        "Continue past type-check errors"
+      , Option []    ["lenient-imports"] (NoArg lenientImportsOpt)
+        "Pass --allow-unsolved-metas to Agda"
+      , Option []    ["resolve-deps"] (NoArg resolveDepsOpt)
+        "Search only the .agda-lib depend: closure"
+      , Option []    ["skip-agda"] (NoArg skipAgdaOpt)
+        "Skip Agda; module graph from a source scan"
+      , Option []    ["incremental"] (NoArg incrementalOpt)
+        "Reuse cached per-module results"
+      , Option []    ["cache-dir"] (ReqArg cacheDirOpt "DIR")
+        "Cache directory for --incremental"
+      , Option []    ["quiet"] (NoArg quietOpt)
+        "Hide progress messages"
+      , Option []    ["packed-analytical"] (NoArg packedAnalyticalOpt)
+        "Add per-definition fields to packed JSON"
+      , Option []    ["with-signatures"] (NoArg withSignaturesOpt)
+        "Emit each definition's type"
+      , Option []    ["normalise-signatures"] (NoArg normaliseSignaturesOpt)
+        "Normalise emitted types"
+      , Option []    ["signature-implicits"] (NoArg showImplicitOpt)
+        "Show implicit arguments in emitted types"
+      , Option []    ["with-term-hashes"] (NoArg withTermHashesOpt)
+        "Emit a hash per definition subterm"
+      , Option []    ["min-term-depth"] (ReqArg minTermDepthOpt "N")
+        ("Minimum subterm depth to hash (default "
+           ++ show (optMinTermDepth defaultOptions) ++ ")")
+      , Option []    ["theme"]   (ReqArg themeOpt "THEME")
+        "DOT colours: default|light|dark|colorblind"
       , Option []    ["color-defined"]
           (ReqArg (colorOpt "color-defined"   (\p s -> p{ colorDefined   = s })) "#RRGGBB")
-        ("Color for fully-defined definitions (default: "
-           ++ colorDefined defaultPalette ++ ").")
+        ("Colour of definitions (default " ++ colorDefined defaultPalette ++ ")")
       , Option []    ["color-postulate"]
           (ReqArg (colorOpt "color-postulate" (\p s -> p{ colorPostulate = s })) "#RRGGBB")
-        ("Color for postulates (default: " ++ colorPostulate defaultPalette ++ ").")
+        ("Colour of postulates (default " ++ colorPostulate defaultPalette ++ ")")
       , Option []    ["color-hole"]
           (ReqArg (colorOpt "color-hole"      (\p s -> p{ colorHole      = s })) "#RRGGBB")
-        ("Color for definitions containing unsolved holes (default: "
-           ++ colorHole defaultPalette ++ ").")
-      , Option []    ["lazy"] (NoArg lazyOpt)
-        "JSON output only: split into a module-level graph.json plus\nper-module modules/<Module>.json detail files, instead of one\nmonolithic deps.json. `agda-plotter` renders a page shell that\nfetches them on demand; that needs HTTP serving. Requires -o."
-      , Option []    ["exclude"] (ReqArg excludeOpt "PREFIX")
-        "Drop every module whose name is PREFIX or starts with PREFIX.\nCan be repeated."
-      , Option []    ["gzip"] (NoArg gzipOpt)
-        "Lazy JSON output only: also write a .gz sibling next to every\nemitted JSON file."
+        ("Colour of holes (default " ++ colorHole defaultPalette ++ ")")
       , Option []    ["color-failed"]
           (ReqArg (colorOpt "color-failed"    (\p s -> p{ colorFailed    = s })) "#RRGGBB")
-        ("Color for modules whose type-check failed under --keep-going\n(default: "
-           ++ colorFailed defaultPalette ++ ").")
-      , Option []    ["keep-going"] (NoArg keepGoingOpt)
-        "Continue past Agda type-check errors. Modules whose type-check\nfailed are tagged 'failed' in the output graph."
-      , Option []    ["skip-agda"] (NoArg skipAgdaOpt)
-        "Don't invoke Agda at all. Render a module-level graph straight\nfrom the source-file scan (line-parses 'module' / 'import')."
-      , Option []    ["incremental"] (NoArg incrementalOpt)
-        "Cache each module's compiled dependency fragment under\n<out-dir>/.agda-deps-cache, keyed on the module's interface hash,\nand skip the per-definition walk on later runs when the module is\nunchanged. Disabled under --keep-going."
-      , Option []    ["cache-dir"] (ReqArg cacheDirOpt "DIR")
-        "Override the --incremental cache location (fragments +\nserialise manifest). Default: <out-dir>/.agda-deps-cache. No\neffect without --incremental."
-      , Option []    ["packed-analytical"] (NoArg packedAnalyticalOpt)
-        "Augment --json-mode=packed's 'defs' with per-definition\nanalytical arrays (kind/line/access/unsafe/unsolvedMetas, plus\ntype under --with-signatures and subterm hashes under\n--with-term-hashes), so the compact form carries everything\nexpanded does. Off by default; no effect on expanded output."
-      , Option []    ["quiet"] (NoArg quietOpt)
-        "Suppress 'I am working' progress lines on stderr; only genuine\nwarnings and errors are printed."
-      , Option []    ["no-externals"] (NoArg noExternalsOpt)
-        "Drop external modules (anything outside the project root) from\nthe rendered graph entirely — modules, definitions, and edges."
-      , Option []    ["json-mode"] (ReqArg jsonModeOpt "MODE")
-        "JSON shape: packed (default; base64-encoded typed arrays + CSR\nadjacency, compact for huge graphs) or expanded (arrays of\nrecords keyed by qname, no base64 — friendlier for downstream\ntooling)."
-      , Option []    ["lenient-imports"] (NoArg lenientImportsOpt)
-        "Tolerate imports of modules with open holes; forwarded to Agda\nas --allow-unsolved-metas. Useful with --keep-going when commits\ndeliberately leave '?' holes.\nSilent unsolved metas (missing record fields, failed instance\nsearch, unsolved _) still surface: per-def 'unsolvedMetas' counts\nand a top-level 'unsolvedModules' rollup — failedModules: [] alone\ndoes not mean everything compiles.\nINCOMPATIBLE WITH --safe DEPENDENCIES: --allow-unsolved-metas is a\nglobal Agda flag and any --safe module in the dep closure (e.g. the\nstandard library) will reject it with [SafeFlagPragma]. For projects\nbuilt on a --safe stdlib, prefer --keep-going alone."
-      , Option []    ["resolve-deps"] (NoArg resolveDepsOpt)
-        "Constrain Agda's search path to the project's .agda-lib 'depend:'\nclosure. Expands into '--no-libraries -i <dir>...' before Agda's\nCLI parser runs. Useful when two libraries with the same module\nname are registered (e.g. multiple stdlib versions) and Agda's\nresolver picks the wrong one, producing [AmbiguousTopLevelModuleName].\nFalls back silently to default behaviour if the project has no\n.agda-lib or resolution fails."
-      , Option []    ["with-term-hashes"] (NoArg withTermHashesOpt)
-        "Emit a canonical-form hash for every subterm walked\nin each definition. Off by default. Surfaces as\n'definitionSubtermHashes' in --json-mode=expanded; intended for\ndownstream AST-level CSE / lemma-extraction clustering."
-      , Option []    ["min-term-depth"] (ReqArg minTermDepthOpt "N")
-        ("Only emit hashes for subterms with AST depth\n>= N (default "
-           ++ show (optMinTermDepth defaultOptions)
-           ++ "). 1 disables the filter. Ignored without\n--with-term-hashes.")
-      , Option []    ["with-signatures"] (NoArg withSignaturesOpt)
-        "Render each definition's type signature (reify of its type) and\nemit it as the per-def 'type' field in --json-mode=expanded. Shown\nas-written: not normalised, Agda's default printing (no\n--show-implicit). Off by default. For downstream type-aware\ntooling."
-      , Option []    ["normalise-signatures"] (NoArg normaliseSignaturesOpt)
-        "Normalise each type signature before rendering (semantic form\nrather than as-written). Off by default. No effect without\n--with-signatures."
-      , Option []    ["signature-implicits"] (NoArg showImplicitOpt)
-        "Render type signatures with implicit (and irrelevant) arguments\nshown. Off by default. No effect without --with-signatures.\n(Named to avoid clashing with Agda's own --show-implicit.)"
+        ("Colour of failed modules (default " ++ colorFailed defaultPalette ++ ")")
       ]
   , backendInteractTop    = Nothing
   , backendInteractHole   = Nothing
@@ -866,7 +867,7 @@ writeOutputs :: Options -> SerialiseCtx -> TL.Text -> GraphInput -> IO ()
 writeOutputs opts sc dotText gi = do
   forM_ (optOutDir opts) (createDirectoryIfMissing True)
   case (optFormat opts, lazyTreeOutput opts, optOutDir opts) of
-    (FmtDot, _, Just dir) -> TL.writeFile (dir </> "deps.dot") dotText
+    (FmtDot, _, Just dir) -> atomicWriteLazyText (dir </> "deps.dot") dotText
     (FmtDot, _, Nothing)  -> TL.putStrLn dotText
 
     -- '--lazy': a module-level graph.json plus one detail file per
@@ -876,10 +877,10 @@ writeOutputs opts sc dotText gi = do
 
     (FmtJson, _, Nothing) -> putStrLn (renderJson (optJsonMode opts) gi)
 
-    -- Plain 'writeFile', not 'writeJsonMaybeGz': --gzip documents itself
+    -- Plain JSON, not 'writeJsonMaybeGz': --gzip documents itself
     -- as affecting the lazy tree's files only.
     (FmtJson, _, Just dir) -> do
-      writeFile (dir </> "deps.json") (renderJson (optJsonMode opts) gi)
+      atomicWriteString (dir </> "deps.json") (renderJson (optJsonMode opts) gi)
       when (scEnabled sc) $
         writeManifest (scCacheDir sc) (optGzip opts)
           (manifestFromList [("deps.json", scMonoToken sc)])
@@ -1000,8 +1001,11 @@ writeLazyTree dir opts sc gjo = do
 writeJsonMaybeGz :: Bool -> FilePath -> String -> IO ()
 writeJsonMaybeGz gz path content = do
   let bytes = TLE.encodeUtf8 (TL.pack content)
-  BL.writeFile path bytes
-  when gz $ BL.writeFile (path ++ ".gz") (GZip.compress bytes)
+  -- Publish the compressed sibling first and the canonical JSON last.  Each
+  -- replacement is atomic; replacing JSON last means its appearance is the
+  -- closest available commit point for the two-file pair.
+  when gz $ atomicWriteLazyBytes (path ++ ".gz") (GZip.compress bytes)
+  atomicWriteLazyBytes path bytes
 
 -- | Classify modules whose source lives outside the project root (the
 -- cwd after 'Main''s .agda-lib discovery). A module is external when no

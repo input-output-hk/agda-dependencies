@@ -38,6 +38,7 @@ import System.Directory
 import System.FilePath ( (</>) )
 
 import Agda.Utils.Hash ( hashString )
+import AgdaDeps.AtomicWrite ( atomicWriteString )
 
 -- | A content fingerprint.
 type Epoch = Word64
@@ -101,7 +102,7 @@ readManifest cacheDir gzip = do
 writeManifest :: FilePath -> Bool -> Manifest -> IO ()
 writeManifest cacheDir gzip manifest =
   (do createDirectoryIfMissing True cacheDir
-      writeFile (manifestFileName cacheDir) body)
+      atomicWriteString (manifestFileName cacheDir) body)
     `E.catch` \ (_ :: E.IOException) -> pure ()
   where
     body = unlines $

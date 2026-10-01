@@ -1,24 +1,23 @@
 # agda-deps: an Agda dependency graph generator
 
-`agda-deps` is an Agda compiler backend that emits a dependency graph relating
+`agda-deps` explores Agda projects and emits dependency graphs relating
 definitions, postulates, and incomplete definitions/expressions plus their
 relation.
 
-It writes two things:
+It can write two things:
 
-- a stable **JSON** artifact (see
+- a **JSON** artifact (see
   [Consuming the JSON output](#consuming-the-json-output)),
 - a Graphviz **DOT** file, for a quick static picture.
 
-We also built two other tools consuming generated JSON files:
+Based on the dependency graph of libraries, we also built two other tools:
 
-| Tool                                                                            | What it does                                                                                                            |
-|---------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
-| [`agda-plotter`](https://github.com/input-output-hk/agda-plotter)               | Renders the graph as an interactive HTML page. |
-| [`agda-graph-explorer`](https://github.com/input-output-hk/agda-graph-explorer) | Unused-import analysis, graph-level optimisation analyses, and an MCP server for coding agents.                         |
+| Tool                                                                            | What it does                                                                                    |
+|---------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| [`agda-plotter`](https://github.com/input-output-hk/agda-plotter)               | Renders the graph as an interactive HTML page.                                                  |
+| [`agda-graph-explorer`](https://github.com/input-output-hk/agda-graph-explorer) | Unused-import analysis, graph-level optimisation analyses, and an MCP server for coding agents. |
 
-Neither links Agda, so both build from Hackage in minutes. For an interactive
-page, see the [`agda-plotter` README](https://github.com/input-output-hk/agda-plotter#readme).
+For an interactive page, see the [`agda-plotter` README](https://github.com/input-output-hk/agda-plotter#readme).
 
 Each node is coloured by the state of its definition:
 
@@ -74,7 +73,7 @@ Standard Agda flags are accepted — `-i DIR` (include path), `-l LIB`,
 `--help` lists the backend's options; `--agda-help` shows Agda's.
 
 There is one subcommand, `agda-deps doctor`, which checks the YAML config file
-and exits — see [Checking a config](#checking-a-config-agda-deps-doctor).
+and exits, see [Checking a config](#checking-a-config-agda-deps-doctor).
 
 - `-o DIR` / `--out-dir=DIR` — output directory (`deps.dot|json`). Without it,
   output goes to stdout; `--lazy` requires it. A value ending in
@@ -94,9 +93,14 @@ and exits — see [Checking a config](#checking-a-config-agda-deps-doctor).
 - `--lenient-imports` — forward `--allow-unsolved-metas` to Agda, for projects
   that deliberately commit `?` holes; combine with `--keep-going`. Under this
   flag a module with unsolved metas *succeeds* (they become `unsolved#meta.*`
-  postulates).
+  postulates). Agda applies the flag globally, so a `--safe` dependency (such
+  as the standard library) rejects it with `[SafeFlagPragma]`; there, use
+  `--keep-going` alone.
 - `--resolve-deps` — constrain Agda's search path to the project's `.agda-lib`
-  `depend:` closure.
+  `depend:` closure (it expands to `--no-libraries -i DIR ...`). Use it when
+  two registered libraries share a module name and Agda reports
+  `[AmbiguousTopLevelModuleName]`. With no `.agda-lib`, or if resolution
+  fails, it warns and leaves the arguments unchanged.
 - `--no-externals` — drop everything outside the project root (nodes and edges).
   JSON keeps a top-level `externals_summary` of what was dropped.
 - `--json-mode=packed|expanded` — the `--format=json` shape (default `packed`).
@@ -104,7 +108,7 @@ and exits — see [Checking a config](#checking-a-config-agda-deps-doctor).
 - `--packed-analytical` — add the per-def analytical arrays (`kinds`/`lines`/
   `access`/`unsafe`/`unsolvedMetas`, plus `types` and subterm arrays when those
   are enabled) to packed, so a decoded packed graph is node-for-node identical
-  to expanded.
+  to expanded. With `--lazy`, each module detail file carries its local slice.
 - `--with-term-hashes` — emit a `Word64` fingerprint per definition subterm
   (`definitionSubtermHashes` + `definitionSubtermDepths`) in expanded JSON.
 - `--min-term-depth=N` — drop subterms below AST depth `N` (default `3`; `1`
@@ -140,21 +144,6 @@ Every run also scans sources for `module` / `import` declarations and unions
 that module-level graph into the output, so modules that never type-checked
 (under `--keep-going`) still appear with their import wiring.
 
-## Node colours
-
-The four state colours apply to DOT output here, and to HTML output in
-`agda-plotter`, which takes the same flag names and the same defaults:
-
-```
-cabal run agda-deps -- --format=dot \
-  --color-defined=#0288d1 --color-postulate=#d32f2f --color-hole=#fbc02d \
-  -i test/ -o test/ test/Test.agda
-```
-
-They are not carried in `graph.json` — each renderer keeps its own copy — so
-changing one here does not change what `agda-plotter` draws. Pass the same
-flags to both, or set them once in a shared `.agda-deps.yml`.
-
 ## YAML config
 
 `agda-deps` reads an optional YAML config.
@@ -186,8 +175,6 @@ exclude:
   - Agda.Builtin
   - Data
 ```
-
-Run `agda-deps doctor` to check a file before relying on it.
 
 ### Checking a config: `agda-deps doctor`
 
@@ -243,7 +230,8 @@ Layout under `-o`:
 graph.json             ← module-level skeleton:
                        ·   modules, moduleEdges (compact A→B pairs)
                        ·   moduleFiles: name → modules/<Module>.json  (the manifest)
-modules/<Module>.json  ← that module's leaves + edges (detail-<hash>.json for non-safe names)
+modules/<Module>.json  ← that module's leaves + edges, plus requested analytical arrays
+                         (detail-<hash>.json for non-safe names)
 deps.html              ← small shell, no inlined data   (written by agda-plotter)
 ```
 
@@ -259,7 +247,7 @@ inlines it into a self-contained page that opens straight off disk.
   carries `names`/`modules`/`states`/`x`/`y` unless
   [`--packed-analytical`](#backend-flags) adds the `kinds`/`lines`/`access`/
   `unsafe`/`unsolvedMetas` (and `types`/`subterm*`) arrays. Best for tens of
-  thousands of nodes.
+  thousands of nodes. Lazy detail files carry the same fields, locally indexed.
 - **expanded** — arrays of records keyed by qname / module name, no base64.
   Carries `"schemaVersion": 2` and `"mode": "expanded"`. Best for small
   fixtures and ad-hoc tooling.
@@ -345,3 +333,15 @@ is reconstructed by a closure pass (`contractIgnoredEdges`, same file).
 
 I used Claude Code to generate features on this project.
 Most are proofs of concept for visualizing and exploring Agda projects.
+
+
+## Legal Disclaimer
+
+*Important disclaimer & acceptance of risk*.
+This is a proof-of-concept implementation that has not undergone security
+auditing. This code is provided "as is" for research and educational purposes
+only. It has not been subjected to a formal security review or audit and may
+contain vulnerabilities. Do not use this code in production systems, or any
+environment where security is critical, without conducting your own thorough
+security assessment. By using this code, you acknowledge and accept all
+associated risks, and our company disclaims any liability for damages or losses.

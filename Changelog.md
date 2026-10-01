@@ -7,6 +7,31 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-10-01 — `agda-deps` — lazy packed analytical fields preserved
+
+`--json-mode=packed --lazy --packed-analytical` now writes each module's local
+`kinds`, `lines`, `access`, `unsafe`, `unsolvedMetas`, optional `types`, and
+optional `subterm*` arrays inside the detail file's existing `defs` object.
+Previously the lazy split removed the monolithic `defs` object and silently
+dropped every requested analytical field.
+
+The detail extension is additive and optional, so the wire stays at v2 and old
+lazy consumers continue to work. The monolithic and lazy forms share one data
+builder and encoder; CI decodes both and compares them node-for-node with a
+cold expanded graph. Default lazy output remains byte-identical.
+
+---
+
+## 2026-09-29 — `agda-deps` — shorter `--help`
+
+`--help` now prints one line per flag, grouped by purpose, followed by a
+pointer to the README. It is 42 lines at most 80 columns wide, down from 128,
+and is identical on Agda 2.8 and 2.9. The two warnings it used to carry (the
+`[SafeFlagPragma]` clash with `--lenient-imports`, and when to use
+`--resolve-deps`) are now in the README's flag list.
+
+---
+
 ## 2026-09-29 — `agda-deps` — six fixes from the pre-release review
 
 **Config keys that act before Agda runs now work.** `quiet`, `skip-agda`,

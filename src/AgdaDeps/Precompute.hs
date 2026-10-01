@@ -19,19 +19,21 @@ module AgdaDeps.Precompute
   ( PrecomputedGraph(..)
   , emptyGraph
   , precomputeFromArgs
+  , discoverAgdaFiles
   ) where
 
+import Prelude hiding ( foldl' )
 import Control.DeepSeq ( force )
 import Control.Exception ( catch, evaluate, IOException )
 import Control.Monad ( foldM )
 
 import Data.Char ( isAlphaNum )
 import Data.Containers.ListUtils ( nubOrd )
-import Data.List ( foldl' )
+import Data.List ( foldl', sort )
 import qualified Data.Set as Set
 
 import System.Directory
-  ( doesDirectoryExist, doesFileExist, listDirectory )
+  ( canonicalizePath, doesDirectoryExist, doesFileExist, listDirectory )
 import System.FilePath ( (</>), takeBaseName )
 
 import AgdaDeps.Logging ( info )
@@ -72,7 +74,7 @@ precomputeFromArgs argv = do
   if null roots
     then return emptyGraph
     else do
-      files <- concat <$> mapM discoverAgdaFiles roots
+      files <- discoverAgdaFilesFromRoots roots
       let files' = nubOrd files
       modulesAndImports <- mapM scanFile files'
       let pairs       = zip files' modulesAndImports
@@ -89,20 +91,45 @@ precomputeFromArgs argv = do
 -- | Recursively list every Agda source file under a directory.
 -- Hidden directories (name starting with @.@) are skipped.
 discoverAgdaFiles :: FilePath -> IO [FilePath]
-discoverAgdaFiles root = do
-  exists <- doesDirectoryExist root
-  if not exists then return [] else go [] root
-  where
-    -- Tail-recursive collector accumulating into a single list.
-    go acc d = do
-      entries <- listDirectory d `catch` \(_ :: IOException) -> return []
-      foldM step acc [ d </> e | e <- entries, not (isHidden e) ]
+discoverAgdaFiles root = discoverAgdaFilesFromRoots [root]
 
-    step acc p = do
+-- | Traverse several roots with one canonical visited-directory set. The
+-- first spelling of a directory wins when two include paths are symlink
+-- aliases; roots themselves retain CLI order.
+discoverAgdaFilesFromRoots :: [FilePath] -> IO [FilePath]
+discoverAgdaFilesFromRoots roots = do
+  (_, filesRev) <- foldM startRoot (Set.empty, []) roots
+  return (reverse filesRev)
+  where
+    -- Keep the rendered paths in the spelling supplied by the caller, but
+    -- track canonical directory identities so symlink aliases/cycles are
+    -- visited only once.  Sorting each directory makes discovery independent
+    -- of the filesystem's enumeration order.
+    go seen acc d = do
+      canonical <- (Just <$> canonicalizePath d)
+        `catch` \(_ :: IOException) -> return Nothing
+      case canonical of
+        Nothing -> return (seen, acc)
+        Just key
+          | Set.member key seen -> return (seen, acc)
+          | otherwise -> do
+              entries <- sort <$> (listDirectory d
+                `catch` \(_ :: IOException) -> return [])
+              foldM step (Set.insert key seen, acc)
+                [ d </> e | e <- entries, not (isHidden e) ]
+
+    startRoot state@(seen, acc) root = do
+      exists <- doesDirectoryExist root
+      if exists then go seen acc root else return state
+
+    step (seen, acc) p = do
       isDir <- doesDirectoryExist p
       if isDir
-        then go acc p
-        else return $ if looksLikeAgdaSource p then p : acc else acc
+        then go seen acc p
+        else return
+          ( seen
+          , if looksLikeAgdaSource p then p : acc else acc
+          )
 
     isHidden ('.':_) = True
     isHidden _       = False
@@ -160,12 +187,14 @@ stripBlockComments :: String -> String
 stripBlockComments = go 0
   where
     go :: Int -> String -> String
-    go 0 ('{':'-':rest) = go 1 rest
-    go 0 (c:cs)         = c : go 0 cs
-    go n ('-':'}':rest) | n > 0 = go (n - 1) rest
-    go n ('{':'-':rest) | n > 0 = go (n + 1) rest
-    go n (_:cs)         | n > 0 = go n cs
-    go _ []             = []
+    go _ [] = []
+    go n ('{':'-':rest)
+      | n == 0    = go 1 rest
+      | otherwise = go (n + 1) rest
+    go n ('-':'}':rest)
+      | n > 0     = go (n - 1) rest
+    go 0 (c:cs) = c : go 0 cs
+    go n (_:cs) = go n cs
 
 -- Strip trailing punctuation Agda disallows in module names
 -- (semicolons, parentheses, … from compact one-liners).
