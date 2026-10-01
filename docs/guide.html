@@ -110,25 +110,34 @@ imports (repeat <code>-i</code> for the standard library) and passing the top mo
 <p>Everything after <code>--</code> is forwarded to the backend and to Agda's CLI.
 Standard Agda flags are accepted — <code>-i DIR</code> (include path), <code>-l LIB</code>,
 <code>--library-file=FILE</code>, <code>--no-libraries</code>, and the trailing positional module.
+Attached short forms (<code>-iDIR</code>, <code>-lLIB</code>, <code>-oDIR</code>) work throughout startup.
+CLI paths resolve from the invocation directory, before automatic project-root
+discovery changes the working directory. A second <code>--</code> ends option parsing;
+following tokens are positional arguments.
 <code>--help</code> lists the backend's options; <code>--agda-help</code> shows Agda's.</p>
 <p>There is one subcommand, <code>agda-deps doctor</code>, which checks the YAML config file
 and exits, see <a href="#checking-a-config-agda-deps-doctor">Checking a config</a>.</p>
 <ul>
 <li><code>-o DIR</code> / <code>--out-dir=DIR</code> — output directory (<code>deps.dot|json</code>). Without it,
   output goes to stdout; <code>--lazy</code> requires it. A value ending in
-  <code>.json</code>/<code>.dot</code> also sets the format unless <code>--format</code> is given.</li>
+  <code>.json</code>/<code>.dot</code> also sets the format unless <code>--format</code> is given. With repeated
+  output flags, the last destination determines both the path and inference.</li>
 <li><code>--format=dot|json</code> — output format (default <code>dot</code>).</li>
 <li><code>--config=PATH</code> — load a YAML config. See <a href="#yaml-config">YAML config</a>.</li>
 <li><code>--theme=default|light|dark|colorblind</code> — palette preset for the four state
-  colours in DOT output.</li>
+  colours in DOT output. With repeated flags, the last theme wins.</li>
 <li><code>--color-defined|postulate|hole|failed=#RRGGBB</code> — override a state colour
-  (defaults <code>#4caf50</code> / <code>#f44336</code> / <code>#9c27b0</code> / <code>#ff9800</code>).</li>
+  (defaults <code>#4caf50</code> / <code>#f44336</code> / <code>#9c27b0</code> / <code>#ff9800</code>). Explicit CLI
+  colours override the CLI theme whether they appear before or after it;
+  the last colour for each state wins. A CLI theme replaces the YAML palette,
+  including YAML colour overrides.</li>
 <li><code>--keep-going</code> — don't abort on a type-check error: tag the failing module
   <code>failed</code> and emit whatever loaded, with def-level data for every module that
   elaborated.</li>
 <li><code>--skip-agda</code> — don't invoke Agda; emit a module-level graph from a source
   scan (<code>module</code> / <code>import</code> lines). No definition graph, so
-  only module-level views have anything to draw.</li>
+  only module-level views have anything to draw. With <code>--no-externals</code>,
+  source file metadata also covers only files resolving inside the project root.</li>
 <li><code>--lenient-imports</code> — forward <code>--allow-unsolved-metas</code> to Agda, for projects
   that deliberately commit <code>?</code> holes; combine with <code>--keep-going</code>. Under this
   flag a module with unsolved metas <em>succeeds</em> (they become <code>unsolved#meta.*</code>
@@ -136,12 +145,21 @@ and exits, see <a href="#checking-a-config-agda-deps-doctor">Checking a config</
   as the standard library) rejects it with <code>[SafeFlagPragma]</code>; there, use
   <code>--keep-going</code> alone.</li>
 <li><code>--resolve-deps</code> — constrain Agda's search path to the project's <code>.agda-lib</code>
-  <code>depend:</code> closure (it expands to <code>--no-libraries -i DIR ...</code>). Use it when
-  two registered libraries share a module name and Agda reports
+  <code>depend:</code> closure (it expands to <code>--no-libraries -i DIR ...</code>, retaining the
+  project's own include paths). It uses Agda's library parser, registry
+  discovery, and version matching: an unversioned request prefers an exact
+  unversioned entry, otherwise the highest installed version; a versioned
+  request requires that version. <code>--library-file</code> overrides the registry.
+  Use it when two registered libraries share a module name and Agda reports
   <code>[AmbiguousTopLevelModuleName]</code>. With no <code>.agda-lib</code>, or if resolution
-  fails, it warns and leaves the arguments unchanged.</li>
+  fails, it warns and leaves the arguments unchanged. Missing or ambiguous
+  dependencies and malformed library files discard the entire proposed pin;
+  successfully resolved siblings are never applied on their own.</li>
 <li><code>--no-externals</code> — drop everything outside the project root (nodes and edges).
-  JSON keeps a top-level <code>externals_summary</code> of what was dropped.</li>
+  Membership compares resolved source paths with the resolved project root by
+  directory component. Symlinks pointing outside are external; aliases
+  resolving inside are internal. Missing or unresolvable source files are
+  external. JSON keeps a top-level <code>externals_summary</code> of what was dropped.</li>
 <li><code>--json-mode=packed|expanded</code> — the <code>--format=json</code> shape (default <code>packed</code>).
   See <a href="#consuming-the-json-output">Consuming the JSON output</a>.</li>
 <li><code>--packed-analytical</code> — add the per-def analytical arrays (<code>kinds</code>/<code>lines</code>/
@@ -179,15 +197,29 @@ and exits, see <a href="#checking-a-config-agda-deps-doctor">Checking a config</
 <li><code>--gzip</code> — <code>--lazy</code> only: also write a <code>.gz</code> next to every emitted JSON file
   (the plain <code>.json</code> is still written).</li>
 </ul>
-<p>Every run also scans sources for <code>module</code> / <code>import</code> declarations and unions
-that module-level graph into the output, so modules that never type-checked
-(under <code>--keep-going</code>) still appear with their import wiring.</p>
+<p>Every run also scans sources for <code>module</code> / <code>import</code> declarations. JSON
+includes the scanned module graph, including isolated, unimported modules
+with no extracted definitions, and modules that never type-checked under
+<code>--keep-going</code>. Scanned source paths fill in module mappings when no binding
+site is available; lazy output supplies placeholders for modules without
+definitions. <code>--exclude</code> removes modules and their mappings, while
+<code>--no-externals</code> also removes scanned paths outside the physical project root.</p>
 <h2 id="yaml-config">YAML config</h2>
 <p><code>agda-deps</code> reads an optional YAML config.
 Keys mirror the CLI flags in kebab-case (<code>--no-externals</code> ↔ <code>no-externals</code>).
 Merge order is <strong>defaults → config → CLI</strong>. Discovery (first match wins):
 <code>--config=PATH</code>, <code>$AGDA_DEPS_CONFIG</code>, <code>./.agda-deps.yml</code> (or <code>.yaml</code>), then the
-dotfile in the nearest ancestor with a <code>*.agda-lib</code>.</p>
+dotfile in the nearest ancestor with a <code>*.agda-lib</code>.
+Relative paths named by <code>--config</code> or <code>$AGDA_DEPS_CONFIG</code> resolve from the
+invocation directory. Automatic dotfile discovery uses the working directory
+after project-root discovery. A named file must exist; <code>--config</code> requires a
+path. With repeated <code>--config</code> flags, the last file wins.</p>
+<p>Supplied <code>color-*</code> values must be quoted <code>#RRGGBB</code> strings, and
+<code>min-term-depth</code> must be an integer of at least 1. Invalid values (including
+null values for these keys) stop normal and skip runs with the config path,
+key, and expected value before source scanning, type-checking, or output.
+The config must be valid even when a CLI flag overrides the setting. Omitted
+keys and empty configs retain the defaults.</p>
 <p>The quickest way to start is to generate a fully-documented sample — every
 option at its default with a one-line comment — and edit it:</p>
 <pre><code>agda-deps --show-defaults &gt; .agda-deps.yml
@@ -209,12 +241,13 @@ exclude:
 <h3 id="checking-a-config-agda-deps-doctor">Checking a config: <code>agda-deps doctor</code></h3>
 <pre><code>agda-deps doctor [--config=PATH] [--strict]
 </code></pre>
-<p>Resolves the config exactly as a run would, then reports what is wrong with it.
-It catches the failures a config fails <em>silently</em>:</p>
+<p>Resolves the config exactly as a run would, then reports errors, unknown keys,
+and ineffective combinations:</p>
 <ul>
 <li><strong>Unknown keys.</strong> A misspelled key is ignored by the parser, so the setting
   just never applies.</li>
-<li><strong>Bad values.</strong> A colour that isn't <code>#RRGGBB</code>.</li>
+<li><strong>Bad values.</strong> A colour that isn't <code>#RRGGBB</code>, an unquoted colour read as a
+  YAML comment, or a <code>min-term-depth</code> below 1.</li>
 <li><strong>Combinations that do nothing.</strong> <code>lazy</code> under <code>format: dot</code>, <code>cache-dir</code>
   without <code>incremental</code>, <code>min-term-depth</code> without <code>with-term-hashes</code>,
   <code>json-mode</code> under <code>format: dot</code>, <code>incremental</code> together with <code>keep-going</code>,
@@ -332,7 +365,7 @@ naming convention, for stale-cache detection; absent reads as <code>1</code>).</
 </tr>
 <tr>
 <td><code>sourceFiles</code></td>
-<td>every scanned source path.</td>
+<td>scanned source paths; project-only with <code>--no-externals</code>.</td>
 </tr>
 <tr>
 <td><code>reexports</code></td>

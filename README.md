@@ -70,6 +70,10 @@ cabal run agda-deps -- --format=json -i src/ -i /path/to/agda-stdlib/src -o out/
 Everything after `--` is forwarded to the backend and to Agda's CLI.
 Standard Agda flags are accepted — `-i DIR` (include path), `-l LIB`,
 `--library-file=FILE`, `--no-libraries`, and the trailing positional module.
+Attached short forms (`-iDIR`, `-lLIB`, `-oDIR`) work throughout startup.
+CLI paths resolve from the invocation directory, before automatic project-root
+discovery changes the working directory. A second `--` ends option parsing;
+following tokens are positional arguments.
 `--help` lists the backend's options; `--agda-help` shows Agda's.
 
 There is one subcommand, `agda-deps doctor`, which checks the YAML config file
@@ -77,19 +81,24 @@ and exits, see [Checking a config](#checking-a-config-agda-deps-doctor).
 
 - `-o DIR` / `--out-dir=DIR` — output directory (`deps.dot|json`). Without it,
   output goes to stdout; `--lazy` requires it. A value ending in
-  `.json`/`.dot` also sets the format unless `--format` is given.
+  `.json`/`.dot` also sets the format unless `--format` is given. With repeated
+  output flags, the last destination determines both the path and inference.
 - `--format=dot|json` — output format (default `dot`).
 - `--config=PATH` — load a YAML config. See [YAML config](#yaml-config).
 - `--theme=default|light|dark|colorblind` — palette preset for the four state
-  colours in DOT output.
+  colours in DOT output. With repeated flags, the last theme wins.
 - `--color-defined|postulate|hole|failed=#RRGGBB` — override a state colour
-  (defaults `#4caf50` / `#f44336` / `#9c27b0` / `#ff9800`).
+  (defaults `#4caf50` / `#f44336` / `#9c27b0` / `#ff9800`). Explicit CLI
+  colours override the CLI theme whether they appear before or after it;
+  the last colour for each state wins. A CLI theme replaces the YAML palette,
+  including YAML colour overrides.
 - `--keep-going` — don't abort on a type-check error: tag the failing module
   `failed` and emit whatever loaded, with def-level data for every module that
   elaborated.
 - `--skip-agda` — don't invoke Agda; emit a module-level graph from a source
   scan (`module` / `import` lines). No definition graph, so
-  only module-level views have anything to draw.
+  only module-level views have anything to draw. With `--no-externals`,
+  source file metadata also covers only files resolving inside the project root.
 - `--lenient-imports` — forward `--allow-unsolved-metas` to Agda, for projects
   that deliberately commit `?` holes; combine with `--keep-going`. Under this
   flag a module with unsolved metas *succeeds* (they become `unsolved#meta.*`
@@ -97,12 +106,21 @@ and exits, see [Checking a config](#checking-a-config-agda-deps-doctor).
   as the standard library) rejects it with `[SafeFlagPragma]`; there, use
   `--keep-going` alone.
 - `--resolve-deps` — constrain Agda's search path to the project's `.agda-lib`
-  `depend:` closure (it expands to `--no-libraries -i DIR ...`). Use it when
-  two registered libraries share a module name and Agda reports
+  `depend:` closure (it expands to `--no-libraries -i DIR ...`, retaining the
+  project's own include paths). It uses Agda's library parser, registry
+  discovery, and version matching: an unversioned request prefers an exact
+  unversioned entry, otherwise the highest installed version; a versioned
+  request requires that version. `--library-file` overrides the registry.
+  Use it when two registered libraries share a module name and Agda reports
   `[AmbiguousTopLevelModuleName]`. With no `.agda-lib`, or if resolution
-  fails, it warns and leaves the arguments unchanged.
+  fails, it warns and leaves the arguments unchanged. Missing or ambiguous
+  dependencies and malformed library files discard the entire proposed pin;
+  successfully resolved siblings are never applied on their own.
 - `--no-externals` — drop everything outside the project root (nodes and edges).
-  JSON keeps a top-level `externals_summary` of what was dropped.
+  Membership compares resolved source paths with the resolved project root by
+  directory component. Symlinks pointing outside are external; aliases
+  resolving inside are internal. Missing or unresolvable source files are
+  external. JSON keeps a top-level `externals_summary` of what was dropped.
 - `--json-mode=packed|expanded` — the `--format=json` shape (default `packed`).
   See [Consuming the JSON output](#consuming-the-json-output).
 - `--packed-analytical` — add the per-def analytical arrays (`kinds`/`lines`/
@@ -140,9 +158,13 @@ Output-shape flags:
 - `--gzip` — `--lazy` only: also write a `.gz` next to every emitted JSON file
   (the plain `.json` is still written).
 
-Every run also scans sources for `module` / `import` declarations and unions
-that module-level graph into the output, so modules that never type-checked
-(under `--keep-going`) still appear with their import wiring.
+Every run also scans sources for `module` / `import` declarations. JSON
+includes the scanned module graph, including isolated, unimported modules
+with no extracted definitions, and modules that never type-checked under
+`--keep-going`. Scanned source paths fill in module mappings when no binding
+site is available; lazy output supplies placeholders for modules without
+definitions. `--exclude` removes modules and their mappings, while
+`--no-externals` also removes scanned paths outside the physical project root.
 
 ## YAML config
 
@@ -151,6 +173,17 @@ Keys mirror the CLI flags in kebab-case (`--no-externals` ↔ `no-externals`).
 Merge order is **defaults → config → CLI**. Discovery (first match wins):
 `--config=PATH`, `$AGDA_DEPS_CONFIG`, `./.agda-deps.yml` (or `.yaml`), then the
 dotfile in the nearest ancestor with a `*.agda-lib`.
+Relative paths named by `--config` or `$AGDA_DEPS_CONFIG` resolve from the
+invocation directory. Automatic dotfile discovery uses the working directory
+after project-root discovery. A named file must exist; `--config` requires a
+path. With repeated `--config` flags, the last file wins.
+
+Supplied `color-*` values must be quoted `#RRGGBB` strings, and
+`min-term-depth` must be an integer of at least 1. Invalid values (including
+null values for these keys) stop normal and skip runs with the config path,
+key, and expected value before source scanning, type-checking, or output.
+The config must be valid even when a CLI flag overrides the setting. Omitted
+keys and empty configs retain the defaults.
 
 The quickest way to start is to generate a fully-documented sample — every
 option at its default with a one-line comment — and edit it:
@@ -182,12 +215,13 @@ exclude:
 agda-deps doctor [--config=PATH] [--strict]
 ```
 
-Resolves the config exactly as a run would, then reports what is wrong with it.
-It catches the failures a config fails *silently*:
+Resolves the config exactly as a run would, then reports errors, unknown keys,
+and ineffective combinations:
 
 - **Unknown keys.** A misspelled key is ignored by the parser, so the setting
   just never applies.
-- **Bad values.** A colour that isn't `#RRGGBB`.
+- **Bad values.** A colour that isn't `#RRGGBB`, an unquoted colour read as a
+  YAML comment, or a `min-term-depth` below 1.
 - **Combinations that do nothing.** `lazy` under `format: dot`, `cache-dir`
   without `incremental`, `min-term-depth` without `with-term-hashes`,
   `json-mode` under `format: dot`, `incremental` together with `keep-going`,
@@ -272,7 +306,7 @@ naming convention, for stale-cache detection; absent reads as `1`).
 | `moduleEdges`                | `[importer, imported]` pairs of module names.     |
 | `transitiveModuleEdges`      | the module edges implied by a longer path.        |
 | `moduleFiles`                | module name → source path.                        |
-| `sourceFiles`                | every scanned source path.                        |
+| `sourceFiles`                | scanned source paths; project-only with `--no-externals`. |
 | `reexports`                  | one row per `open import … public` — see below.   |
 
 Optional top-level fields (`moduleOptionEscapes`, `unsolvedModules`,

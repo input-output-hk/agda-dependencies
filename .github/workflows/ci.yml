@@ -63,6 +63,27 @@ jobs:
     - name: Run behavior-preserving hardening tests
       run: cabal test hardening
 
+    - name: Skip mode filters external file metadata in every JSON shape
+      run: python3 schema/skip_agda_check.py "$(cabal list-bin agda-deps)"
+
+    - name: Scanned modules survive every JSON shape and incremental reuse
+      run: python3 schema/scanned_modules_check.py "$(cabal list-bin agda-deps)"
+
+    - name: Project containment follows symlinks and directory boundaries
+      run: python3 schema/project_containment_check.py "$(cabal list-bin agda-deps)"
+
+    - name: Startup arguments agree with Agda option syntax
+      run: python3 schema/arguments_check.py "$(cabal list-bin agda-deps)"
+
+    - name: Library resolution matches Agda and falls back atomically
+      run: python3 schema/lib_resolve_check.py "$(cabal list-bin agda-deps)"
+
+    - name: YAML scalar validation agrees with CLI and doctor
+      run: python3 schema/config_validation_check.py "$(cabal list-bin agda-deps)"
+
+    - name: Explicit CLI colours override themes in either argument order
+      run: python3 schema/palette_precedence_check.py "$(cabal list-bin agda-deps)"
+
     - name: Run agda-deps on the bundled test corpus (every output shape)
       run: |
         mkdir -p ci-out
@@ -517,6 +538,41 @@ jobs:
       run: |
         cabal test --project-file=cabal.project.agda29 \
           --builddir=dist-agda29 hardening
+
+    - name: Skip mode filters external file metadata (Agda 2.9)
+      run: |
+        python3 schema/skip_agda_check.py \
+          "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
+
+    - name: Scanned modules survive JSON shapes and incremental reuse (Agda 2.9)
+      run: |
+        python3 schema/scanned_modules_check.py \
+          "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
+
+    - name: Project containment follows resolved paths (Agda 2.9)
+      run: |
+        python3 schema/project_containment_check.py \
+          "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
+
+    - name: Startup arguments agree with Agda option syntax (Agda 2.9)
+      run: |
+        python3 schema/arguments_check.py \
+          "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
+
+    - name: Library resolution matches Agda and falls back atomically (Agda 2.9)
+      run: |
+        python3 schema/lib_resolve_check.py \
+          "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
+
+    - name: YAML scalar validation agrees with CLI and doctor (Agda 2.9)
+      run: |
+        python3 schema/config_validation_check.py \
+          "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
+
+    - name: Explicit CLI colours override themes in either argument order (Agda 2.9)
+      run: |
+        python3 schema/palette_precedence_check.py \
+          "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
 
     - name: Expanded output matches the golden (2.8/2.9 parity)
       # Must run cold (dead-private recovery) — see the 2.8 job's note.

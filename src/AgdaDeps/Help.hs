@@ -6,14 +6,9 @@
 -- "Main" intercepts @--help@ \/ @-h@ \/ @-?@ and routes to 'printHelp';
 -- @--agda-help@ is rewritten to a plain @--help@ for Agda's full help.
 --
--- Key functions: 'isHelpRequest', 'wantsAgdaHelp', 'rewriteAgdaHelp',
--- 'printHelp', 'isVersionRequest', 'printVersion'.
+-- Key functions: 'printHelp', 'printVersion'.
 module AgdaDeps.Help
-  ( isHelpRequest
-  , wantsAgdaHelp
-  , rewriteAgdaHelp
-  , printHelp
-  , isVersionRequest
+  ( printHelp
   , printVersion
   ) where
 
@@ -26,27 +21,6 @@ import Agda.Compiler.Backend ( commandLineFlags )
 import Agda.Utils.GetOpt ( OptDescr(Option), ArgDescr(NoArg), usageInfo )
 
 import AgdaDeps.Backend ( backend )
-
--- | True for the bare help flags (no @=topic@ suffix). Topic forms
--- (@--help=warning@, @--help=error@, …) are forwarded to Agda
--- unchanged so its topic-specific help still works.
-isHelpRequest :: String -> Bool
-isHelpRequest a = a == "--help" || a == "-h" || a == "-?"
-
--- | True for the version flags (@--version@, @-V@,
--- @--numeric-version@), intercepted to print the @agda-deps@ version
--- rather than Agda's.
-isVersionRequest :: String -> Bool
-isVersionRequest a = a == "--version" || a == "-V" || a == "--numeric-version"
-
--- | True if the user asked for Agda's full upstream help.
-wantsAgdaHelp :: String -> Bool
-wantsAgdaHelp = (== "--agda-help")
-
--- | Replace every @--agda-help@ token with @--help@ so Agda's own
--- help printer fires.
-rewriteAgdaHelp :: [String] -> [String]
-rewriteAgdaHelp = map (\a -> if wantsAgdaHelp a then "--help" else a)
 
 -- | Print the @agda-deps@ build identity. Plain @--version@ \/ @-V@
 -- prints the full 'buildFingerprint' (version + git revision + build

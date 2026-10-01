@@ -1,6 +1,5 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE PatternGuards #-}
 -- | Entry point for the @agda-deps@ executable: intercept the @doctor@
 -- subcommand and @--help@ \/ @--version@ \/ @--emit-schema@, pre-process
 -- @argv@ (canonicalise
@@ -8,47 +7,44 @@
 -- hand off to 'runAgdaArgs', 'runAgdaArgsKeepGoing', or 'runSkipAgda'.
 module Main where
 
-import System.Directory
-  ( canonicalizePath, getCurrentDirectory, setCurrentDirectory )
+import System.Directory ( getCurrentDirectory, setCurrentDirectory )
 import System.Environment ( getArgs )
-import System.Exit ( exitSuccess )
-import System.FilePath ( (</>), isAbsolute, takeDirectory )
+import System.Exit ( die, exitSuccess )
+import System.FilePath ( (</>), takeDirectory )
 
 import Control.Monad ( forM_, when )
-import Data.List ( isPrefixOf )
 
 #if MIN_VERSION_Agda(2,9,0)
-import Agda.Compiler.Backend ( Backend_boot(Backend) )
+import Agda.Compiler.Backend ( Backend_boot(Backend), commandLineFlags )
 import Agda.Main ( runAgdaArgs )
 #else
 -- Agda 2.8 has no 'runAgdaArgs'; shim it below over 'runAgda''.
-import Agda.Compiler.Backend ( Backend, Backend_boot(Backend) )
+import Agda.Compiler.Backend ( Backend, Backend_boot(Backend), commandLineFlags )
 import Agda.Main ( runAgda' )
 import System.Environment ( withArgs )
 #endif
 
 import Data.IORef ( writeIORef )
+import Agda.Interaction.Options ( standardOptions, deadStandardOptions )
+import Agda.Utils.GetOpt ( OptDescr(..), ArgDescr(..) )
 
+import AgdaDeps.Arguments
 import AgdaDeps.Backend
   ( backendWithSeed, parseBackendFlags, precomputedGraphRef )
 import AgdaDeps.Config
-  ( applyConfig, defaultConfig, discoverConfigPath, loadConfig
-  , extractConfigArg, inferFormatFromOutput, cfgResolveDeps
+  ( applyConfig, defaultConfig, discoverConfigPathFrom, loadConfig
+  , cfgResolveDeps
   , showDefaultsYaml )
 import AgdaDeps.Doctor  ( isDoctorCommand, runDoctor )
 import AgdaDeps.Driver  ( runAgdaArgsKeepGoing )
 import AgdaDeps.Backend.Wire ( expandedSchemaJson )
-import AgdaDeps.Help
-  ( isHelpRequest, wantsAgdaHelp, rewriteAgdaHelp, printHelp
-  , isVersionRequest, printVersion )
-import AgdaDeps.LibResolve
-  ( wantsResolveDeps, stripResolveDepsFlag, resolveProjectDepsArgs )
+import AgdaDeps.Help ( printHelp, printVersion )
+import AgdaDeps.LibResolve ( resolveProjectDepsDirs )
 import AgdaDeps.Logging ( setQuiet, info )
-import AgdaDeps.Options ( Options(..), defaultOptions )
-import AgdaDeps.Precompute ( precomputeFromArgs )
+import AgdaDeps.Options ( Options(..), defaultOptions, formatSlug )
+import AgdaDeps.Precompute ( precomputeFromRoots )
 import AgdaDeps.SkipAgda ( runSkipAgda )
-import AgdaDeps.Util
-  ( candidateDirs, looksLikeAgdaSource, nearestAgdaLibAncestor )
+import AgdaDeps.Util ( nearestAgdaLibAncestor )
 
 #if !MIN_VERSION_Agda(2,9,0)
 -- | Agda 2.8 shim for 2.9's @runAgdaArgs@: run Agda with an explicit
@@ -64,40 +60,41 @@ main = do
   -- `agda-deps doctor` checks the YAML config and exits. First, so that
   -- `doctor --help` gets the subcommand's own usage.
   when (isDoctorCommand rawArgs) $ runDoctor rawArgs
+  normalized <- either (die . ("agda-deps: " ++)) pure
+                  (normalizeArguments argumentDescriptors rawArgs)
   -- Plain --help / -h / -? short-circuit to backend-only help; forms
   -- like --help=warning pass through to Agda.
-  when (any isHelpRequest rawArgs && not (any wantsAgdaHelp rawArgs)) $
+  when ((hasBareOption "--help" normalized || hasOption "-h" normalized)
+        && not (hasOption "--agda-help" normalized)) $
     printHelp >> exitSuccess
   -- --version / -V / --numeric-version report agda-deps's own version.
-  case filter isVersionRequest rawArgs of
+  case [ n | Flag n _ _ <- normalized,
+             n `elem` ["--version", "--numeric-version"] ] of
     (v:_) -> printVersion (v == "--numeric-version") >> exitSuccess
     []    -> return ()
   -- --emit-schema prints the generated JSON Schema for expanded JSON
   -- output and exits (no Agda run, no input file needed).
-  when ("--emit-schema" `elem` rawArgs) $
+  when (hasOption "--emit-schema" normalized) $
     putStrLn expandedSchemaJson >> exitSuccess
   -- --show-defaults prints a sample .agda-deps.yml (every option with its
   -- default value, commented out) and exits, so the user can seed a config
   -- file: `agda-deps --show-defaults > Project/.agda-deps.yml`.
-  when ("--show-defaults" `elem` rawArgs) $
+  when (hasOption "--show-defaults" normalized) $
     putStr showDefaultsYaml >> exitSuccess
 
-  -- Lift out the optional --config=PATH token so Agda's GetOpt never
-  -- sees it and the YAML loads before argv parsing.
-  let (cliConfigArg, argsNoConfig) = extractConfigArg rawArgs
-
-  let cliResolveDeps    = wantsResolveDeps argsNoConfig
-      argsNoResolveDeps = stripResolveDepsFlag argsNoConfig
-  args' <- canonicalizePathArgs (rewriteAgdaHelp argsNoResolveDeps)
-  mRoot <- if userOptedOutOfLibDiscovery args'
+  invocationDir <- getCurrentDirectory
+  absolute <- canonicalizeArguments invocationDir normalized
+  mRoot <- if any (`hasOption` absolute)
+                ["--no-libraries", "--library", "--library-file"]
              then return Nothing
-             else discoverProjectRoot args'
+             else discoverProjectRoot (sourceRoots absolute)
   mapM_ setCurrentDirectory mRoot
 
   -- Discover + load YAML config (if any) once cwd has settled on the
   -- project root. Config layered onto 'defaultOptions' is the seed
   -- Agda's GetOpt walks argv on top of.
-  mCfgPath <- discoverConfigPath cliConfigArg
+  mCfgPath <- discoverConfigPathFrom invocationDir
+                (lastOptionValue "--config" absolute)
   cfg <- maybe (pure defaultConfig) loadConfig mCfgPath
   let seedOptions = applyConfig cfg defaultOptions
 
@@ -105,10 +102,14 @@ main = do
   -- decision taken before Agda runs reads the answer the backend will get.
   -- The backend itself stays seeded with 'seedOptions': Agda's parse layers
   -- the CLI on top again, and repeatable flags (--exclude) would otherwise
-  -- count twice. A bad flag value is left for the chosen path to report,
-  -- so routing falls back to the config alone.
-  let resolved = either (const seedOptions) fst
-                   (parseBackendFlags seedOptions args')
+  -- count twice. Select only known backend flags: Agda option operands
+  -- must never be reparsed as backend flags or source files.
+  let withFormat = case inferredFormat absolute of
+        Just fmt -> option "--format" (Just (formatSlug fmt)) : absolute
+        Nothing -> absolute
+  resolved <- either (die . ("agda-deps: " ++)) (pure . fst)
+                (parseBackendFlags seedOptions
+                  (renderArguments (selectOptions backendDescriptors withFormat)))
   setQuiet (optQuiet resolved)
   forM_ mRoot $ \root -> info $
     "agda-deps: changing directory to project root " ++ root
@@ -117,101 +118,59 @@ main = do
 
   -- --lenient-imports (CLI or config) is forwarded to Agda as
   -- --allow-unsolved-metas.
-  let args = [ "--allow-unsolved-metas" | optLenientImports resolved ]
-             ++ filter (/= "--lenient-imports") args'
+  let args = [ option "--allow-unsolved-metas" Nothing | optLenientImports resolved ]
+             ++ map forwardHelp
+                  (withoutOptions ["--config", "--resolve-deps", "--lenient-imports"]
+                    withFormat)
+      forwardHelp (Flag "--agda-help" _ _) = option "--help" Nothing
+      forwardHelp arg = arg
 
   -- --resolve-deps (CLI or YAML): replace Agda's library resolver with an
   -- explicit @--no-libraries -i \<dir\> ...@ list from the project's
   -- @.agda-lib@ @depend:@ closure (see "AgdaDeps.LibResolve").
-  let resolveDeps = cliResolveDeps
+  let resolveDeps = hasOption "--resolve-deps" absolute
                  || cfgResolveDeps cfg == Just True
-  resolveArgs <- if resolveDeps
+  resolveDirs <- if resolveDeps
     then do
       resolveRoot <- maybe getCurrentDirectory return mRoot
-      resolveProjectDepsArgs info resolveRoot
+      resolveProjectDepsDirs info (lastOptionValue "--library-file" absolute) resolveRoot
     else return []
-  let args'WithResolve = resolveArgs ++ args
-
-  -- Infer --format from the -o extension when --format wasn't given
-  -- explicitly. Explicit --format in argv wins over inference, which
-  -- wins over the config-file value, which wins over the default.
-  let userGaveFormat = any ("--format" `isFlagPrefix`) args'WithResolve
-      args'' = case (userGaveFormat, inferFormatFromOutput args'WithResolve) of
-        (False, Just fmt) ->
-          ("--format=" ++ fmt) : args'WithResolve
-        _ -> args'WithResolve
+  let resolveArgs = if null resolveDirs then [] else
+        option "--no-libraries" Nothing :
+          map (option "--include-path" . Just) resolveDirs
+      finalArgs = resolveArgs ++ args
+      argv = renderArguments finalArgs
 
   -- Pre-compute the module-level graph from .agda sources so the output
   -- carries every module under the user's -i paths. Written to an IORef
   -- that postCompileAD unions into importEdges.
-  precomputed <- precomputeFromArgs args''
+  precomputed <- precomputeFromRoots (sourceRoots finalArgs)
   writeIORef precomputedGraphRef precomputed
   let runWith = Backend (backendWithSeed seedOptions)
   if optSkipAgda resolved
-    then runSkipAgda seedOptions precomputed args''
+    then runSkipAgda resolved precomputed (firstSource finalArgs)
     else if optKeepGoing resolved
-      then runAgdaArgsKeepGoing [runWith] args''
-      else runAgdaArgs           [runWith] args''
+      then runAgdaArgsKeepGoing [runWith] argv
+      else runAgdaArgs           [runWith] argv
 
--- | Does @arg@ start with @\"flag\"@ in either short (@\"flag=val\"@)
--- or two-token form (just @\"flag\"@)?
-isFlagPrefix :: String -> String -> Bool
-isFlagPrefix flag arg =
-     arg == flag
-  || (flag ++ "=") `isPrefixOf` arg
+-- | Share the real flag arities with every startup decision. The option
+-- actions are discarded: this pass recognises syntax without applying values.
+backendDescriptors :: [OptDescr ()]
+backendDescriptors = map (fmap (const ()))
+  (commandLineFlags (backendWithSeed defaultOptions))
 
--- | True when the user has already passed flags that govern library
--- handling (so our auto-discovery shouldn't second-guess them).
-userOptedOutOfLibDiscovery :: [String] -> Bool
-userOptedOutOfLibDiscovery = any isOptOut
-  where
-    isOptOut a =
-         a == "--no-libraries"
-      || a == "--library"      || "--library="      `isPrefixOf` a
-      || a == "-l"
-      || a == "--library-file" || "--library-file=" `isPrefixOf` a
-
--- | Canonicalize file/dir paths in argv (the @-o@ and @-i@ flag values,
--- plus positional @*.agda@ / @*.lagda*@ source files) to absolute paths.
--- Runs before any cwd change, so relative paths resolve against the
--- original cwd.
-canonicalizePathArgs :: [String] -> IO [String]
-canonicalizePathArgs = go
-  where
-    go [] = return []
-    go (a:rest)
-      -- Two-arg path flags: -o DIR, -i DIR, --out-dir DIR,
-      -- --include-path DIR.
-      | a `elem` pathFlagsTwo, v:rest' <- rest = do
-          v' <- absify v
-          (\xs -> a : v' : xs) <$> go rest'
-      -- One-arg "--flag=VALUE" forms.
-      | Just (flagPrefix, v) <- splitEq a, flagPrefix `elem` pathFlagsEq = do
-          v' <- absify v
-          ((flagPrefix ++ "=" ++ v') :) <$> go rest
-      -- Positional source files.
-      | looksLikeAgdaSource a = do
-          a' <- absify a
-          (a' :) <$> go rest
-      | otherwise = (a :) <$> go rest
-
-    pathFlagsTwo = ["-o", "--out-dir", "-i", "--include-path"]
-    pathFlagsEq  = ["--out-dir", "--include-path"]
-
-    splitEq s = case break (== '=') s of
-      (k, '=':v) -> Just (k, v)
-      _          -> Nothing
-
-    absify :: FilePath -> IO FilePath
-    absify p
-      | isAbsolute p = return p
-      | otherwise    = canonicalizePath p
+argumentDescriptors :: [OptDescr ()]
+argumentDescriptors = backendDescriptors
+  ++ map (fmap (const ())) (standardOptions ++ deadStandardOptions)
+  ++ [ Option ['h'] [] (NoArg ()) ""
+     ]
+  ++ [ Option [] [name] (NoArg ()) ""
+     | name <- ["agda-help", "emit-schema", "show-defaults"] ]
 
 -- | Walk up from the include-path and source-file directories until we
 -- find an ancestor containing an @.agda-lib@. Return that ancestor.
-discoverProjectRoot :: [String] -> IO (Maybe FilePath)
-discoverProjectRoot args = do
-  let candidates = candidateDirs args
+discoverProjectRoot :: [FilePath] -> IO (Maybe FilePath)
+discoverProjectRoot candidates = do
   cwd <- getCurrentDirectory
   if any (sameDir cwd) candidates
     then return Nothing  -- cwd is already a candidate

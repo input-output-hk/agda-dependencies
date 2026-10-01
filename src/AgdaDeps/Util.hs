@@ -6,7 +6,7 @@
 -- modules: with-function detection ('isWithFun'), case-tree leaf access
 -- ('ccDone'), hex colour parsing ('isValidHexColor', 'parseHexColor'),
 -- string splitting ('splitOn'), JSON encoding ('jsString', 'jArray',
--- 'jObj'), argv inspection ('candidateDirs', 'looksLikeAgdaSource') and
+-- 'jObj'), source-file recognition ('looksLikeAgdaSource') and
 -- project discovery ('nearestAgdaLibAncestor', 'firstExistingFile').
 module AgdaDeps.Util
   ( -- * Agda with-function compatibility (2.8 / 2.9)
@@ -30,8 +30,7 @@ module AgdaDeps.Util
   , jStrMap
   , jStrArrMap
 
-    -- * argv inspection (shared by Main + Precompute)
-  , candidateDirs
+    -- * Source-file recognition
   , looksLikeAgdaSource
 
     -- * Project discovery (shared by Main, Config, LibResolve)
@@ -41,13 +40,19 @@ module AgdaDeps.Util
   , underCwd
   ) where
 
+import Control.Exception ( catch, IOException )
 import Data.Char ( isHexDigit )
-import Data.List ( intercalate, isPrefixOf, isSuffixOf, stripPrefix )
+import Data.IORef ( newIORef, readIORef, modifyIORef' )
+import Data.List ( intercalate, isSuffixOf )
+import qualified Data.Map.Strict as M
 import Data.Word ( Word8 )
 import Numeric ( readHex, showHex )
 import System.Directory
-  ( doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory )
-import System.FilePath ( (</>), normalise, takeDirectory, takeExtension )
+  ( canonicalizePath, doesDirectoryExist, doesFileExist, getCurrentDirectory
+  , listDirectory )
+import System.FilePath
+  ( (</>), dropTrailingPathSeparator, equalFilePath, splitDirectories
+  , takeDirectory, takeExtension )
 
 import Agda.TypeChecking.CompiledClause ( CompiledClauses', pattern Done )
 #if MIN_VERSION_Agda(2,9,0)
@@ -181,21 +186,6 @@ jStrMap = jObj . map (fmap jsString)
 jStrArrMap :: [(String, [String])] -> String
 jStrArrMap = jObj . map (fmap jStrArray)
 
--- | Directories worth scanning for project sources, lifted from a
--- canonicalised argv: every @-i@ \/ @--include-path@ value, plus the
--- parent directory of any positional @*.agda@ \/ @*.lagda*@ source
--- file. Used by 'Main.discoverProjectRoot' and "AgdaDeps.Precompute".
-candidateDirs :: [String] -> [FilePath]
-candidateDirs = go
-  where
-    go [] = []
-    go (a:rest)
-      | a == "-i" || a == "--include-path"
-      , v:rest' <- rest = v : go rest'
-      | Just v <- stripPrefix "--include-path=" a = v : go rest
-      | looksLikeAgdaSource a = takeDirectory a : go rest
-      | otherwise = go rest
-
 -- | True for paths that look like an Agda source file by extension.
 -- Used to recognise positional arguments to the executable and to
 -- filter directory listings during the source-scan pre-compute.
@@ -229,9 +219,29 @@ firstExistingFile (p : ps) = do
   e <- doesFileExist p
   if e then pure (Just p) else firstExistingFile ps
 
--- | A predicate for "this path lies under the current working directory"
--- (the project root once 'Main' has settled cwd), by normalised prefix.
-underCwd :: IO (FilePath -> Bool)
+-- | Classify source files by their resolved location relative to the project
+-- root (the cwd once 'Main' has settled it). Compare whole path components:
+-- @project-old@ is not inside @project@. Symlinks pointing out are external;
+-- aliases resolving in are internal. Missing files / resolution errors are
+-- external. Memoise each spelling for this run; callers stay single-threaded.
+underCwd :: IO (FilePath -> IO Bool)
 underCwd = do
-  root <- normalise <$> getCurrentDirectory
-  pure (\p -> root `isPrefixOf` normalise p)
+  root <- canonicalizePath =<< getCurrentDirectory
+  let rootParts = splitDirectories (dropTrailingPathSeparator root)
+      classify p = (do
+        exists <- doesFileExist p
+        if not exists then pure False else do
+          resolved <- canonicalizePath p
+          let parts = splitDirectories resolved
+          pure $ length rootParts <= length parts
+              && and (zipWith equalFilePath rootParts parts))
+        `catch` \(_ :: IOException) -> pure False
+  cache <- newIORef M.empty
+  pure $ \p -> do
+    cached <- M.lookup p <$> readIORef cache
+    case cached of
+      Just inside -> pure inside
+      Nothing -> do
+        inside <- classify p
+        modifyIORef' cache (M.insert p inside)
+        pure inside

@@ -27,7 +27,8 @@ module AgdaDeps.Config
   , ConfigOrigin(..)
   , describeOrigin
   , findConfigPath
-  , discoverConfigPath
+  , findConfigPathFrom
+  , discoverConfigPathFrom
   , loadConfig
 
     -- * Merge
@@ -36,30 +37,29 @@ module AgdaDeps.Config
     -- * Sample config
   , showDefaultsYaml
 
-    -- * argv helpers
-  , extractConfigArg
-  , inferFormatFromOutput
   ) where
 
 import Control.Exception ( try, SomeException, displayException )
 import Data.Aeson ( FromJSON(..), withObject, (.:?), withText )
 import qualified Data.Aeson as A
+import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Aeson.Types as A
 import qualified Data.Text as T
 import qualified Data.Yaml as Y
 
-import Data.List ( stripPrefix )
 import Data.Maybe ( fromMaybe )
 import System.Directory ( doesFileExist, getCurrentDirectory )
 import System.Environment ( lookupEnv )
 import System.Exit ( die )
-import System.FilePath ( (</>), takeExtension )
+import System.FilePath ( (</>) )
 
+import AgdaDeps.Arguments ( absoluteAt )
 import AgdaDeps.Options
   ( Options(..), OutputFormat(..), JsonMode(..)
-  , ColorPalette(..), defaultPalette, defaultOptions
+  , ColorPalette(..), defaultPalette, defaultOptions, applyCliPalette
   , formatSlug, jsonModeSlug
   , allFormats, allJsonModes, parseSlug
+  , validateColor, validateMinTermDepth
   )
 import AgdaDeps.Util ( firstExistingFile, nearestAgdaLibAncestor )
 
@@ -155,10 +155,10 @@ allThemes = [ThemeDefault, ThemeLight, ThemeDark, ThemeColorblind]
 parseTheme :: String -> Either String Theme
 parseTheme = parseSlug "theme" themeSlug allThemes
 
--- | Apply a theme to the colour-palette slots of an 'Options'. The
--- four colours are set; everything else is left alone.
+-- | Apply a theme's base palette, preserving explicit CLI colour choices.
+-- Config loading starts without CLI choices and overlays YAML colours next.
 applyTheme :: Theme -> Options -> Options
-applyTheme t opts = opts { optColors = themePalette t }
+applyTheme t = applyCliPalette (themePalette t)
 
 themePalette :: Theme -> ColorPalette
 themePalette ThemeDefault    = defaultPalette
@@ -198,6 +198,23 @@ instance FromJSON JsonMode where
 instance FromJSON Theme where
   parseJSON = parseEnum "theme" parseTheme
 
+-- | An omitted field keeps the default; a supplied value (including null)
+-- must pass its parser. Keep the key in diagnostics for domain failures too.
+validatedField
+  :: A.Object -> A.Key -> (A.Value -> A.Parser a) -> A.Parser (Maybe a)
+validatedField o key parse =
+  traverse parse (KM.lookup key o) A.<?> A.Key key
+
+parseColor :: A.Value -> A.Parser String
+parseColor = withText "a hex colour of the form #RRGGBB (quote it in YAML)" $
+  either fail pure . validateColor . T.unpack
+
+parseMinTermDepth :: A.Value -> A.Parser Int
+parseMinTermDepth v = do
+  n <- A.prependFailure "Expected a positive integer (1 disables the filter): "
+         (parseJSON v)
+  either fail pure (validateMinTermDepth n)
+
 instance FromJSON Config where
   -- A comment-only (or empty) YAML document decodes to 'Null'. Treat it as
   -- an empty config — all defaults — so a freshly-seeded file from
@@ -210,10 +227,10 @@ instance FromJSON Config where
         cfgOutDir          <- o .:? "out-dir"
         cfgFormat          <- o .:? "format"
         cfgTheme           <- o .:? "theme"
-        cfgColorDefined    <- o .:? "color-defined"
-        cfgColorPostulate  <- o .:? "color-postulate"
-        cfgColorHole       <- o .:? "color-hole"
-        cfgColorFailed     <- o .:? "color-failed"
+        cfgColorDefined    <- validatedField o "color-defined" parseColor
+        cfgColorPostulate  <- validatedField o "color-postulate" parseColor
+        cfgColorHole       <- validatedField o "color-hole" parseColor
+        cfgColorFailed     <- validatedField o "color-failed" parseColor
         cfgLazy            <- o .:? "lazy"
         cfgExcludeModules  <- o .:? "exclude"
         cfgGzip            <- o .:? "gzip"
@@ -228,7 +245,7 @@ instance FromJSON Config where
         cfgLenientImports  <- o .:? "lenient-imports"
         cfgResolveDeps     <- o .:? "resolve-deps"
         cfgWithTermHashes  <- o .:? "with-term-hashes"
-        cfgMinTermDepth    <- o .:? "min-term-depth"
+        cfgMinTermDepth    <- validatedField o "min-term-depth" parseMinTermDepth
         cfgWithSignatures  <- o .:? "with-signatures"
         cfgNormaliseSignatures <- o .:? "normalise-signatures"
         cfgShowImplicit    <- o .:? "signature-implicits"
@@ -444,15 +461,26 @@ describeOrigin (OriginProjectRoot d) =
 --      @*.agda-lib@; look for the same two filenames there.
 --   5. Nothing — no config applied.
 findConfigPath :: Maybe FilePath -> IO (Either String (Maybe (FilePath, ConfigOrigin)))
-findConfigPath (Just p) = do
+findConfigPath mp = do
+  invocationDir <- getCurrentDirectory
+  findConfigPathFrom invocationDir mp
+
+-- | Named paths are relative to the invocation directory even after
+-- project discovery changes cwd. Automatic dotfiles use the settled cwd.
+findConfigPathFrom
+  :: FilePath -> Maybe FilePath
+  -> IO (Either String (Maybe (FilePath, ConfigOrigin)))
+findConfigPathFrom invocationDir (Just path) = do
+  p <- absoluteAt invocationDir path
   exists <- doesFileExist p
   pure $ if exists
     then Right (Just (p, OriginFlag))
     else Left ("agda-deps: --config: file not found: " ++ p)
-findConfigPath Nothing = do
+findConfigPathFrom invocationDir Nothing = do
   mEnv <- lookupEnv "AGDA_DEPS_CONFIG"
   case mEnv of
-    Just p | not (null p) -> do
+    Just path | not (null path) -> do
+      p <- absoluteAt invocationDir path
       exists <- doesFileExist p
       pure $ if exists
         then Right (Just (p, OriginEnv))
@@ -473,8 +501,8 @@ findConfigPath Nothing = do
 
 -- | 'findConfigPath' for the normal run: a named-but-missing file is
 -- fatal, and the provenance is discarded.
-discoverConfigPath :: Maybe FilePath -> IO (Maybe FilePath)
-discoverConfigPath mp = findConfigPath mp >>= \case
+discoverConfigPathFrom :: FilePath -> Maybe FilePath -> IO (Maybe FilePath)
+discoverConfigPathFrom invocationDir mp = findConfigPathFrom invocationDir mp >>= \case
   Left err -> die err
   Right r  -> pure (fmap fst r)
 
@@ -489,43 +517,3 @@ loadConfig path = do
     Right (Left perr) -> die $ "agda-deps: failed to parse config file "
                             ++ path ++ ":\n  " ++ Y.prettyPrintParseException perr
     Right (Right cfg) -> pure cfg
-
--- ---------------------------------------------------------------------------
--- argv helpers
--- ---------------------------------------------------------------------------
-
--- | Strip the @--config=PATH@ or @--config PATH@ token pair out of
--- argv, returning the parsed path and the cleaned argv. If the flag
--- appears more than once the last occurrence wins.
-extractConfigArg :: [String] -> (Maybe FilePath, [String])
-extractConfigArg = go Nothing []
-  where
-    go acc keep [] = (acc, reverse keep)
-    go acc keep (a : rest)
-      | a == "--config" = case rest of
-          (v : rest') -> go (Just v) keep rest'
-          []          -> (acc, reverse keep)  -- malformed; left for GetOpt
-      | Just v <- stripPrefix "--config=" a =
-          go (Just v) keep rest
-      | otherwise = go acc (a : keep) rest
-
--- | Look at @-o@ / @--out-dir=…@ in argv and, if its value has a
--- recognised extension, return the format that should be inferred.
--- Returns 'Nothing' for directories, missing flags, or unrecognised
--- extensions.
-inferFormatFromOutput :: [String] -> Maybe String
-inferFormatFromOutput = pickValue
-  where
-    pickValue [] = Nothing
-    pickValue (a : rest)
-      | a == "-o" || a == "--out-dir" = case rest of
-          (v : _) -> matchExt v
-          []      -> Nothing
-      | Just v <- stripPrefix "-o=" a       = matchExt v
-      | Just v <- stripPrefix "--out-dir=" a = matchExt v
-      | otherwise = pickValue rest
-
-    matchExt :: FilePath -> Maybe String
-    matchExt v = lookup (takeExtension v)
-      [ ('.' : slug, slug) | slug <- map formatSlug allFormats ]
-

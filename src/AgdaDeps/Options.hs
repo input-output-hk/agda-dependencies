@@ -24,11 +24,16 @@ module AgdaDeps.Options
     -- * Colour palette
   , ColorPalette(..)
   , defaultPalette
+  , applyCliPalette
 
     -- * Options
   , Options(..)
   , defaultOptions
   , lazyTreeOutput
+
+    -- * Shared scalar validation
+  , validateColor
+  , validateMinTermDepth
 
     -- * CLI option parsers
   , outdirOpt
@@ -121,7 +126,9 @@ parseSlug what slug vals s = case [ v | v <- vals, slug v == s ] of
 -- 'Enum' enumerate it); the numeric code is 'defStateCode', not
 -- 'fromEnum'.
 data DefState = Defined | Postulate | Hole | Failed
-  deriving (Show, Eq, Enum, Bounded)
+  deriving (Show, Eq, Enum, Bounded, Generic)
+
+instance NFData DefState
 
 -- | Stable numeric code shared by packed output and the fragment cache.
 defStateCode :: DefState -> Word8
@@ -160,11 +167,28 @@ colorFor p Postulate = colorPostulate p
 colorFor p Hole      = colorHole      p
 colorFor p Failed    = colorFailed    p
 
+setColorFor :: DefState -> String -> ColorPalette -> ColorPalette
+setColorFor Defined   s p = p{ colorDefined   = s }
+setColorFor Postulate s p = p{ colorPostulate = s }
+setColorFor Hole      s p = p{ colorHole      = s }
+setColorFor Failed    s p = p{ colorFailed    = s }
+
+-- | Replace the base palette while retaining each explicit CLI colour.
+-- YAML colours do not mark slots, so a CLI theme still overrides them.
+applyCliPalette :: ColorPalette -> Options -> Options
+applyCliPalette palette opts = opts
+  { optColors = foldl retain palette (optCliColorOverrides opts) }
+  where
+    retain p state = setColorFor state (colorFor (optColors opts) state) p
+
 -- | The full set of backend options, populated from CLI flags.
 data Options = Options
   { optOutDir     :: Maybe FilePath
   , optFormat     :: OutputFormat
   , optColors     :: ColorPalette
+  , optCliColorOverrides :: [DefState]
+    -- ^ Parser bookkeeping: slots explicitly set by CLI flags. At most
+    -- four entries; not a YAML option or serialized cache/wire field.
   , optLazy       :: Bool
     -- ^ @--lazy@: split @--format=json@ output into a module-level
     -- @graph.json@ plus per-module @modules\/\<Module\>.json@ detail
@@ -221,6 +245,7 @@ defaultOptions = Options
   { optOutDir          = Nothing
   , optFormat          = FmtDot
   , optColors          = defaultPalette
+  , optCliColorOverrides = []
   , optLazy            = False
   , optExcludeModules  = []
   , optGzip            = False
@@ -342,10 +367,27 @@ showImplicitOpt opts = return opts{ optShowImplicit = True }
 -- Validates that the value is a positive integer.
 minTermDepthOpt :: MonadError String m => String -> Options -> m Options
 minTermDepthOpt s opts = case reads s :: [(Int, String)] of
-  [(n, "")] | n >= 1 -> return opts{ optMinTermDepth = n }
-  _ -> throwError $
-    "Invalid value for --min-term-depth: " ++ show s
-      ++ ". Expected a positive integer (1 disables the filter)."
+  [(n, "")] -> case validateMinTermDepth n of
+    Right depth -> return opts{ optMinTermDepth = depth }
+    Left e -> invalid e
+  _ -> invalid minTermDepthExpected
+  where
+    invalid e = throwError $
+      "Invalid value for --min-term-depth: " ++ show s ++ ". " ++ e
+
+-- | Domain rules shared by CLI parsing, YAML decoding, and doctor.
+validateColor :: String -> Either String String
+validateColor s
+  | isValidHexColor s = Right s
+  | otherwise = Left "Expected a hex colour of the form #RRGGBB."
+
+validateMinTermDepth :: Int -> Either String Int
+validateMinTermDepth n
+  | n >= 1 = Right n
+  | otherwise = Left minTermDepthExpected
+
+minTermDepthExpected :: String
+minTermDepthExpected = "Expected a positive integer (1 disables the filter)."
 
 formatOpt :: MonadError String m => String -> Options -> m Options
 formatOpt s opts = case parseSlug "--format" formatSlug allFormats s of
@@ -357,10 +399,13 @@ formatOpt s opts = case parseSlug "--format" formatSlug allFormats s of
 colorOpt
   :: MonadError String m
   => String                                   -- ^ flag name (for error message)
-  -> (ColorPalette -> String -> ColorPalette) -- ^ palette setter
+  -> DefState                                 -- ^ palette slot
   -> String -> Options -> m Options
-colorOpt flagName setter s opts
-  | isValidHexColor s = return opts{ optColors = setter (optColors opts) s }
-  | otherwise = throwError $
+colorOpt flagName state s opts = case validateColor s of
+  Right color -> return opts
+    { optColors = setColorFor state color (optColors opts)
+    , optCliColorOverrides = state : filter (/= state) (optCliColorOverrides opts)
+    }
+  Left e -> throwError $
       "Invalid value for --" ++ flagName ++ ": " ++ show s
-        ++ ". Expected a hex colour of the form #RRGGBB."
+        ++ ". " ++ e

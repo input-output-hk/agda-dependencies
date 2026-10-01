@@ -7,7 +7,7 @@
 -- module and its import edges even when type-check failures kept some
 -- transitive deps from loading.
 --
--- 'precomputeFromArgs' walks every directory passed via @-i@ /
+-- 'precomputeFromRoots' walks every directory passed via @-i@ /
 -- @--include-path@ (and the parent of each positional source file)
 -- for @.agda@ and @.lagda*@ files, line-parsing each to pick out its
 -- @module …@ declaration and @import …@ / @open import …@
@@ -18,7 +18,7 @@
 module AgdaDeps.Precompute
   ( PrecomputedGraph(..)
   , emptyGraph
-  , precomputeFromArgs
+  , precomputeFromRoots
   , discoverAgdaFiles
   ) where
 
@@ -37,7 +37,7 @@ import System.Directory
 import System.FilePath ( (</>), takeBaseName )
 
 import AgdaDeps.Logging ( info )
-import AgdaDeps.Util ( candidateDirs, looksLikeAgdaSource )
+import AgdaDeps.Util ( looksLikeAgdaSource )
 
 -- | Pre-computed module-level information discovered by scanning
 -- @.agda@ sources.
@@ -61,16 +61,14 @@ data PrecomputedGraph = PrecomputedGraph
 emptyGraph :: PrecomputedGraph
 emptyGraph = PrecomputedGraph [] [] [] []
 
--- | Drive the scan from a canonicalised argv list. Pulls out every
--- @-i@ \/ @--include-path@ directory plus the parent directory of
--- each positional @.agda@ \/ @.lagda*@ source file, walks them
--- recursively, and returns the combined module + import map.
+-- | Scan the include paths and source-file parent directories selected
+-- by the shared argv parser. Return the combined module + import map.
 --
 -- Writes a single info line to stderr summarising the discovery
 -- (file count, module count, edge count).
-precomputeFromArgs :: [String] -> IO PrecomputedGraph
-precomputeFromArgs argv = do
-  let roots = nubOrd (candidateDirs argv)
+precomputeFromRoots :: [FilePath] -> IO PrecomputedGraph
+precomputeFromRoots paths = do
+  let roots = nubOrd paths
   if null roots
     then return emptyGraph
     else do

@@ -38,6 +38,7 @@ executable agda-deps
                        BuildInfo
                        BuildInfoTH
                        AgdaDeps.Util
+                       AgdaDeps.Arguments
                        AgdaDeps.AtomicWrite
                        AgdaDeps.Logging
                        AgdaDeps.Csr
@@ -92,6 +93,7 @@ test-suite hardening
   ghc-options:         -Wall -Wcompat -Wincomplete-record-updates
                        -Wincomplete-uni-patterns -Wredundant-constraints
   other-modules:       AgdaDeps.AtomicWrite
+                       AgdaDeps.Arguments
                        AgdaDeps.Logging
                        AgdaDeps.Layout
                        AgdaDeps.Precompute

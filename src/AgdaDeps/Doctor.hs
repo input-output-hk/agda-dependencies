@@ -47,15 +47,17 @@ import System.FilePath ( takeExtension, takeFileName )
 import System.IO ( hPutStrLn, stderr )
 
 import AgdaDeps.Config
-  ( ConfigOrigin, allThemes, describeOrigin, extractConfigArg
+  ( ConfigOrigin, allThemes, describeOrigin
   , findConfigPath, themeSlug )
+import AgdaDeps.Arguments
+  ( Argument(..), normalizeArguments, hasOption, lastOptionValue
+  , withoutOptions, renderArguments )
+import Agda.Utils.GetOpt ( OptDescr(..), ArgDescr(..) )
 import Agda.Utils.List ( editDistance )
 
-import AgdaDeps.Help ( isHelpRequest )
 import AgdaDeps.Options
   ( Options(..), allFormats, allJsonModes, defaultOptions, formatSlug
-  , jsonModeSlug )
-import AgdaDeps.Util ( isValidHexColor )
+  , jsonModeSlug, validateColor, validateMinTermDepth )
 
 -- ---------------------------------------------------------------------------
 -- Command detection + usage
@@ -119,37 +121,50 @@ about key msg = key ++ ": " ++ msg
 -- | Run the doctor over the config file and exit. Takes the full argv
 -- (leading @doctor@ included).
 runDoctor :: [String] -> IO ()
-runDoctor argv
-  | any isHelpRequest argv = putStr doctorUsage >> exitSuccess
-  | otherwise = do
-      let (mCfgArg, rest) = extractConfigArg argv
-          strict = "--strict" `elem` rest
-          leftovers = filter (`notElem` ["doctor", "--strict"]) rest
-      unless (null leftovers) $ do
-        hPutStrLn stderr $
-          "agda-deps doctor: unexpected argument(s): " ++ unwords leftovers
-        hPutStrLn stderr doctorUsage
-        exitWith (ExitFailure 2)
+runDoctor argv = do
+  args <- case normalizeArguments descriptors (drop 1 argv) of
+    Left e -> do
+      hPutStrLn stderr ("agda-deps doctor: " ++ e)
+      exitWith (ExitFailure 2)
+    Right a -> pure a
+  if hasOption "--help" args
+    then putStr doctorUsage >> exitSuccess
+    else pure ()
+  let mCfgArg = lastOptionValue "--config" args
+      strict = hasOption "--strict" args
+      leftovers = renderArguments
+                    (filter (/= EndOptions) (withoutOptions ["--config", "--strict"] args))
+  unless (null leftovers) $ do
+    hPutStrLn stderr $
+      "agda-deps doctor: unexpected argument(s): " ++ unwords leftovers
+    hPutStrLn stderr doctorUsage
+    exitWith (ExitFailure 2)
 
-      putStrLn "agda-deps doctor"
+  putStrLn "agda-deps doctor"
+  putStrLn ""
+  findConfigPath mCfgArg >>= \case
+    Left e -> do
+      -- A file was named explicitly and is not there: nothing to check.
+      putStrLn ("  " ++ padSev SevError ++ stripTool e)
       putStrLn ""
-      findConfigPath mCfgArg >>= \case
-        Left e -> do
-          -- A file was named explicitly and is not there: nothing to check.
-          putStrLn ("  " ++ padSev SevError ++ stripTool e)
-          putStrLn ""
-          putStrLn (summaryLine False 1 0)
-          exitFailure
-        Right Nothing -> do
-          cwd <- getCurrentDirectory
-          putStrLn ("  config     none found (searched from " ++ cwd ++ ")")
-          putStrLn "  order      --config=PATH, $AGDA_DEPS_CONFIG, ./.agda-deps.yml"
-          putStrLn "             (or .yaml), then the same names beside the nearest"
-          putStrLn "             ancestor *.agda-lib"
-          putStrLn ""
-          putStrLn "Summary: no config file; every option is at its default."
-          exitSuccess
-        Right (Just (path, origin)) -> checkFile strict path origin
+      putStrLn (summaryLine False 1 0)
+      exitFailure
+    Right Nothing -> do
+      cwd <- getCurrentDirectory
+      putStrLn ("  config     none found (searched from " ++ cwd ++ ")")
+      putStrLn "  order      --config=PATH, $AGDA_DEPS_CONFIG, ./.agda-deps.yml"
+      putStrLn "             (or .yaml), then the same names beside the nearest"
+      putStrLn "             ancestor *.agda-lib"
+      putStrLn ""
+      putStrLn "Summary: no config file; every option is at its default."
+      exitSuccess
+    Right (Just (path, origin)) -> checkFile strict path origin
+  where
+    descriptors =
+      [ Option [] ["config"] (ReqArg (const ()) "PATH") ""
+      , Option [] ["strict"] (NoArg ()) ""
+      , Option ['h', '?'] ["help"] (NoArg ()) ""
+      ]
 
 -- | Check one config file and exit with the appropriate status.
 checkFile :: Bool -> FilePath -> ConfigOrigin -> IO ()
@@ -245,6 +260,11 @@ oneLine = unwords . words
 -- a complaint when the value is out of range.
 type Domain a = a -> Maybe (Severity, String)
 
+validationDomain :: Show a => (a -> Either String a) -> Domain a
+validationDomain validate value = case validate value of
+  Right _ -> Nothing
+  Left e -> Just (SevError, show value ++ ". " ++ e)
+
 -- | What a key's value may be, and the domain check on top of the type.
 data FieldTy
   = TyBool
@@ -282,7 +302,7 @@ knownFields =
   , field "lenient-imports"      TyBool
   , field "resolve-deps"         TyBool
   , field "with-term-hashes"     TyBool
-  , field "min-term-depth"       (TyInt positive)
+  , field "min-term-depth"       (TyInt (validationDomain validateMinTermDepth))
   , field "with-signatures"      TyBool
   , field "normalise-signatures" TyBool
   , field "signature-implicits"  TyBool
@@ -296,10 +316,6 @@ knownFields =
       | ".agda" `isSuffixOf` s || "/" `isInfixOf` s = Just
           (SevWarning, show s ++ " looks like a file path; a module-name"
                              ++ " prefix (e.g. Data.List) is expected")
-      | otherwise = Nothing
-    positive n
-      | n < 1     = Just (SevError, show n ++ " is below the minimum of 1"
-                                           ++ " (1 disables the filter)")
       | otherwise = Nothing
 
 knownKeys :: [String]
@@ -336,7 +352,7 @@ unknownKey key = err
 -- | Type- and domain-check one key's value.
 checkValue :: String -> FieldTy -> A.Value -> [Finding]
 checkValue key _ A.Null =
-  [ err (about key "value is null, so the key is ignored")
+  [ err (about key "value is null")
         (Just (if isColorKey key
                  then "quote the colour — an unquoted #RRGGBB is a YAML"
                       ++ " comment, e.g. " ++ key ++ ": \"#4caf50\""
@@ -349,7 +365,7 @@ checkValue key ty v = case ty of
   TyStr dom -> case v of
     A.String t -> domain key (dom (T.unpack t))
     _ -> [wrongType key "a string" v Nothing]
-  TyColor -> checkValue key (TyStr hexColor) v
+  TyColor -> checkValue key (TyStr (validationDomain validateColor)) v
   TyInt dom -> case v of
     A.Number _ -> case A.fromJSON v :: A.Result Int of
       A.Success n -> domain key (dom n)
@@ -379,10 +395,6 @@ checkValue key ty v = case ty of
   where
     isString = \case A.String _ -> True; _ -> False
     domain k = maybe [] (\(sev, m) -> [Finding sev (about k m) Nothing])
-    hexColor s
-      | isValidHexColor s = Nothing
-      | otherwise = Just
-          (SevError, show s ++ " is not a colour of the form \"#RRGGBB\"")
 
 wrongType :: String -> String -> A.Value -> Maybe String -> Finding
 wrongType key expected v hint = err

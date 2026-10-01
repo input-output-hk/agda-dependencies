@@ -527,10 +527,7 @@ validateExpanded eg = concat
   , ck (null duplicateModuleFileKeys)
        ("duplicate moduleFiles keys, e.g. "
         ++ show (take 3 duplicateModuleFileKeys))
-    -- Module-only --skip-agda currently has a known --no-externals metadata
-    -- bug (BUGS.md). Enforce the subset on definition graphs now without
-    -- turning that already-documented mode into a runtime crash.
-  , ck (nDefs == 0 || null moduleFileDanglers)
+  , ck (null moduleFileDanglers)
        ("moduleFiles keys absent from modules, e.g. "
         ++ show (take 3 moduleFileDanglers))
   , ck (null metadataModuleDanglers)

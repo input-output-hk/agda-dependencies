@@ -8,10 +8,12 @@
 -- @Skip@ped module's @compileDef@ never runs, so those slices must be
 -- cached or its helper edges are lost.
 --
--- Cache key: @(fragment format version, content-option fingerprint,
+-- Cache key: @(fragment format version, content-option/include-path fingerprint,
 -- iFullHash, nodeKeyVersion)@. 'iFullHash' folds in transitive
 -- imported-interface hashes, so a fragment is invalidated exactly when a
--- change can alter this module's elaborated defs.
+-- change can alter this module's elaborated defs. 'preCompileAD' also folds
+-- in Agda's effective include paths: another library version with identical
+-- source bytes can have the same interface hash but different QName locations.
 --
 -- Written only from a fresh type-check: a warm interface load exposes a
 -- dead-code-pruned signature and loses edges, so caching the fresh

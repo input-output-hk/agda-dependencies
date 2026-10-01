@@ -18,46 +18,33 @@ module AgdaDeps.SkipAgda
   ( runSkipAgda
   ) where
 
-import Data.List ( find )
+import Control.Monad ( filterM )
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.Text.Lazy as TL
 
-import System.Exit ( exitFailure )
-import System.IO ( hPutStrLn, stderr )
-
 import AgdaDeps.Backend
-  ( checkOutputFlags, noSerialiseCtx, parseBackendFlags, writeOutputs )
+  ( checkOutputFlags, noSerialiseCtx, writeOutputs )
 import AgdaDeps.Logging ( info )
 import AgdaDeps.Backend.GraphJson ( GraphInput(..), emptyGraphInput )
 import AgdaDeps.Options
   ( Options(..), lazyTreeOutput, isExcludedModule )
 import AgdaDeps.Precompute ( PrecomputedGraph(..) )
-import AgdaDeps.Util       ( looksLikeAgdaSource, underCwd )
+import AgdaDeps.Util       ( underCwd )
 
--- | Entry point. Parses backend options out of argv (Agda-side flags
--- are tolerated and ignored), identifies the entry source file from
--- the positional arguments, and writes the output files through
+-- | Entry point. Uses the options and positional entry source resolved
+-- by the shared startup parser, and writes the output files through
 -- 'AgdaDeps.Backend.writeOutputs', the full pipeline's writer.
 --
--- @seed@ is the YAML-config-seeded 'Options' assembled in 'Main'; CLI
--- flags in @argv@ layer on top of it, preserving the
--- defaults → config → CLI merge order.
-runSkipAgda :: Options -> PrecomputedGraph -> [String] -> IO ()
-runSkipAgda seed precomputed argv = do
-  (opts, positionals) <- case parseBackendFlags seed argv of
-    Left err -> do
-      hPutStrLn stderr $ "agda-deps: --skip-agda: " ++ err
-      exitFailure
-    Right v -> return v
-
+-- The 'Options' assembled in 'Main' preserve defaults → config → CLI.
+runSkipAgda :: Options -> PrecomputedGraph -> Maybe FilePath -> IO ()
+runSkipAgda opts precomputed entrySource = do
   -- Options resolved, no work done. This path never reaches
   -- 'preCompileAD', so it runs the shared check itself; a local copy
   -- would be free to accept a combination the Agda path rejects.
   checkOutputFlags opts
 
-  let entrySource  = find looksLikeAgdaSource positionals
-      excludes     = optExcludeModules opts
+  let excludes     = optExcludeModules opts
       keep m       = not (isExcludedModule excludes m)
 
       mods         = filter keep (precomputedModules precomputed)
@@ -75,12 +62,16 @@ runSkipAgda seed precomputed argv = do
       entryModule = entrySource >>= (`M.lookup` fileToModule)
 
   isUnderRoot <- underCwd
+  outsideModuleFiles <- filterM (fmap not . isUnderRoot . snd) modFilePairs
+  sourceFiles <- if optNoExternals opts
+    then filterM isUnderRoot (precomputedSourceFiles precomputed)
+    else pure (precomputedSourceFiles precomputed)
   let -- External classification, best-effort without Agda:
-      --   (1) modules whose binding-site file lives outside cwd, and
+      --   (1) modules whose resolved binding-site file lives outside cwd, and
       --   (2) modules that appear only as import targets, with no
       --       source file under the '-i' paths.
       externalsFromFiles = S.fromList
-        [ m | (m, p) <- modFilePairs, not (isUnderRoot p) ]
+        (map fst outsideModuleFiles)
 
       importOnlyMods = S.fromList
         [ m | (s, t) <- imports, m <- [s, t], not (S.member m modSet) ]
@@ -99,14 +90,17 @@ runSkipAgda seed precomputed argv = do
             )
         | otherwise = (mods, imports, externals0)
 
+      allModules = S.fromList mods'
+      -- File metadata must follow the same external filter as the graph.
+      -- Keep the source scan's in-root files even when no module header
+      -- could be parsed: sourceFiles is also a filesystem inventory.
+      moduleFileMap' = M.filterWithKey (\m _ -> S.member m allModules) moduleFileMap
   info $
     "agda-deps: --skip-agda: " ++ show (length mods')
     ++ " module(s), " ++ show (length imports') ++ " import edge(s); "
     ++ show (S.size externals) ++ " external."
 
-  emit opts moduleFileMap entryModule externals imports'
-       (precomputedSourceFiles precomputed)
-       (S.fromList mods')
+  emit opts moduleFileMap' entryModule externals imports' sourceFiles allModules
 
 -- | Build the module-only graph and write it through the full pipeline's
 -- writer, with the cache disabled: nothing is type-checked here, so there

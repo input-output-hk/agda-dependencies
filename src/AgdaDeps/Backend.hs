@@ -22,7 +22,7 @@ module AgdaDeps.Backend
   ) where
 
 import Prelude hiding ( foldl' )
-import Control.Monad ( foldM, when, unless, forM, forM_ )
+import Control.Monad ( filterM, foldM, when, unless, forM, forM_ )
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Control.DeepSeq ( force )
 
@@ -46,7 +46,7 @@ import Paths_agda_deps ( version )
 import Data.List ( foldl', sort, sortOn )
 
 import qualified System.Directory
-import System.Directory ( createDirectoryIfMissing, getCurrentDirectory )
+import System.Directory ( canonicalizePath, createDirectoryIfMissing, getCurrentDirectory )
 import System.Exit ( exitFailure )
 import System.FilePath ( (</>) )
 import System.IO ( hPutStrLn, stderr )
@@ -83,6 +83,7 @@ import Agda.TypeChecking.Monad.Base
 -- (module has no export list) — no CPP for the file-OPTIONS scan.
 import Agda.Interaction.Library.Base ( pragmaStrings )
 import Agda.TypeChecking.Monad.Imports ( getVisitedModules )
+import Agda.TypeChecking.Monad.Options ( getIncludeDirs )
 import Agda.TypeChecking.Monad.State ( getSignature )
 import Agda.Compiler.Common ( curIF )
 import Agda.Utils.Lens ( (^.) )
@@ -121,7 +122,7 @@ import AgdaDeps.AtomicWrite
 import BuildInfo ( buildFingerprint )
 import AgdaDeps.Layout ( Position, computePositions )
 import AgdaDeps.Options
-  ( Options(..), OutputFormat(..)
+  ( Options(..), OutputFormat(..), DefState(..)
   , ColorPalette(..), defaultOptions, defaultPalette, formatSlug, lazyTreeOutput
   , outdirOpt, formatOpt
   , colorOpt, lazyOpt, excludeOpt
@@ -156,8 +157,8 @@ import AgdaDeps.Backend.GraphJson
 newtype ModuleEnv = ModuleEnv
   { envSideChannelsBefore :: SideChannels }
 
--- | @--theme=NAME@ parser. Sets the four 'optColor*' slots; individual
--- @--color-*@ flags appearing later in argv override their slot.
+-- | @--theme=NAME@ parser. Replace the base palette while preserving CLI
+-- @--color-*@ choices, regardless of where they appear in argv.
 themeOpt :: MonadError String m => String -> Options -> m Options
 themeOpt s opts = case parseTheme s of
   Right th -> return (applyTheme th opts)
@@ -233,16 +234,16 @@ backendWithSeed seed = Backend'
       , Option []    ["theme"]   (ReqArg themeOpt "THEME")
         "DOT colours: default|light|dark|colorblind"
       , Option []    ["color-defined"]
-          (ReqArg (colorOpt "color-defined"   (\p s -> p{ colorDefined   = s })) "#RRGGBB")
+          (ReqArg (colorOpt "color-defined"   Defined) "#RRGGBB")
         ("Colour of definitions (default " ++ colorDefined defaultPalette ++ ")")
       , Option []    ["color-postulate"]
-          (ReqArg (colorOpt "color-postulate" (\p s -> p{ colorPostulate = s })) "#RRGGBB")
+          (ReqArg (colorOpt "color-postulate" Postulate) "#RRGGBB")
         ("Colour of postulates (default " ++ colorPostulate defaultPalette ++ ")")
       , Option []    ["color-hole"]
-          (ReqArg (colorOpt "color-hole"      (\p s -> p{ colorHole      = s })) "#RRGGBB")
+          (ReqArg (colorOpt "color-hole"      Hole) "#RRGGBB")
         ("Colour of holes (default " ++ colorHole defaultPalette ++ ")")
       , Option []    ["color-failed"]
-          (ReqArg (colorOpt "color-failed"    (\p s -> p{ colorFailed    = s })) "#RRGGBB")
+          (ReqArg (colorOpt "color-failed"    Failed) "#RRGGBB")
         ("Colour of failed modules (default " ++ colorFailed defaultPalette ++ ")")
       ]
   , backendInteractTop    = Nothing
@@ -257,10 +258,10 @@ backendWithSeed seed = Backend'
   , mayEraseType          = \ _ -> return True
   }
 
--- | Parse the backend's own flags out of argv, layered on top of @seed@
--- (the config-seeded 'Options'), and return them with the positional
--- arguments. Uses 'getOpt'' so Agda's flags (@-i@, @--include-path@, …)
--- pass through as unrecognised and are ignored. Folding the CLI actions
+-- | Parse the backend flags selected by the shared argv normaliser,
+-- layered on top of @seed@ (the config-seeded 'Options'). Do not pass
+-- raw argv here: unknown Agda flags' operands would be reparsed.
+-- Folding the CLI actions
 -- over @seed@ gives the defaults → config → CLI precedence — the same
 -- answer Agda's own parse hands the backend, available before Agda runs.
 parseBackendFlags :: Options -> [String] -> Either String (Options, [String])
@@ -276,8 +277,8 @@ parseBackendFlags seed argv =
 -- then report every flag combination that does not compose.
 --
 -- This is the earliest the backend sees a fully-resolved 'Options':
--- Agda's own @GetOpt@ walks argv on top of the seed, so 'Main' has only
--- the seed and the raw argv. Agda has already type-checked by the time
+-- Agda's own @GetOpt@ walks argv on top of the seed, while 'Main' uses
+-- the same flags for early routing. Agda has already type-checked by the time
 -- this hook runs — but the per-definition walk, the layout pass and
 -- graph assembly have not, so failing here still saves the bulk of the
 -- backend's work rather than reporting at the very end.
@@ -288,7 +289,17 @@ preCompileAD opts = do
   resetSideChannels
   liftIO $ writeIORef recompiledRef False
   -- Compute the run's fragment fingerprint once (constant across modules).
-  liftIO $ writeIORef optsFingerprintRef (optionsFingerprint opts)
+  -- Interface hashes can stay equal when another library version supplies
+  -- byte-identical sources. Fragments also cache QName source locations,
+  -- including references into imports, so refresh them when lookup paths
+  -- change. The domain marker invalidates fingerprints from earlier builds.
+  includeDirs <- getIncludeDirs
+  let fingerprint = combineEpochs
+        [ optionsFingerprint opts
+        , hashEpoch "fragment-include-paths-v1"
+        , hashEpoch (show includeDirs)
+        ]
+  liftIO $ writeIORef optsFingerprintRef fingerprint
   when (optIncremental opts && optKeepGoing opts) $
     info ("agda-deps: --incremental is disabled under --keep-going "
        ++ "(fragments are only cached from fully-checked runs).")
@@ -335,24 +346,32 @@ cacheDirFor opts = case optCacheDir opts of
 -- set, output-affecting options, build identity and node-key convention,
 -- plus the run inputs no fragment carries: the source scan (every module
 -- and file under @-i@, imported or not), the project root (external
--- classification) and the entry module. With \"nothing recompiled\"
--- ('recompiledRef'), an unchanged token means the output is
+-- classification), the resolved containment of scanned / referenced files
+-- (symlinks can change without a body edit) and the entry module. With
+-- \"nothing recompiled\" ('recompiledRef'), an unchanged token means the output is
 -- byte-identical.
 outputToken
-  :: Options -> PrecomputedGraph -> FilePath -> Maybe String -> [String]
+  :: Options -> PrecomputedGraph -> FilePath -> [(FilePath, Bool)]
+  -> Maybe String -> [String]
   -> Epoch
-outputToken opts precomputed root entry modules = combineEpochs
+outputToken opts precomputed root containment entry modules = combineEpochs
   [ hashEpoch buildFingerprint
   , fromIntegral nodeKeyVersion
   , hashEpoch (unwords optStrings)
   , hashEpoch (unwords modules)
   , hashEpoch (show precomputed)
   , hashEpoch (show (root, entry))
+  -- Invalidate outputs made with the former textual-prefix classification.
+  , hashEpoch "project-containment-physical-v1"
+  -- Source-only scanned modules now survive in every JSON shape.
+  , hashEpoch "scanned-module-inventory-v1"
+  , hashEpoch (show containment)
   ]
   where
     -- One 'show' per output-affecting option (a single tuple exceeds
     -- GHC's 'Show' limit). Add every new output-affecting option here, or
-    -- the no-op skip serves stale output.
+    -- the no-op skip serves stale output. The resolved palette covers CLI
+    -- colour choices; parser-only optCliColorOverrides does not belong here.
     optStrings =
       [ show (optFormat opts), show (optJsonMode opts), show (optLazy opts)
       , show (optColors opts), show (optGzip opts)
@@ -507,9 +526,20 @@ postCompileAD opts _ defMap = do
         | otherwise           = map prettyShow (M.keys defMap)
       cacheDir  = cacheDirFor opts
   precomputed <- liftIO $ readIORef precomputedGraphRef
-  root        <- liftIO getCurrentDirectory
+  root        <- liftIO $ canonicalizePath =<< getCurrentDirectory
+  isUnderRoot <- liftIO underCwd
+  -- Resolve only distinct file paths, without building the graph. Include
+  -- cached references as well as the scan so library aliases affect the
+  -- no-op token too. The predicate's per-run cache is reused during emission.
+  let sourcePaths = precomputedSourceFiles precomputed
+                 ++ map snd (precomputedModuleFiles precomputed)
+                 ++ referencedPaths
+  containment <- if incrementalCacheEnabled opts
+    then liftIO $ forM (S.toAscList (S.fromList sourcePaths)) $ \p ->
+      (,) p <$> isUnderRoot p
+    else pure []
   mMain       <- liftIO $ readIORef mainModuleRef
-  let monoToken = outputToken opts precomputed root
+  let monoToken = outputToken opts precomputed root containment
                     (fmap (prettyShow . fst) mMain) liveModules
   anyRecompiled <- liftIO $ readIORef recompiledRef
   let monoSkippable = incrementalCacheEnabled opts && not anyRecompiled
@@ -519,7 +549,12 @@ postCompileAD opts _ defMap = do
       info $ "agda-deps: --incremental: " ++ slot ++ " unchanged; skipped re-emit."
       gcStaleFragments opts cacheDir liveModules
     Nothing ->
-      emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable
+      emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippable
+  where
+    referencedPaths =
+      [ p | results <- M.elems defMap, Just d <- results
+          , qn <- _name d : S.toList (_deps d)
+          , Just (p, _) <- [nrSrcLoc qn] ]
 
 -- | Whether the up-front no-op skip fires, and for which output file
 -- ('Nothing' = fall through). Only the monolithic @deps.json@: the
@@ -546,10 +581,11 @@ hoistedMonoSkip opts cacheDir monoToken monoSkippable =
 -- already computed are threaded in rather than recomputed.
 emitFullGraph
   :: Options
+  -> (FilePath -> IO Bool)
   -> Map TopLevelModuleName [Maybe ADDef]
   -> [String] -> FilePath -> Epoch -> Bool
   -> TCM ()
-emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
+emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippable = do
   let rawDefs0 :: [ADDef]
       rawDefs0 = concatMap catMaybes (M.elems defMap)
 
@@ -633,6 +669,7 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
 
   externals0 <- liftIO $
     classifyExternalModules
+      isUnderRoot
       allQNames0
       (precomputedModuleFiles precomputed)
       allEndpointModules
@@ -645,10 +682,10 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
         | optNoExternals opts = Just $! buildExternalsSummary externals0 defs0
         | otherwise           = Nothing
 
-      (defs, externalModules) =
+      defs =
         if optNoExternals opts
-          then (dropExternalDefs externals0 defs0, S.empty)
-          else (defs0, externals0)
+          then dropExternalDefs externals0 defs0
+          else defs0
 
       -- Only @--no-externals@ filters 'defs', so only it needs a fresh
       -- QName pass; the default path's 'defs' == 'defs0', so reuse
@@ -666,6 +703,12 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
       -- composes @--exclude@ with @--no-externals@.
       keep m =  not (isExcludedModule excludes m)
              && not (optNoExternals opts && S.member m externals0)
+
+      -- The source scan also finds isolated, unimported modules. Retain
+      -- them without inventing definitions, using the same filter as
+      -- imports and metadata (and the module-only skip path).
+      scannedModules = S.fromList (filter keep (precomputedModules precomputed))
+      externalModules = S.filter keep externals0
 
       -- A failed external is still external: under @--no-externals@ it is
       -- dropped with the rest (and listed in @externals_summary@).
@@ -746,20 +789,29 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
       importEdges =
         S.toList (S.fromList (visitedImportEdges ++ precomputedImportEdges))
 
-      -- Module -> source-file path, from the binding site of any QName
-      -- homed there. Feeds v2 graph.json moduleToFile / fileToModules.
-      -- 'keep' so excluded modules surface no path.
+      -- Binding sites take precedence over scanned paths when Agda has
+      -- selected a source among duplicate module names. The scan supplies
+      -- paths for modules without QNames, including unimported sources
+      -- and re-export-only hubs. Excluded modules surface no path.
       moduleFileMap :: Map String FilePath
-      moduleFileMap = M.fromListWith (\_old new -> new)
+      moduleFileMap = M.union bindingFiles scannedFiles
+      bindingFiles = M.fromListWith (\_old new -> new)
         [ (modName, p)
         | qn <- allQNames
         , let modName = moduleKey qn
         , keep modName
         , Just (p, _line) <- [nrSrcLoc qn]
         ]
+      scannedFiles = M.fromList
+        [ (m, p) | (m, p) <- precomputedModuleFiles precomputed, keep m ]
 
-      sourceFiles :: [FilePath]
-      sourceFiles = precomputedSourceFiles precomputed
+  -- Files without a module header still belong to the scan inventory.
+  -- As in skip mode, --exclude filters modules; --no-externals also
+  -- filters source paths by physical project containment.
+  sourceFiles <- liftIO $
+    if optNoExternals opts
+      then filterM isUnderRoot (precomputedSourceFiles precomputed)
+      else pure (precomputedSourceFiles precomputed)
 
   info $
     "agda-deps: postCompile: " ++ show (length defs) ++ " definitions, "
@@ -803,7 +855,7 @@ emitFullGraph opts defMap liveModules cacheDir monoToken monoSkippable = do
         , giFailedModules    = failedModules
         , giPositions        = positions
         , giLazy             = lazyTreeOutput opts
-        , giExtraModules     = S.empty
+        , giExtraModules     = scannedModules
         , giReExports        = reExportRows
         , giExternalsSummary = externalsSummary
         , giPackedAnalytical = optPackedAnalytical opts
@@ -1018,33 +1070,31 @@ writeJsonMaybeGz gz path content = do
 --
 -- Returns the complement: every seen module with no in-root path.
 classifyExternalModules
-  :: [NodeRef]                -- ^ every node referenced in the graph
+  :: (FilePath -> IO Bool)    -- ^ memoised physical-containment predicate
+  -> [NodeRef]                -- ^ every node referenced in the graph
   -> [(String, FilePath)]     -- ^ module → file map from precompute
   -> [String]                 -- ^ all module names seen as endpoints
   -> IO (Set String)
-classifyExternalModules qns precomputedMF endpointModules = do
-  isUnderRoot <- underCwd
-  let -- Per-module flag: at least one signal lands at an in-root source
-      -- path. 'isUnderRoot' (normalise + isPrefixOf) is memoised per
-      -- distinct FilePath in @pc@, so it runs once per file, not once per
-      -- node (10k-100k nodes vs a few hundred files). Strict inserts keep
-      -- the @||@ accumulator a WHNF Bool.
-      seedFromQNames :: Map String Bool
-      seedFromQNames = snd (foldl' bumpQ (M.empty, M.empty) qns)
-        where
-          bumpQ (!pc, !acc) qn =
-            let !modName = moduleKey qn
-            in case nrSrcLoc qn of
-                 Nothing     -> (pc, MS.insertWith (||) modName False acc)
-                 Just (p, _) -> case M.lookup p pc of
-                   Just ir -> (pc, MS.insertWith (||) modName ir acc)
-                   Nothing -> let !ir = isUnderRoot p
-                              in ( M.insert p ir pc
-                                 , MS.insertWith (||) modName ir acc )
-      seedFromPrecompute :: Map String Bool
-      seedFromPrecompute = foldl' bumpP seedFromQNames precomputedMF
-        where bumpP !acc (m, p) = MS.insertWith (||) m (isUnderRoot p) acc
-      -- Endpoints with no other evidence default to "not in-root".
+classifyExternalModules isUnderRoot qns precomputedMF endpointModules = do
+  -- Per-module flag: at least one signal resolves to an in-root source.
+  -- Keep a pure path lookup for repeated QNames; the shared predicate also
+  -- memoises across this pass, the source scan and the no-op token.
+  let bumpQ (!pc, !acc) qn =
+        let !modName = moduleKey qn
+            add ir = MS.insertWith (||) modName ir acc
+        in case nrSrcLoc qn of
+             Nothing -> pure (pc, add False)
+             Just (p, _) -> case M.lookup p pc of
+               Just ir -> pure (pc, add ir)
+               Nothing -> do
+                 ir <- isUnderRoot p
+                 pure (M.insert p ir pc, add ir)
+      bumpP !acc (m, p) = do
+        ir <- isUnderRoot p
+        pure $! MS.insertWith (||) m ir acc
+  seedFromQNames <- snd <$> foldM bumpQ (M.empty, M.empty) qns
+  seedFromPrecompute <- foldM bumpP seedFromQNames precomputedMF
+  let -- Endpoints with no other evidence default to "not in-root".
       inRootByModule :: Map String Bool
       inRootByModule = foldl' bumpE seedFromPrecompute endpointModules
         where bumpE !acc m = MS.insertWith (||) m False acc

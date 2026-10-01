@@ -7,6 +7,147 @@ work see [TODO.md](TODO.md); for deferred / refused ideas see
 
 ---
 
+## 2026-10-01 — `agda-deps` — retain isolated scanned modules in JSON
+
+Normal JSON output now includes every scanned module that survives
+`--exclude` and `--no-externals`, even if it has no definitions or import
+edges. Previously an unimported module in an external include directory
+could abort expanded output and silently disappear from packed and lazy
+output. Source-only modules contribute no invented definitions, and lazy
+output uses the existing empty placeholders.
+
+Scanned paths fill gaps in module-to-file mappings while Agda binding paths
+retain precedence. External inventories follow the module filters, and
+`--no-externals` also filters scanned source paths by physical containment,
+matching skip mode. Older incremental outputs refresh while keeping their
+definition fragments. The wire and cache payload formats are unchanged.
+
+CI regressions cover all JSON shapes, normal and skip modes, combined
+filters, source-only modules, and incremental additions/removals under
+Agda 2.8 and 2.9. Cold corpus output differs only by three added source-file
+mappings; definition data is unchanged.
+
+## 2026-10-01 — `agda-deps` — CLI colour overrides survive later themes
+
+Explicit CLI `--color-*` choices now override `--theme` regardless of their
+argument order. `--color-defined='#123456' --theme=dark` and the reversed
+order both render definitions in `#123456`. Previously a later theme erased
+the explicit colour. Repeated themes select the last theme; repeated colours
+select the last value for each state.
+
+Defaults → YAML → CLI precedence is preserved: a CLI theme replaces the YAML
+palette, including YAML colour overrides, and explicit CLI colours then take
+precedence. Startup and Agda parsing share the same rule, including skip and
+keep-going modes. Invalid values still fail even if a later flag replaces them.
+
+Regressions under Agda 2.8 and 2.9 cover all 120 placements of a theme and
+four colour flags, actual DOT colours for all four states, repeated flags,
+YAML interactions, and incremental reuse. Palette changes refresh output;
+equivalent flag orders retain cached JSON. The wire and cache formats and
+preset colour values are unchanged.
+
+## 2026-10-01 — `agda-deps` — validate YAML colours and minimum term depth
+
+Normal YAML loading now rejects malformed `color-*` values and
+`min-term-depth` below 1, using the same domain rules as the CLI and doctor.
+Supplied colours must be `#RRGGBB` strings; supplied depths must be positive
+integers. Null values for these keys, including unquoted colours that YAML
+reads as comments, are errors. Omitted keys, empty documents, and the seeded
+`--show-defaults` sample still use defaults.
+
+Failures identify the config path, key, and expected value before source
+scanning, type-checking, caching, or output in both normal and skip mode.
+Validation also applies when a CLI flag would override the invalid setting.
+Previously bad colours could render as black and non-positive depths could
+silently disable filtering. Valid configurations keep their existing output;
+the wire and cache formats are unchanged.
+
+CI regressions under Agda 2.8 and 2.9 cover invalid values and types, quoted
+mixed-case colours, depth boundaries, CLI parity and overrides, seeded configs,
+doctor's multiple-error reporting, and preservation of existing caches and
+outputs when validation fails.
+
+## 2026-10-01 — `agda-deps` — complete library resolution or normal fallback
+
+`--resolve-deps` now uses Agda's project/library parser, registry discovery,
+and dependency resolver. Unversioned names prefer an exact unversioned entry,
+otherwise the highest numeric installed version; versioned names require that
+version. Distinct entries with the same matching name remain ambiguous.
+Version-specific registries and `--library-file` follow Agda's own precedence.
+
+The complete transitive closure must resolve before any include paths are
+injected. A missing or ambiguous dependency, malformed project/library file,
+or registry read failure warns and leaves Agda's arguments unchanged. The old
+resolver skipped unresolved dependencies and could disable Agda's normal
+library handling with only the successfully resolved siblings. Successful
+pins now retain the project's own include paths, which `--no-libraries` also
+disables implicitly.
+
+Incremental fragment fingerprints now include Agda's effective include paths.
+Switching library versions with byte-identical source files refreshes cached
+QName source locations, even when interface hashes are unchanged. Existing
+fragments are invalidated; the payload and JSON formats are unchanged, and
+the main module still requires a cold check to seed its fragment.
+
+Temporary-project regressions cover both normal and skip modes under Agda
+2.8 and 2.9: version matching, the `prettyprint` / `standard-library` pattern,
+atomic fallback, ambiguity, parsing, cycles, registry selection, and
+incremental version changes.
+
+## 2026-10-01 — `agda-deps` — shared startup argument parsing
+
+Startup now recognises argv using the backend and Agda option tables before
+making discovery, config, routing, or source-scan decisions. Attached short
+forms (`-oDIR`, `-iDIR`, `-lLIB`) follow the same rules as separated values.
+Option operands remain values even when they resemble flags or source files;
+`--` preserves the positional boundary and unknown Agda flags are forwarded.
+Normal and skip mode share resolved options and the identified entry source.
+
+Relative CLI paths, including `--config`, and relative `$AGDA_DEPS_CONFIG`
+paths resolve from the invocation directory before changing to the project
+root. Automatic dotfile discovery still uses the settled working directory.
+A missing `--config` operand now reports GetOpt's syntax error in normal,
+skip, and doctor modes. Output-format inference uses the last CLI output
+destination; explicit `--format` retains precedence over inference and YAML.
+
+GetOpt parity tests and temporary-project regressions run under both supported
+Agda versions. JSON fields and cache formats are unchanged.
+
+## 2026-10-01 — `agda-deps` — project containment follows resolved paths
+
+External classification now compares complete directory components of the
+canonical project root and source paths. A sibling such as `/work/project-old`
+is external to `/work/project`. Symlinks pointing outside the root are external;
+aliases resolving inside are internal. Missing or unresolvable source files
+are external. Both normal and skip mode share this policy; emitted source path
+strings keep their existing spelling.
+
+Each distinct source path is resolved once per run. The incremental output token
+invalidates previous outputs once and tracks containment of scanned and cached
+reference paths, so retargeting an unchanged source across the boundary forces
+emission while preserving fragment reuse. The wire and fragment formats stay
+unchanged.
+
+Regressions cover sibling prefixes, relative paths, `..`, file and directory
+symlinks, broken links, normal/skip classification, external filtering, and
+incremental symlink retargeting on both supported Agda versions.
+
+---
+
+## 2026-10-01 — `agda-deps` — skip mode filters external file metadata
+
+`--skip-agda --no-externals` now filters the module-to-source map and source
+file inventory along with modules and import edges. Expanded `moduleFiles`
+contains only retained modules, and expanded `sourceFiles` and packed `files`
+omit external source paths, including files without a parseable module header.
+In-project files without a module header remain in the inventory.
+
+CI checks expanded, packed and lazy output against a temporary project and
+external library, including the default run that retains externals. The wire
+shape and cache formats are unchanged; skip mode does not use the caches.
+
+---
+
 ## 2026-10-01 — `agda-deps` — lazy packed analytical fields preserved
 
 `--json-mode=packed --lazy --packed-analytical` now writes each module's local

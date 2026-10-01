@@ -2,9 +2,9 @@
 """Drift guard for the config key set.
 
 ``FromJSON Config`` (``src/AgdaDeps/Config.hs``) is the source of truth: the
-``.:? "<key>"`` keys it reads are the config keys the backend honours. Two
-hand-maintained mirrors must list exactly the same set, and this fails CI when
-either drifts:
+``.:? "<key>"`` and ``validatedField o "<key>"`` reads are the config keys
+the backend honours. Two hand-maintained mirrors must list exactly the same
+set, and this fails CI when either drifts:
 
 * the commented sample ``.agda-deps.yml`` emitted by ``--show-defaults``
   (``Config.showDefaultsYaml``) — so a flag added to the parser but not to the
@@ -33,8 +33,10 @@ def emitted_keys(sample_text):
 
 
 def fromjson_keys(config_src):
-    # Every config field is parsed as  o .:? "<kebab-key>".
-    return set(re.findall(r'\.:\?\s*"([a-z-]+)"', config_src))
+    # Optional reads and reads with domain validation both declare their key.
+    return set(re.findall(
+        r'(?:\.:\?|validatedField\s+o)\s*"([a-z-]+)"', config_src,
+    ))
 
 
 def doctor_keys(doctor_src):

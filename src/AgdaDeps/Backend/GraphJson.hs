@@ -173,9 +173,9 @@ data GraphInput = GraphInput
   , giLazy            :: Bool
   , giExtraModules    :: Set String
     -- ^ Module names to include in the graph even if they have no
-    -- defs, no import edges, and aren't the entry. Used by
-    -- 'AgdaDeps.SkipAgda' to surface modules discovered by the
-    -- source-file scan that happen to be orphans in the import graph.
+    -- defs, no import edges, and aren't the entry. Both compilation and
+    -- 'AgdaDeps.SkipAgda' use this to retain source-scan modules that
+    -- happen to be orphans in the import graph.
   , giReExports       :: ![(String, String, [String], [(String, String)])]
     -- ^ Per (host-module, source-module) the fully-qualified names the
     -- host module re-exports via @open … public@, plus the renamed

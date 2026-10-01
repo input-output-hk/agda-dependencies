@@ -7,6 +7,15 @@ Recipes: [Examples.md](Examples.md). Planned work: [TODO.md](TODO.md).
 
 ## Deferred — useful, no current push
 
+- **Full node identity in graph algorithms.** `NodeRef` equality uses
+  `(hash, key)` and survives a hash collision, but node collection,
+  ignored-edge BFS, DOT identifiers, and layout identifiers use the 64-bit
+  hash alone. A collision could merge nodes or lose reachability. Deferred
+  because collisions are extremely unlikely and this is not a current
+  priority. A future change would use full `NodeRef` identities for collection
+  and traversal, assign unique internal IDs for DOT and layout, and preserve
+  existing ordering and wire identities. Verify with forced-collision tests.
+
 - **Bump the `cabal.project.agda29` Agda pin to Hackage** once Agda 2.9
   releases (it currently points at an upstream `agda/agda` commit). The default
   `cabal.project` already tracks Hackage, pinned at Agda 2.8.0.
