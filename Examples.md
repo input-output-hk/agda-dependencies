@@ -190,3 +190,17 @@ agda-deps doctor --strict                    # as a CI gate: warnings fail too
 
 Keys mirror the CLI flags in kebab-case; CLI flags still win. `doctor` runs no
 Agda and needs no input module.
+
+## Type abstraction reports
+
+```sh
+agda-deps --format=json --json-mode=expanded --with-type-terms \
+  --with-signatures -i test-hardening/ -o /tmp/type-graph \
+  test-hardening/type-terms.agda
+agda-optimization type-patterns /tmp/type-graph/deps.json --min-owners=2
+```
+
+Use a larger graph for repeated predicates. `--with-signatures` is optional;
+structural matching uses `typeTerms`. The consuming report separates
+inherited contexts, retrieves existing type bodies and checks known module
+cycles. A proposed abstraction still needs source review and Agda validation.

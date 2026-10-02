@@ -379,3 +379,32 @@ contain vulnerabilities. Do not use this code in production systems, or any
 environment where security is critical, without conducting your own thorough
 security assessment. By using this code, you acknowledge and accept all
 associated risks, and our company disclaims any liability for damages or losses.
+
+## Structural type evidence
+
+`--with-type-terms` adds the optional `typeTerms` object to expanded v2 JSON.
+It contains one hash-consed expression DAG, definition signatures and
+inherited section-parameter counts, plus type-valued clause bodies and their
+binder contexts. Node keys and graph schema versions remain 3 and 2;
+`typeTerms.v` is independently versioned at 1. Binder names, hiding, relevance,
+quantity and polarity metadata are retained. Unsupported forms stay explicit.
+
+```sh
+agda-deps --format=json --json-mode=expanded --with-type-terms \
+  -i src/ -o out/ src/Main.agda
+agda-optimization type-patterns out/deps.json --scope=MyLibrary
+```
+
+This opt-in evidence is consumed by `agda-graph-explorer`. It is independent
+of signature rendering and existing subterm hashes. The producer removes
+module-copy wrappers, preserves named user definitions, and exports
+source locations at declaration granularity. It does not infer per-node types
+or source ranges, perform conversion checking, or propose source changes.
+Only definitions retained in the graph receive evidence; `--no-externals`
+therefore also limits external type-body retrieval.
+
+The first version requires `--format=json --json-mode=expanded` and rejects
+`--incremental` and `--skip-agda`: the structural capture is not stored in the
+incremental fragment cache. YAML uses `with-type-terms: true`; doctor and
+`--show-defaults` document the same constraints. Default output omits the
+field completely. See the generated expanded schema for the wire shape.

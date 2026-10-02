@@ -30,7 +30,7 @@ import Agda.Utils.GetOpt ( OptDescr(..), ArgDescr(..) )
 
 import AgdaDeps.Arguments
 import AgdaDeps.Backend
-  ( backendWithSeed, parseBackendFlags, precomputedGraphRef )
+  ( backendWithSeed, parseBackendFlags, precomputedGraphRef, checkOutputFlags )
 import AgdaDeps.Config
   ( applyConfig, defaultConfig, discoverConfigPathFrom, loadConfig
   , cfgResolveDeps
@@ -111,6 +111,7 @@ main = do
                 (parseBackendFlags seedOptions
                   (renderArguments (selectOptions backendDescriptors withFormat)))
   setQuiet (optQuiet resolved)
+  checkOutputFlags resolved
   forM_ mRoot $ \root -> info $
     "agda-deps: changing directory to project root " ++ root
     ++ " so Agda picks up its .agda-lib"

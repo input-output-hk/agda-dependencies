@@ -175,6 +175,7 @@ import Agda.Compiler.Backend ( IsMain )
 
 import AgdaDeps.Options ( Options(..), DefState(..), isExcludedModule )
 import AgdaDeps.MatchConstant ( matchConstantAnalysable, matchConstantOf )
+import AgdaDeps.TypeExport (captureTypeDefinition)
 import AgdaDeps.TermCanon ( subtermHashes )
 import AgdaDeps.NodeKey
   ( bindingLineOfQ, moduleKeyOfQ, nodeKeyFromPretty, nodeKeyOfQ )
@@ -1470,6 +1471,7 @@ computeDefAD opts def@Defn{..} = do
   -- Convert to 'NodeRef' at the producer boundary: everything downstream
   -- is identity-as-data.
   nameRef  <- mkRef defName
+  when (optWithTypeTerms opts) $ captureTypeDefinition (nrFile nameRef) def
   -- Tag each edge as its 'NodeRef' is built (one pass), reading the
   -- precomputed 'nrWhereHelper' bit instead of a per-edge 'prettyShow'.
   -- 'S.toAscList' fixes the key order, so 'M.fromList''s last-wins on

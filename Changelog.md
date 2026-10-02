@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-02 — optional structural type terms
+
+- `--with-type-terms` / YAML `with-type-terms` adds a shared type-expression
+  DAG, signatures, section-parameter counts and type-valued clause bodies
+  with binder contexts to expanded JSON. `typeTerms.v` is 1; graph v2 and
+  node keys v3 are unchanged. Default output omits the field.
+- Capture preserves modalities and qualified identities, marks unsupported
+  forms, and removes module-copy wrappers without broadly unfolding user
+  definitions. It retains only final graph definitions and exports no
+  fabricated expression source ranges or per-node types.
+- Requires a non-incremental Agda run with expanded JSON; incompatible
+  output/cache/skip flags fail before checking. CLI, config, doctor, defaults,
+  generated schema and output fingerprints are updated together. Adds wire,
+  Unicode and warm-interface checks on Agda 2.8 and the pinned 2.9 build.
+
+
 History of notable changes to `agda-deps`. Reverse-chronological. For
 runnable recipes see [Examples.md](Examples.md); for forward-looking
 work see [TODO.md](TODO.md); for deferred / refused ideas see

@@ -129,6 +129,9 @@ jobs:
         python3 schema/check_schema.py ci-out/generated.schema.json \
           schema/graph-v2-expanded.schema.json
 
+    - name: Structural type evidence contract
+      run: python3 schema/type_terms_check.py "$(cabal list-bin agda-deps)"
+
     - name: --show-defaults and doctor document every config key
       # Both hand-maintained mirrors of the config key set must list exactly
       # the keys the FromJSON Config instance reads: the commented sample
@@ -573,6 +576,9 @@ jobs:
       run: |
         python3 schema/palette_precedence_check.py \
           "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
+
+    - name: Structural type evidence contract (2.9)
+      run: python3 schema/type_terms_check.py "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
 
     - name: Expanded output matches the golden (2.8/2.9 parity)
       # Must run cold (dead-private recovery) — see the 2.8 job's note.

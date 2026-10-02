@@ -162,7 +162,9 @@ externalsSummaryJson = encodeObject externalsSummaryFields . toWireExternals
 -- | All the inputs the schema emitter needs. Per-def state is read off
 -- 'giDefs' ('_state'); a node with no 'ADDef' of its own is 'Defined'.
 data GraphInput = GraphInput
-  { giDefs            :: [ADDef]
+  { giTypeTerms       :: !(Maybe String)
+    -- ^ UTF-8 decoded JSON from TypeExport; expanded output only.
+  , giDefs            :: [ADDef]
   , giImportEdges     :: [(String, String)]
   , giSourceFiles     :: [FilePath]
   , giModuleFile      :: M.Map String FilePath
@@ -217,7 +219,8 @@ data GraphInput = GraphInput
 -- (see "AgdaDeps.SkipAgda").
 emptyGraphInput :: GraphInput
 emptyGraphInput = GraphInput
-  { giDefs                   = []
+  { giTypeTerms              = Nothing
+  , giDefs                   = []
   , giImportEdges            = []
   , giSourceFiles            = []
   , giModuleFile             = M.empty
@@ -1525,7 +1528,8 @@ toExpandedGraph GraphInput{..} =
   -- Assemble the typed wire value; encoding + structural validation are
   -- handled by 'buildExpandedJson' via AgdaDeps.Backend.Wire.
   in ExpandedGraph
-       { egNodeKeyVersion = nodeKeyVersion
+       { egTypeTerms      = giTypeTerms
+       , egNodeKeyVersion = nodeKeyVersion
        , egProducer       = buildFingerprint
        , egModules        = modules
        , egEntryModule    = giEntryModule

@@ -53,6 +53,7 @@ module AgdaDeps.Options
   , lenientImportsOpt, resolveDepsOpt
   , withTermHashesOpt
   , minTermDepthOpt
+  , withTypeTermsOpt
   , withSignaturesOpt
   , normaliseSignaturesOpt
   , showImplicitOpt
@@ -210,6 +211,8 @@ data Options = Options
     -- ^ Minimum AST depth at which a subterm's hash gets emitted.
     -- Default 3; @1@ disables filtering. Ignored when
     -- 'optWithTermHashes' is 'False'.
+  , optWithTypeTerms :: Bool
+    -- ^ Opt-in structural type DAG, expanded JSON only; no incremental cache.
   , optWithSignatures :: Bool
     -- ^ Emit each definition's reified type (@defType@ via @prettyTCM@)
     -- as the per-def @"type"@ field in expanded JSON. Not normalised,
@@ -257,6 +260,7 @@ defaultOptions = Options
   , optLenientImports  = False
   , optWithTermHashes  = False
   , optMinTermDepth    = 3
+  , optWithTypeTerms   = False
   , optWithSignatures  = False
   , optNormaliseSignatures = False
   , optShowImplicit    = False
@@ -409,3 +413,6 @@ colorOpt flagName state s opts = case validateColor s of
   Left e -> throwError $
       "Invalid value for --" ++ flagName ++ ": " ++ show s
         ++ ". " ++ e
+
+withTypeTermsOpt :: Monad m => Options -> m Options
+withTypeTermsOpt opts = return opts { optWithTypeTerms = True }

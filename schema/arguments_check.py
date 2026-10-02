@@ -59,6 +59,23 @@ def check(binary, root):
     for skip in (False, True):
         mode = ["--skip-agda"] if skip else []
         prefix = "skip" if skip else "normal"
+        # Early output validation must respect the resolved CLI/config quiet
+        # flag even when --lazy produces an informational notice.
+        quiet_config = caller / "quiet.yml"
+        quiet_config.write_text(good_config + "quiet: true\n")
+        for suffix, flags, quiet in (
+            ("notice", [], False),
+            ("cli", ["--quiet"], True),
+            ("config", ["--config", str(quiet_config)], True),
+        ):
+            output = f"out/{prefix}-lazy-{suffix}"
+            result = run([*mode, *flags, "--lazy", "--json-mode=expanded",
+                          "-i../project/src", "-o" + output, entry])
+            if quiet:
+                assert result.stderr == "", (suffix, result.stderr)
+            else:
+                assert "--lazy only splits packed JSON" in result.stderr, result.stderr
+            graph(output)
         # Named configs bind to the invocation directory before auto-discovery
         # changes cwd. A valid but different config at the new cwd is a trap.
         for suffix, flags, env in (

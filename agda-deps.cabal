@@ -19,7 +19,6 @@ extra-doc-files:     README.md
                      Changelog.md
                      TODO.md
                      Backlog.md
-                     BUGS.md
 
 source-repository head
   type:     git
@@ -62,6 +61,7 @@ executable agda-deps
                        AgdaDeps.Precompute
                        AgdaDeps.SkipAgda
                        AgdaDeps.TermCanon
+                       AgdaDeps.TypeExport
   autogen-modules:     Paths_agda_deps
   build-depends:       base >= 4.10 && < 4.23,
                        Agda >= 2.8 && < 3,
@@ -101,10 +101,12 @@ test-suite hardening
                        AgdaDeps.Options
                        AgdaDeps.NodeKey
                        AgdaDeps.TermCanon
+                       AgdaDeps.TypeExport
                        AgdaDeps.MatchConstant
                        AgdaDeps.Deps
                        AgdaDeps.Backend.Wire
   build-depends:       base >= 4.10 && < 4.23,
+                       aeson >= 2.0 && < 3,
                        Agda >= 2.8 && < 3,
                        deepseq >= 1.4.4 && < 1.6,
                        text >= 1.2 && < 2.2,

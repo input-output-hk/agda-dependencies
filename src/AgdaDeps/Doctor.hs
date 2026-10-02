@@ -303,6 +303,7 @@ knownFields =
   , field "resolve-deps"         TyBool
   , field "with-term-hashes"     TyBool
   , field "min-term-depth"       (TyInt (validationDomain validateMinTermDepth))
+  , field "with-type-terms"      TyBool
   , field "with-signatures"      TyBool
   , field "normalise-signatures" TyBool
   , field "signature-implicits"  TyBool
@@ -457,6 +458,9 @@ checkCoherence o = catMaybes
       warn (about "packed-analytical"
                   "only adds arrays to packed JSON, and json-mode is expanded")
            (Just "expanded already carries them; drop packed-analytical")
+  , whenTrue "with-type-terms" (fmtNot "json" || not (jsonModeIs "expanded") || isTrue "incremental" || isTrue "skip-agda") $
+      err (about "with-type-terms" "requires expanded JSON and a non-incremental Agda run")
+           (Just "set format: json and json-mode: expanded; drop incremental and skip-agda")
   , jsonOnly "with-signatures" "reified type signatures"
   , jsonOnly "with-term-hashes" "subterm hashes"
   , whenTrue "normalise-signatures" (not (isTrue "with-signatures")) $

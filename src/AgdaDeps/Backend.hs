@@ -121,8 +121,9 @@ import AgdaDeps.AtomicWrite
   ( atomicWriteString, atomicWriteLazyText, atomicWriteLazyBytes )
 import BuildInfo ( buildFingerprint )
 import AgdaDeps.Layout ( Position, computePositions )
+import AgdaDeps.TypeExport (initializeTypeExport, readTypeTerms)
 import AgdaDeps.Options
-  ( Options(..), OutputFormat(..), DefState(..)
+  ( JsonMode(..), Options(..), OutputFormat(..), DefState(..)
   , ColorPalette(..), defaultOptions, defaultPalette, formatSlug, lazyTreeOutput
   , outdirOpt, formatOpt
   , colorOpt, lazyOpt, excludeOpt
@@ -130,7 +131,7 @@ import AgdaDeps.Options
   , incrementalOpt, cacheDirOpt, packedAnalyticalOpt
   , quietOpt, noExternalsOpt, jsonModeOpt, lenientImportsOpt
   , resolveDepsOpt
-  , withTermHashesOpt, minTermDepthOpt, withSignaturesOpt
+  , withTermHashesOpt, minTermDepthOpt, withSignaturesOpt, withTypeTermsOpt
   , normaliseSignaturesOpt, showImplicitOpt
   , isExcludedModule
   )
@@ -220,6 +221,8 @@ backendWithSeed seed = Backend'
         "Hide progress messages"
       , Option []    ["packed-analytical"] (NoArg packedAnalyticalOpt)
         "Add per-definition fields to packed JSON"
+      , Option []    ["with-type-terms"] (NoArg withTypeTermsOpt)
+        "Emit structural type DAG (expanded JSON, non-incremental only)"
       , Option []    ["with-signatures"] (NoArg withSignaturesOpt)
         "Emit each definition's type"
       , Option []    ["normalise-signatures"] (NoArg normaliseSignaturesOpt)
@@ -286,6 +289,8 @@ parseBackendFlags seed argv =
 -- bypasses this hook entirely and does resolve options up front.
 preCompileAD :: Options -> TCM Options
 preCompileAD opts = do
+  liftIO $ checkOutputFlags opts
+  liftIO $ initializeTypeExport (optWithTypeTerms opts)
   resetSideChannels
   liftIO $ writeIORef recompiledRef False
   -- Compute the run's fragment fingerprint once (constant across modules).
@@ -303,7 +308,6 @@ preCompileAD opts = do
   when (optIncremental opts && optKeepGoing opts) $
     info ("agda-deps: --incremental is disabled under --keep-going "
        ++ "(fragments are only cached from fully-checked runs).")
-  liftIO $ checkOutputFlags opts
   return opts
 
 -- | Report the output-flag combinations that do not compose: exit on the
@@ -315,6 +319,9 @@ preCompileAD opts = do
 -- reported.
 checkOutputFlags :: Options -> IO ()
 checkOutputFlags opts = do
+  when (optWithTypeTerms opts && (optFormat opts /= FmtJson || optJsonMode opts /= JsonExpanded || optIncremental opts || optSkipAgda opts)) $ do
+    hPutStrLn stderr "agda-deps: --with-type-terms requires --format=json --json-mode=expanded and no --incremental/--skip-agda."
+    exitFailure
   when (optLazy opts && optFormat opts == FmtJson
         && optOutDir opts == Nothing) $ do
     hPutStrLn stderr "agda-deps: --lazy requires -o/--out-dir to be set."
@@ -376,6 +383,7 @@ outputToken opts precomputed root containment entry modules = combineEpochs
       [ show (optFormat opts), show (optJsonMode opts), show (optLazy opts)
       , show (optColors opts), show (optGzip opts)
       , show (optNoExternals opts), show (optExcludeModules opts)
+      , show (optWithTypeTerms opts)
       , show (optWithSignatures opts)
       , show (optNormaliseSignatures opts), show (optShowImplicit opts)
       , show (optWithTermHashes opts), show (optMinTermDepth opts)
@@ -845,8 +853,11 @@ emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippab
 
   positions <- jsonOnly M.empty $ liftIO $ computeQNamePositions allQNames defs
 
+  typeTerms <- liftIO $ readTypeTerms [nrKey (_name d) | d <- defs]
+
   let gi = GraphInput
-        { giDefs             = defs
+        { giTypeTerms        = typeTerms
+        , giDefs             = defs
         , giImportEdges      = importEdges
         , giSourceFiles      = sourceFiles
         , giModuleFile       = moduleFileMap

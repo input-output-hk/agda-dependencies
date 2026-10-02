@@ -116,6 +116,7 @@
       "additionalProperties": { "$ref": "#/$defs/unsolvedModule" },
       "description": "Optional (--allow-unsolved-metas / --lenient-imports). Per top-level module, the source lines of SILENT unsolved metavariables (missing record fields, failed instance search, unsolved `_` — what plain `agda` reports as UnsolvedMetaVariables) and of unsolved constraints. Honest interaction `?` holes are NOT listed — they surface only as per-def state `H`. Only modules with at least one entry appear; omitted entirely when none does. Under these flags such modules 'succeeded' with un-produced evidence, so an empty `failedModules` alone must not be read as 'everything compiles'."
     },
+    "typeTerms": { "$ref": "#/$defs/typeTerms" },
     "definitionSubtermHashes": {
       "type": "array",
       "items": {
@@ -138,6 +139,154 @@
     }
   },
   "$defs": {
+    "typeTerms": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "v",
+        "nodes",
+        "definitions"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/typeNode"
+          }
+        },
+        "definitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/typeDefinition"
+          }
+        }
+      }
+    },
+    "typeNode": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "tag",
+        "name",
+        "info",
+        "binds",
+        "children"
+      ],
+      "properties": {
+        "tag": {
+          "type": "string",
+          "enum": [
+            "var",
+            "def",
+            "con",
+            "lit",
+            "app",
+            "pi",
+            "lam",
+            "type",
+            "binder",
+            "proj",
+            "irrelevant",
+            "unsupported",
+            "level-plus",
+            "sort",
+            "sort-inf",
+            "sort-constant",
+            "level"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "info": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "binds": {
+          "type": "boolean"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "typeBody": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "root",
+        "context"
+      ],
+      "properties": {
+        "root": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "context": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "typeDefinition": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "name",
+        "module",
+        "file",
+        "line",
+        "signature",
+        "sectionParameters",
+        "bodies"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "module": {
+          "type": "string"
+        },
+        "file": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "signature": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sectionParameters": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bodies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/typeBody"
+          }
+        }
+      }
+    },
     "edge": {
       "type": "array",
       "items": { "type": "string" },

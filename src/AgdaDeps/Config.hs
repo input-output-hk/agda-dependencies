@@ -96,6 +96,7 @@ data Config = Config
     -- ^ Mirror of @--with-term-hashes@.
   , cfgMinTermDepth    :: Maybe Int
     -- ^ Mirror of @--min-term-depth=N@.
+  , cfgWithTypeTerms   :: Maybe Bool
   , cfgWithSignatures  :: Maybe Bool
     -- ^ Mirror of @--with-signatures@: emit rendered type signatures.
   , cfgNormaliseSignatures :: Maybe Bool
@@ -129,6 +130,7 @@ defaultConfig = Config
   , cfgResolveDeps     = Nothing
   , cfgWithTermHashes  = Nothing
   , cfgMinTermDepth    = Nothing
+  , cfgWithTypeTerms   = Nothing
   , cfgWithSignatures  = Nothing
   , cfgNormaliseSignatures = Nothing
   , cfgShowImplicit    = Nothing
@@ -246,6 +248,7 @@ instance FromJSON Config where
         cfgResolveDeps     <- o .:? "resolve-deps"
         cfgWithTermHashes  <- o .:? "with-term-hashes"
         cfgMinTermDepth    <- validatedField o "min-term-depth" parseMinTermDepth
+        cfgWithTypeTerms   <- o .:? "with-type-terms"
         cfgWithSignatures  <- o .:? "with-signatures"
         cfgNormaliseSignatures <- o .:? "normalise-signatures"
         cfgShowImplicit    <- o .:? "signature-implicits"
@@ -289,6 +292,7 @@ applyConfig c opts0 =
       , optLenientImports  = fromMaybe (optLenientImports opts1) (cfgLenientImports c)
       , optWithTermHashes  = fromMaybe (optWithTermHashes opts1) (cfgWithTermHashes c)
       , optMinTermDepth    = fromMaybe (optMinTermDepth   opts1) (cfgMinTermDepth   c)
+      , optWithTypeTerms   = fromMaybe (optWithTypeTerms opts1) (cfgWithTypeTerms c)
       , optWithSignatures  = fromMaybe (optWithSignatures opts1) (cfgWithSignatures c)
       , optNormaliseSignatures = fromMaybe (optNormaliseSignatures opts1) (cfgNormaliseSignatures c)
       , optShowImplicit    = fromMaybe (optShowImplicit   opts1) (cfgShowImplicit   c)
@@ -361,6 +365,8 @@ showDefaultsYaml = unlines $
   , "# --- Type signatures (expanded JSON) ---------------------------------------"
   , ""
   , "# Emit each definition's reified type as the per-def \"type\" field."
+  , "# Structural type DAG; requires format: json, json-mode: expanded, no incremental/skip-agda."
+  , "#with-type-terms: " ++ yBool (optWithTypeTerms defaultOptions)
   , "#with-signatures: " ++ yBool (optWithSignatures defaultOptions)
   , ""
   , "# Normalise type signatures before rendering. Needs with-signatures."
