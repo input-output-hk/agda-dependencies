@@ -396,7 +396,8 @@ showDefaultsYaml = unlines $
   , ""
   , "# --- Type-checking pipeline ------------------------------------------------"
   , ""
-  , "# Continue past type-check errors; a failing module is tagged F."
+  , "# Independently check every discovered project source, continuing past errors."
+  , "# Successful files contribute definitions; failing modules are tagged F."
   , "#keep-going: " ++ yBool (optKeepGoing defaultOptions)
   , ""
   , "# Skip Agda entirely; build a module-level graph from a source scan."

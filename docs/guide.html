@@ -19,7 +19,7 @@
 <main><div class="layout">
 <aside class="toc"><div class="toc-inner">
 <div class="toc-title">On this page</div>
-<nav><a class="lvl2" href="#prerequisites">Prerequisites</a><a class="lvl2" href="#build">Build</a><a class="lvl2" href="#quick-start">Quick start</a><a class="lvl2" href="#backend-flags">Backend flags</a><a class="lvl2" href="#yaml-config">YAML config</a><a class="lvl3" href="#checking-a-config-agda-deps-doctor">Checking a config: agda-deps doctor</a><a class="lvl2" href="#large-projects-lazy-output">Large projects: lazy output</a><a class="lvl2" href="#consuming-the-json-output">Consuming the JSON output</a><a class="lvl3" href="#expanded-top-level-fields">Expanded top-level fields</a><a class="lvl2" href="#what-gets-filtered-out">What gets filtered out</a><a class="lvl2" href="#ai-disclaimer">AI disclaimer</a><a class="lvl2" href="#legal-disclaimer">Legal Disclaimer</a></nav>
+<nav><a class="lvl2" href="#prerequisites">Prerequisites</a><a class="lvl2" href="#build">Build</a><a class="lvl2" href="#quick-start">Quick start</a><a class="lvl2" href="#backend-flags">Backend flags</a><a class="lvl2" href="#yaml-config">YAML config</a><a class="lvl3" href="#checking-a-config-agda-deps-doctor">Checking a config: agda-deps doctor</a><a class="lvl2" href="#large-projects-lazy-output">Large projects: lazy output</a><a class="lvl2" href="#consuming-the-json-output">Consuming the JSON output</a><a class="lvl3" href="#expanded-top-level-fields">Expanded top-level fields</a><a class="lvl2" href="#what-gets-filtered-out">What gets filtered out</a><a class="lvl2" href="#ai-disclaimer">AI disclaimer</a><a class="lvl2" href="#legal-disclaimer">Legal Disclaimer</a><a class="lvl2" href="#structural-type-evidence">Structural type evidence</a></nav>
 </div></aside>
 <div class="prose"><h1 id="agda-deps-an-agda-dependency-graph-generator">agda-deps: an Agda dependency graph generator</h1>
 <p><code>agda-deps</code> explores Agda projects and emits dependency graphs relating
@@ -131,9 +131,20 @@ and exits, see <a href="#checking-a-config-agda-deps-doctor">Checking a config</
   colours override the CLI theme whether they appear before or after it;
   the last colour for each state wins. A CLI theme replaces the YAML palette,
   including YAML colour overrides.</li>
-<li><code>--keep-going</code> — don't abort on a type-check error: tag the failing module
-  <code>failed</code> and emit whatever loaded, with def-level data for every module that
-  elaborated.</li>
+<li><code>--keep-going</code> — independently check every discovered source inside the
+  physical project root, then emit one graph from the successful modules and
+  their loaded imports. An error in one file does not prevent checking later
+  or unimported files. The command-line entry
+  is checked first. External include directories supply dependencies but are
+  not swept independently; <code>--exclude</code> skips matching scanned candidates.
+  A file blocked by a broken import also appears in <code>failedModules</code>; no
+  definitions are invented for failed files. An accepted hole-bearing file
+  contributes <code>H</code> definitions. Use file-local
+  <code>{-# OPTIONS --allow-unsolved-metas #-}</code> pragmas to tolerate holes alongside
+  safe dependencies. This mode preserves Agda's checking rules and disables
+  <code>--incremental</code>. Source discovery is still limited to the supplied <code>-i</code>
+  roots and the entry file's directory. Run from the project root when there
+  is no <code>.agda-lib</code> for automatic root discovery.</li>
 <li><code>--skip-agda</code> — don't invoke Agda; emit a module-level graph from a source
   scan (<code>module</code> / <code>import</code> lines). No definition graph, so
   only module-level views have anything to draw. With <code>--no-externals</code>,
@@ -433,7 +444,30 @@ only. It has not been subjected to a formal security review or audit and may
 contain vulnerabilities. Do not use this code in production systems, or any
 environment where security is critical, without conducting your own thorough
 security assessment. By using this code, you acknowledge and accept all
-associated risks, and our company disclaims any liability for damages or losses.</p></div>
+associated risks, and our company disclaims any liability for damages or losses.</p>
+<h2 id="structural-type-evidence">Structural type evidence</h2>
+<p><code>--with-type-terms</code> adds the optional <code>typeTerms</code> object to expanded v2 JSON.
+It contains one hash-consed expression DAG, definition signatures and
+inherited section-parameter counts, plus type-valued clause bodies and their
+binder contexts. Node keys and graph schema versions remain 3 and 2;
+<code>typeTerms.v</code> is independently versioned at 1. Binder names, hiding, relevance,
+quantity and polarity metadata are retained. Unsupported forms stay explicit.</p>
+<pre><code class="language-sh">agda-deps --format=json --json-mode=expanded --with-type-terms \
+  -i src/ -o out/ src/Main.agda
+agda-optimization type-patterns out/deps.json --scope=MyLibrary
+</code></pre>
+<p>This opt-in evidence is consumed by <code>agda-graph-explorer</code>. It is independent
+of signature rendering and existing subterm hashes. The producer removes
+module-copy wrappers, preserves named user definitions, and exports
+source locations at declaration granularity. It does not infer per-node types
+or source ranges, perform conversion checking, or propose source changes.
+Only definitions retained in the graph receive evidence; <code>--no-externals</code>
+therefore also limits external type-body retrieval.</p>
+<p>The first version requires <code>--format=json --json-mode=expanded</code> and rejects
+<code>--incremental</code> and <code>--skip-agda</code>: the structural capture is not stored in the
+incremental fragment cache. YAML uses <code>with-type-terms: true</code>; doctor and
+<code>--show-defaults</code> document the same constraints. Default output omits the
+field completely. See the generated expanded schema for the wire shape.</p></div>
 </div>
 </main>
 <footer class="site-footer"><div class="wrap">

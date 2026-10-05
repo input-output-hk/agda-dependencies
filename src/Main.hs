@@ -151,7 +151,7 @@ main = do
   if optSkipAgda resolved
     then runSkipAgda resolved precomputed (firstSource finalArgs)
     else if optKeepGoing resolved
-      then runAgdaArgsKeepGoing [runWith] argv
+      then runAgdaArgsKeepGoing resolved precomputed [runWith] argv
       else runAgdaArgs           [runWith] argv
 
 -- | Share the real flag arities with every startup decision. The option

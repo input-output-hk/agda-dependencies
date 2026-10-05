@@ -474,7 +474,7 @@ checkCoherence o = catMaybes
            (Just "add with-term-hashes: true, or drop min-term-depth")
   , whenTrue "incremental" (isTrue "keep-going") $
       warn (about "incremental" "is disabled under keep-going")
-           (Just "drop one of the two; a partial run is never cached")
+           (Just "drop incremental, or disable keep-going; partial runs are never cached")
   , whenSet "cache-dir" (not (isTrue "incremental")) $
       warn (about "cache-dir" "only locates the incremental cache, which is off")
            (Just "add incremental: true, or drop cache-dir")

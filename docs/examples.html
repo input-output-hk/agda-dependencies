@@ -19,7 +19,7 @@
 <main><div class="layout">
 <aside class="toc"><div class="toc-inner">
 <div class="toc-title">On this page</div>
-<nav><a class="lvl2" href="#setup">Setup</a><a class="lvl2" href="#dot-output-default">DOT output (default)</a><a class="lvl2" href="#html-output-hand-the-json-to-agda-plotter">HTML output — hand the JSON to agda-plotter</a><a class="lvl2" href="#json-output-for-downstream-tooling">JSON output — for downstream tooling</a><a class="lvl2" href="#-no-externals-drop-stdlib-from-the-graph">--no-externals — drop stdlib from the graph</a><a class="lvl2" href="#-keep-going-survive-type-check-errors">--keep-going — survive type-check errors</a><a class="lvl2" href="#-skip-agda-module-level-graph-no-type-checking">--skip-agda — module-level graph, no type-checking</a><a class="lvl2" href="#-lazy-a-page-that-stays-small-at-scale">--lazy — a page that stays small at scale</a><a class="lvl2" href="#-with-term-hashes-subterm-fingerprints">--with-term-hashes — subterm fingerprints</a><a class="lvl2" href="#argusage-find-arguments-a-definition-never-uses">argUsage — find arguments a definition never uses</a><a class="lvl2" href="#-incremental-cache-per-module-work-across-rebuilds">--incremental — cache per-module work across rebuilds</a><a class="lvl2" href="#-packed-analytical-compact-json-without-losing-fidelity">--packed-analytical — compact JSON without losing fidelity</a><a class="lvl2" href="#a-yaml-config-checked-before-use">A YAML config, checked before use</a></nav>
+<nav><a class="lvl2" href="#setup">Setup</a><a class="lvl2" href="#dot-output-default">DOT output (default)</a><a class="lvl2" href="#html-output-hand-the-json-to-agda-plotter">HTML output — hand the JSON to agda-plotter</a><a class="lvl2" href="#json-output-for-downstream-tooling">JSON output — for downstream tooling</a><a class="lvl2" href="#-no-externals-drop-stdlib-from-the-graph">--no-externals — drop stdlib from the graph</a><a class="lvl2" href="#-keep-going-collect-checkable-files-despite-type-errors">--keep-going — collect checkable files despite type errors</a><a class="lvl2" href="#-skip-agda-module-level-graph-no-type-checking">--skip-agda — module-level graph, no type-checking</a><a class="lvl2" href="#-lazy-a-page-that-stays-small-at-scale">--lazy — a page that stays small at scale</a><a class="lvl2" href="#-with-term-hashes-subterm-fingerprints">--with-term-hashes — subterm fingerprints</a><a class="lvl2" href="#argusage-find-arguments-a-definition-never-uses">argUsage — find arguments a definition never uses</a><a class="lvl2" href="#-incremental-cache-per-module-work-across-rebuilds">--incremental — cache per-module work across rebuilds</a><a class="lvl2" href="#-packed-analytical-compact-json-without-losing-fidelity">--packed-analytical — compact JSON without losing fidelity</a><a class="lvl2" href="#a-yaml-config-checked-before-use">A YAML config, checked before use</a><a class="lvl2" href="#type-abstraction-reports">Type abstraction reports</a></nav>
 </div></aside>
 <div class="prose"><h1 id="examples">Examples</h1>
 <p>Runnable recipes for <code>agda-deps</code>. Full flag reference: <a href="guide.html">README.md</a>.</p>
@@ -65,13 +65,25 @@ decoder; use <code>expanded</code> to consume from Python / TypeScript / shell.<
 <p>Strips every module outside the project root (<code>Agda.Builtin</code>, <code>Data</code>, …). Cleaner
 than curating <code>--exclude</code> lists. The JSON keeps an <code>externals_summary</code> recording
 what was dropped.</p>
-<h2 id="-keep-going-survive-type-check-errors"><code>--keep-going</code> — survive type-check errors</h2>
-<pre><code class="language-bash">cabal run agda-deps -- --keep-going -i test/ -o out/ test/Test.agda
+<h2 id="-keep-going-collect-checkable-files-despite-type-errors"><code>--keep-going</code> — collect checkable files despite type errors</h2>
+<pre><code class="language-bash">cabal run agda-deps -- --keep-going --format=json --json-mode=expanded \
+  --with-signatures --with-term-hashes -i test-keepgoing/ \
+  -o /tmp/agda-deps-all test-keepgoing/Entry.agda
 </code></pre>
-<p>Catches the <code>TCErr</code> and proceeds; failing modules surface as <code>F</code>-state markers.
-Use when commits contain <code>?</code> holes, when onboarding a broken project, or when one
-WIP module shouldn't hide the rest. Pair with <code>--lenient-imports</code> if Agda refuses
-to <em>import</em> a module with open metas.</p>
+<p>Checks the entry first, then each discovered source inside the project root,
+including files the entry never imports. Each check starts with fresh per-file
+state and reuses Agda's persistent interface cache. Successful roots and loaded
+dependencies are extracted into one graph after checking ends. Failures,
+including files blocked by broken imports, are listed in <code>failedModules</code> and
+surface as <code>F</code>-state markers.</p>
+<p>For an unfinished implementation, provide its signature and a <code>?</code> body, with
+<code>{-# OPTIONS --allow-unsolved-metas #-}</code> in that file. It can then contribute
+definition data even when an unrelated file has a type error. A global
+<code>--lenient-imports</code> also permits metas, but conflicts with <code>--safe</code> dependencies.
+Undefined names and actual type mismatches remain failures. External include
+trees are not swept, exclusions skip scanned candidates, and <code>--incremental</code>
+is disabled. Source roots must cover the files you want checked; without a
+<code>.agda-lib</code>, invoke from the project root.</p>
 <h2 id="-skip-agda-module-level-graph-no-type-checking"><code>--skip-agda</code> — module-level graph, no type-checking</h2>
 <pre><code class="language-bash">cabal run agda-deps -- --skip-agda --format=json -i test/ -o out/ test/Test.agda
 agda-plotter --view=module-dag-pods -o out/
@@ -153,7 +165,17 @@ agda-deps doctor                             # unknown keys, bad values, no-op c
 agda-deps doctor --strict                    # as a CI gate: warnings fail too
 </code></pre>
 <p>Keys mirror the CLI flags in kebab-case; CLI flags still win. <code>doctor</code> runs no
-Agda and needs no input module.</p></div>
+Agda and needs no input module.</p>
+<h2 id="type-abstraction-reports">Type abstraction reports</h2>
+<pre><code class="language-sh">agda-deps --format=json --json-mode=expanded --with-type-terms \
+  --with-signatures -i test-hardening/ -o /tmp/type-graph \
+  test-hardening/type-terms.agda
+agda-optimization type-patterns /tmp/type-graph/deps.json --min-owners=2
+</code></pre>
+<p>Use a larger graph for repeated predicates. <code>--with-signatures</code> is optional;
+structural matching uses <code>typeTerms</code>. The consuming report separates
+inherited contexts, retrieves existing type bodies and checks known module
+cycles. A proposed abstraction still needs source review and Agda validation.</p></div>
 </div>
 </main>
 <footer class="site-footer"><div class="wrap">

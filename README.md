@@ -92,9 +92,20 @@ and exits, see [Checking a config](#checking-a-config-agda-deps-doctor).
   colours override the CLI theme whether they appear before or after it;
   the last colour for each state wins. A CLI theme replaces the YAML palette,
   including YAML colour overrides.
-- `--keep-going` — don't abort on a type-check error: tag the failing module
-  `failed` and emit whatever loaded, with def-level data for every module that
-  elaborated.
+- `--keep-going` — independently check every discovered source inside the
+  physical project root, then emit one graph from the successful modules and
+  their loaded imports. An error in one file does not prevent checking later
+  or unimported files. The command-line entry
+  is checked first. External include directories supply dependencies but are
+  not swept independently; `--exclude` skips matching scanned candidates.
+  A file blocked by a broken import also appears in `failedModules`; no
+  definitions are invented for failed files. An accepted hole-bearing file
+  contributes `H` definitions. Use file-local
+  `{-# OPTIONS --allow-unsolved-metas #-}` pragmas to tolerate holes alongside
+  safe dependencies. This mode preserves Agda's checking rules and disables
+  `--incremental`. Source discovery is still limited to the supplied `-i`
+  roots and the entry file's directory. Run from the project root when there
+  is no `.agda-lib` for automatic root discovery.
 - `--skip-agda` — don't invoke Agda; emit a module-level graph from a source
   scan (`module` / `import` lines). No definition graph, so
   only module-level views have anything to draw. With `--no-externals`,

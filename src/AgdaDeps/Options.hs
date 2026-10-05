@@ -198,6 +198,8 @@ data Options = Options
   , optExcludeModules :: [String]
   , optGzip :: Bool
   , optKeepGoing :: Bool
+    -- ^ Check every discovered project source independently, then emit one
+    -- graph from the successful interfaces, continuing past checking errors.
   , optSkipAgda :: Bool
   , optQuiet :: Bool
   , optNoExternals :: Bool
@@ -227,7 +229,8 @@ data Options = Options
   , optIncremental    :: Bool
     -- ^ @--incremental@: per-module fragment cache for the
     -- per-definition backend walk, keyed on the interface hash.
-    -- Opt-in; disabled under @--keep-going@. See 'AgdaDeps.FragmentCache'.
+    -- Opt-in; disabled under @--keep-going@.
+    -- See 'AgdaDeps.FragmentCache'.
   , optCacheDir       :: Maybe FilePath
     -- ^ @--cache-dir=PATH@: override the @--incremental@ cache location
     -- (fragments + serialise manifest). Default

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-05 — `--keep-going` collects all checkable project files
+
+- `--keep-going` / YAML `keep-going` now checks the command-line entry and every
+  discovered project source independently, then writes one graph containing
+  successful roots and their loaded dependencies. Type errors, parse errors,
+  unresolved names and broken imports cannot stop later independent checks.
+- Per-file state resets retain Agda's interface cache. Accepted roots are
+  captured before reset, including their live hole metas and cold private
+  definitions. Checking rules and `--safe` remain unchanged; file-local
+  `--allow-unsolved-metas` pragmas permit incomplete implementations.
+- Incremental output caching remains disabled under `--keep-going`.
+  External include trees are dependencies rather than sweep targets;
+  exclusions skip matching discovered roots. Failed requested files, including
+  files blocked by dependencies, use the existing `failedModules` contract.
+- CLI/config/defaults/doctor and output fingerprints are aligned. Regressions
+  cover cold/warm expanded, packed and lazy output, analytical parity, holes,
+  cycles, isolated and literate sources, source-only headers, exclusions,
+  physical containment, entry identity and option isolation on Agda 2.8/2.9.
+  Wire, node-key and fragment payload versions are unchanged.
+
 ## 2026-10-02 — optional structural type terms
 
 - `--with-type-terms` / YAML `with-type-terms` adds a shared type-expression

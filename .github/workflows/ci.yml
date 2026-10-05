@@ -69,6 +69,9 @@ jobs:
     - name: Scanned modules survive every JSON shape and incremental reuse
       run: python3 schema/scanned_modules_check.py "$(cabal list-bin agda-deps)"
 
+    - name: Keep-going recovers all checkable project files
+      run: python3 schema/keep_going_check.py "$(cabal list-bin agda-deps)"
+
     - name: Project containment follows symlinks and directory boundaries
       run: python3 schema/project_containment_check.py "$(cabal list-bin agda-deps)"
 
@@ -211,7 +214,7 @@ jobs:
         python3 - <<'EOF'
         import json
         g = json.load(open("ci-out/keepgoing/deps.json"))
-        assert g.get("failedModules") == ["Broken"], g.get("failedModules")
+        assert g.get("failedModules") == ["Broken", "Entry"], g.get("failedModules")
         defs = {d["name"]: d for d in g["definitions"]}
         assert "Good.double" in defs and "Good.quadruple" in defs, sorted(defs)
         assert ["Good.quadruple", "Good.double"] in g["definitionEdges"]
@@ -465,12 +468,12 @@ jobs:
         import json
         load = lambda p: json.load(open(f"ci-out/fixes/{p}/deps.json"))
         assert load("skip")["definitions"] == [], "config skip-agda ignored"
-        assert load("kg").get("failedModules") == ["Broken"], "config keep-going ignored"
+        assert load("kg").get("failedModules") == ["Broken", "Entry"], "config keep-going ignored"
         g = load("hash1")
         h = dict(zip([d["name"] for d in g["definitions"]], g["definitionSubtermHashes"]))
         assert h["Collision.useA"] != h["Collision.useB"], "same-named where helpers hash alike"
         ext = load("ext/out")
-        assert ext.get("failedModules") == [], ext.get("failedModules")
+        assert ext.get("failedModules") == ["Entry"], ext.get("failedModules")
         assert "Broken" not in ext["modules"], ext["modules"]
         assert "Broken" in ext["externals_summary"]["modules"]
         print("config keys, hash identity, DOT quoting, failed externals OK")
@@ -550,6 +553,11 @@ jobs:
     - name: Scanned modules survive JSON shapes and incremental reuse (Agda 2.9)
       run: |
         python3 schema/scanned_modules_check.py \
+          "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
+
+    - name: Keep-going recovers all checkable project files (Agda 2.9)
+      run: |
+        python3 schema/keep_going_check.py \
           "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
 
     - name: Project containment follows resolved paths (Agda 2.9)

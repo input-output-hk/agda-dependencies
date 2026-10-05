@@ -4,10 +4,11 @@
 -- | Partial-compilation support: walks Agda's loaded-module table on
 -- behalf of a backend to emit a partial graph rather than no output.
 --
--- 'partialBackendInteraction' replaces 'backendInteraction': it catches
--- a failure from @check mainFile@ (a 'TCErr' or any other synchronous
--- exception), reports the failing module via @reportFailed@, and drives
--- each backend's hooks over whatever modules Agda did load.
+-- 'partialBackendInteraction' replaces 'backendInteraction': it checks the
+-- entry and discovered roots independently, reports failures via
+-- @reportFailed@, and captures accepted interfaces before resetting per-file
+-- state. Each backend then extracts one graph from all successfully loaded
+-- modules.
 --
 -- 'partialCompilerMain' re-seeds @stVisitedModules@ from
 -- @stDecodedModules@, re-merges each decoded interface's import state
@@ -33,7 +34,7 @@ module AgdaDeps.ModuleExplorer
   ) where
 
 import qualified Control.Exception as E
-import Control.Monad ( foldM, forM_ )
+import Control.Monad ( foldM, forM_, when )
 import Control.Monad.Except ( catchError, runExceptT, ExceptT(..) )
 import Control.Monad.IO.Class ( liftIO )
 
@@ -60,6 +61,7 @@ import Agda.Compiler.Backend
   )
 import qualified Agda.Compiler.Backend as ACB
 import Agda.Compiler.Common ( setInterface, curDefs, sortDefs )
+import Agda.Interaction.Imports ( crModuleInfo )
 
 import Agda.Interaction.Options
   ( defaultOptions, runOptM, optInputFile, optCompileNoMain, pragmaOptions )
@@ -89,7 +91,8 @@ import Agda.TypeChecking.Monad
   )
 import Agda.TypeChecking.Monad.Base
   ( stCurrentModule, eActiveBackendName
-  , Interface, iTopLevelModuleName, iSignature, miInterface
+  , Interface, iTopLevelModuleName, iModuleName, iSignature
+  , ModuleInfo(..), ModuleCheckMode(..)
   , stImports, stSignature, emptySignature
   -- Import-state lenses + interface fields for 'mergeIfaceState'.
   , stImportedBuiltins, stImportedMetaStore
@@ -110,24 +113,27 @@ import Agda.TypeChecking.Monad.Signature ( unionSignature )
 #endif
 import Agda.TypeChecking.Primitive.Base ( lookupPrimitiveFunction )
 import qualified Data.HashMap.Strict as HMap
-import Agda.TypeChecking.Monad.Imports ( getDecodedModules, visitModule )
+import Agda.TypeChecking.Monad.Imports
+  ( getDecodedModules, setDecodedModules, visitModule )
+import Agda.TypeChecking.Monad.State ( resetState, getSignature )
+import Agda.TypeChecking.Monad.Env ( withCurrentModule )
+import Agda.TypeChecking.MetaVars ( openMetasToPostulates )
+import Agda.TypeChecking.Reduce ( instantiateFull )
 
 import AgdaDeps.Logging ( info )
 
 -- ** Driver entry point
 
--- | Drop-in for @Agda.Main.runAgdaArgs@ that uses the partial-compile
--- interactor. With no source file in argv (e.g. @--help@) the standard
--- 'runAgda' path takes over via the 'Nothing' branch.
---
--- @reportFailed@ is called once per @check mainFile@ failure with the
--- module Agda was checking, to record where the backend's @postCompile@
--- can read it.
+-- | Independently check the entry and supplied sources before running the
+-- backend once. Optional scanned names are diagnostic fallbacks. With no
+-- source file in argv (e.g. @--help@), the standard 'runAgda' path takes over.
+-- @reportFailed@ records failed roots and imports for @postCompile@.
 runPartial
-  :: (String -> IO ())  -- ^ @reportFailed modName@
+  :: [(Maybe String, FilePath)]
+  -> (String -> IO ())  -- ^ @reportFailed modName@
   -> [Backend]
   -> IO ()
-runPartial reportFailed backends = do
+runPartial sources reportFailed backends = do
   progName <- getProgName
   argv     <- getArgs
   let (parsed, _warns) = runOptM $ parseBackendOptions backends argv defaultOptions
@@ -147,10 +153,82 @@ runPartial reportFailed backends = do
         -- Agda 2.8 has no @setSession@; set the session lens directly.
         setTCLens' stBackends bs
 #endif
+        targets <- liftIO $ mapM (\(m, p) -> (,) m <$> absolute p) sources
         runAgdaWithOptions
-          (partialBackendInteraction reportFailed file bs)
+          (partialBackendInteraction reportFailed file targets bs)
           progName
           opts
+
+-- | Reset per-file scopes, options and metas between checks, preserving
+-- Agda's persistent interface cache. A failure can still have loaded healthy
+-- imports, which are kept. Successfully checked roots are retained separately:
+-- Agda does not cache every main interface (notably roots with warnings), and
+-- their live state must be captured before the next reset.
+partialBackendInteraction
+  :: (String -> IO ()) -> AbsolutePath -> [(Maybe String, AbsolutePath)]
+  -> [Backend] -> TCM () -> (AbsolutePath -> TCM ACB.CheckResult) -> TCM ()
+partialBackendInteraction reportFailed mainFile targets backends setup check = do
+  initial <- guardCheck reportFailed setup
+  case initial of
+    Left () -> sequence_ [ partialCompilerMain Nothing b NotMain | Backend b <- backends ]
+    Right () -> do
+      let mainName = lookup mainFile [ (p, m) | (m, p) <- targets ]
+          files = (fromMaybe Nothing mainName, mainFile)
+                : [ t | t@(_, p) <- targets, p /= mainFile ]
+      (roots, entry) <- foldM checkOne (Map.empty, Nothing) files
+      decoded <- getDecodedModules
+      -- Enriched root interfaces take precedence over their pruned cached
+      -- copies. They are used for extraction only, after checking has ended.
+      resetState
+      orDiagnose "setup before extraction" setup
+      setDecodedModules $ Map.filter ((== ModuleTypeChecked) . miMode)
+                        $ Map.union roots decoded
+      sequence_ [ partialCompilerMain entry b IsMain | Backend b <- backends ]
+  where
+    namesByPath = Map.fromList [ (filePath p, m) | (Just m, p) <- targets ]
+    checkOne (roots, entry) (name, path) = do
+      info $ "agda-deps: --keep-going: checking " ++ filePath path
+      let report m = do
+            -- The requested root also failed to check when an import failed.
+            -- Record it even when Agda has no current-module error range.
+            forM_ name reportFailed
+            when (m /= "<unknown>" || name == Nothing) $
+              reportFailed $ Map.findWithDefault m m namesByPath
+      -- Reset outside catchError: its rollback must not restore the previous
+      -- successful root as the "current module" when diagnosing this file.
+      resetState
+      checked <- guardCheck report $ do
+        setup
+        result <- check path
+        noMain <- optCompileNoMain <$> pragmaOptions
+        mi <- captureCheckedRoot (crModuleInfo result)
+        return (mi, noMain)
+      case checked of
+        Left () -> return (roots, entry)
+        Right (mi, noMain) -> do
+          let m = iTopLevelModuleName (miInterface mi)
+              entry' | path == mainFile && not noMain = Just m
+                     | otherwise = entry
+          return (Map.insert m mi roots, entry')
+
+-- | Make accepted root data independent of its live TCM state. Freezing
+-- remaining metas is the same representation Agda uses for imported hole
+-- modules; it does not enable permissive checking or change --safe. Keep the
+-- full local signature so cold root checks do not lose dead private defs.
+captureCheckedRoot :: ModuleInfo -> TCM ModuleInfo
+captureCheckedRoot mi = do
+  let iface = miInterface mi
+  withCurrentModule (iModuleName iface) openMetasToPostulates
+  fullSig <- getSignature
+  let sig = unionSignature fullSig (iSignature iface)
+  iface' <- instantiateFull iface{ iSignature = sig }
+  return mi{ miInterface = iface' }
+
+guardCheck :: (String -> IO ()) -> TCM a -> TCM (Either () a)
+guardCheck reportFailed act =
+  ((Right <$> act)
+     `catchError` \ err -> Left <$> handleCheckError reportFailed err)
+    `catchAllTCM` \ ex -> Left <$> handleCheckException reportFailed ex
 
 -- ** Exception plumbing
 
@@ -190,43 +268,6 @@ orDiagnose stage act = act `catchAllTCM` \ ex -> do
     "agda-deps: --keep-going: FATAL: " ++ stage ++ " failed: "
     ++ exceptionLine ex
   liftIO $ E.throwIO ex
-
--- ** Backend interaction
-
--- | Variant of 'Agda.Compiler.Backend.backendInteraction' that catches
--- check failures. On success it dispatches to the standard
--- 'ACB.compilerMain' for every backend; on failure it tags the module
--- that was in progress via @reportFailed@ and runs each backend's hooks
--- manually over whatever modules Agda DID load before the error.
-partialBackendInteraction
-  :: (String -> IO ())
-  -> AbsolutePath -> [Backend]
-  -> TCM () -> (AbsolutePath -> TCM ACB.CheckResult) -> TCM ()
-partialBackendInteraction reportFailed mainFile backends setup check = do
-  -- Wrap both 'setup' and 'check mainFile' so pre-check library / pragma
-  -- / option errors are caught too. 'catchError' handles 'TCErr' (rolls
-  -- the TCState back, hence 'mergeIfaceState'); 'catchAllTCM' the rest.
-  let guarded :: TCM a -> TCM (Either () a)
-      guarded act =
-        ((Right <$> act)
-           `catchError` \ err -> Left <$> handleCheckError reportFailed err)
-          `catchAllTCM` \ ex -> Left <$> handleCheckException reportFailed ex
-  setupResult <- guarded setup
-  result <- case setupResult of
-    Left ()  -> return (Left ())
-    Right () -> guarded (check mainFile)
-  noMain <- optCompileNoMain <$> pragmaOptions
-  let isMain | noMain    = NotMain
-             | otherwise = IsMain
-  case result of
-    Right checkResult ->
-      -- Agda's own dispatcher: looks the backend up in stBackends and
-      -- runs the private 'compilerMain'.
-      sequence_ [ ACB.callBackend (backendName b) isMain checkResult
-                | Backend b <- backends ]
-    Left () ->
-      sequence_ [ partialCompilerMain b isMain
-                | Backend b <- backends ]
 
 handleCheckError :: (String -> IO ()) -> TCErr -> TCM ()
 handleCheckError reportFailed err = do
@@ -294,8 +335,8 @@ moduleFromRange err =
 -- and interface merge is 'catchAllTCM'-guarded, so a broken piece is
 -- skipped rather than aborting the pass — 'postCompile' always runs.
 partialCompilerMain
-  :: Backend' opts env menv mod def -> IsMain -> TCM ()
-partialCompilerMain backend isMain =
+  :: Maybe TopLevelModuleName -> Backend' opts env menv mod def -> IsMain -> TCM ()
+partialCompilerMain entry backend isMain =
   locallyTC eActiveBackendName (const $ Just $ backendName backend) $ do
     decoded <- getDecodedModules
     let mis    = Map.elems decoded
@@ -324,10 +365,10 @@ partialCompilerMain backend isMain =
   where
     perModule env acc iface = do
       let tlmn = iTopLevelModuleName iface
-      -- Always NotMain: the pass can't tell which interface is the entry
-      -- point, and IsMain-to-all makes entry capture record whichever ran
-      -- last. An absent entryModule beats a wrong one.
-      mRes <- (Just <$> compileOneModule backend env NotMain iface)
+      -- The entry is known only when checking the command-line root succeeded.
+      let moduleIsMain | entry == Just tlmn = isMain
+                       | otherwise = NotMain
+      mRes <- (Just <$> compileOneModule backend env moduleIsMain iface)
                 `catchAllTCM` \ ex -> do
                   reportSkippedModule tlmn (exceptionLine ex)
                   return Nothing

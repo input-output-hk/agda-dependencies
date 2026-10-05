@@ -66,16 +66,29 @@ Strips every module outside the project root (`Agda.Builtin`, `Data`, …). Clea
 than curating `--exclude` lists. The JSON keeps an `externals_summary` recording
 what was dropped.
 
-## `--keep-going` — survive type-check errors
+## `--keep-going` — collect checkable files despite type errors
 
 ```bash
-cabal run agda-deps -- --keep-going -i test/ -o out/ test/Test.agda
+cabal run agda-deps -- --keep-going --format=json --json-mode=expanded \
+  --with-signatures --with-term-hashes -i test-keepgoing/ \
+  -o /tmp/agda-deps-all test-keepgoing/Entry.agda
 ```
 
-Catches the `TCErr` and proceeds; failing modules surface as `F`-state markers.
-Use when commits contain `?` holes, when onboarding a broken project, or when one
-WIP module shouldn't hide the rest. Pair with `--lenient-imports` if Agda refuses
-to *import* a module with open metas.
+Checks the entry first, then each discovered source inside the project root,
+including files the entry never imports. Each check starts with fresh per-file
+state and reuses Agda's persistent interface cache. Successful roots and loaded
+dependencies are extracted into one graph after checking ends. Failures,
+including files blocked by broken imports, are listed in `failedModules` and
+surface as `F`-state markers.
+
+For an unfinished implementation, provide its signature and a `?` body, with
+`{-# OPTIONS --allow-unsolved-metas #-}` in that file. It can then contribute
+definition data even when an unrelated file has a type error. A global
+`--lenient-imports` also permits metas, but conflicts with `--safe` dependencies.
+Undefined names and actual type mismatches remain failures. External include
+trees are not swept, exclusions skip scanned candidates, and `--incremental`
+is disabled. Source roots must cover the files you want checked; without a
+`.agda-lib`, invoke from the project root.
 
 ## `--skip-agda` — module-level graph, no type-checking
 

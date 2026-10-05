@@ -206,7 +206,7 @@ backendWithSeed seed = Backend'
       , Option []    ["gzip"] (NoArg gzipOpt)
         "Also write .gz files (with --lazy)"
       , Option []    ["keep-going"] (NoArg keepGoingOpt)
-        "Continue past type-check errors"
+        "Check every discovered project source, continuing past type-check errors"
       , Option []    ["lenient-imports"] (NoArg lenientImportsOpt)
         "Pass --allow-unsolved-metas to Agda"
       , Option []    ["resolve-deps"] (NoArg resolveDepsOpt)
@@ -828,12 +828,12 @@ emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippab
 
   -- Per-module silent-unsolved-meta / unsolved-constraint rollup
   -- (@--allow-unsolved-metas@ only; empty otherwise). Interface markers
-  -- cover imported modules; the main module's metas are never postulated,
-  -- so its live silent metas are read from TCM state and attributed to the
-  -- entry module (under @--keep-going@'s re-drive there is no entry module
-  -- and no live check state — the failed module is already in
-  -- @failedModules@). Rows where both lists are empty are dropped, so
-  -- unsolved-free corpora stay byte-identical.
+  -- cover imported modules. In a normal run, the main module's live silent
+  -- metas are read from TCM state and attributed to the entry module.
+  -- Under @--keep-going@, accepted roots' metas are frozen
+  -- into their interfaces before per-file state resets, so the interface
+  -- markers also cover those roots. Rows where both lists are empty are
+  -- dropped, so unsolved-free corpora stay byte-identical.
   ifaceUnsolved <- jsonOnly [] $
     forM keptIfaces $ \(m, iface) -> (,) m <$> unsolvedInterfaceLines iface
   liveMetaLines <- jsonOnly [] liveSilentMetaLines

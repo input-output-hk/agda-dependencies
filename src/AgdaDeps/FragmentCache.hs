@@ -121,6 +121,7 @@ optionsFingerprint opts = hashString $ show
   , optWithSignatures opts
   , optNormaliseSignatures opts
   , optShowImplicit opts
+  , optKeepGoing opts
   )
 
 -- | @\<cacheDir\>/\<sanitised module name\>-\<hash\>.frag@. The hash
