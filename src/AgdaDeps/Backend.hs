@@ -43,7 +43,7 @@ import qualified Data.Text.Lazy.IO as TL
 import Data.Version ( showVersion )
 import Paths_agda_deps ( version )
 
-import Data.List ( foldl', sort, sortOn )
+import Data.List ( foldl', sort, sortOn, isPrefixOf )
 
 import qualified System.Directory
 import System.Directory ( canonicalizePath, createDirectoryIfMissing, getCurrentDirectory )
@@ -77,12 +77,14 @@ import Agda.TypeChecking.Monad.Base
   ( iImportedModules, miInterface, Interface
   , iScope, iModuleName, iTopLevelModuleName
   , sigDefinitions, iFullHash
-  , iFilePragmaOptions, iOptionsUsed
+  , iFilePragmaOptions, iOptionsUsed, srcFilePath
   )
 -- 'pragmaStrings' + 'iFilePragmaOptions' live here on both 2.8 and 2.9
 -- (module has no export list) — no CPP for the file-OPTIONS scan.
 import Agda.Interaction.Library.Base ( pragmaStrings )
 import Agda.TypeChecking.Monad.Imports ( getVisitedModules )
+import Agda.Interaction.FindFile ( findFile' )
+import Agda.Utils.FileName ( filePath )
 import Agda.TypeChecking.Monad.Options ( getIncludeDirs )
 import Agda.TypeChecking.Monad.State ( getSignature )
 import Agda.Compiler.Common ( curIF )
@@ -372,6 +374,8 @@ outputToken opts precomputed root containment entry modules = combineEpochs
   , hashEpoch "project-containment-physical-v1"
   -- Source-only scanned modules now survive in every JSON shape.
   , hashEpoch "scanned-module-inventory-v1"
+  -- Refresh existing outputs whose module path came from a public rename.
+  , hashEpoch "module-source-authority-v1"
   , hashEpoch (show containment)
   ]
   where
@@ -646,6 +650,15 @@ emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippab
   -- source under root) are still classified as external.
   precomputed <- liftIO $ readIORef precomputedGraphRef
   visited <- getVisitedModules
+  -- 'findFile'' consults Agda's resolved module-to-source cache, so this
+  -- records the file Agda actually loaded on both 2.8 and 2.9.
+  visitedFiles <- fmap (M.fromList . catMaybes) $ forM (M.keys visited) $ \tlmn -> do
+    source <- findFile' tlmn
+    case source of
+      Left _ -> pure Nothing
+      Right sf -> do
+        path <- srcFilePath sf
+        pure $ Just (prettyShow tlmn, filePath path)
   let -- (source, target) module pairs for every import edge across all
       -- visited interfaces; shared by the endpoint pool and
       -- 'visitedImportEdges'.
@@ -797,12 +810,26 @@ emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippab
       importEdges =
         S.toList (S.fromList (visitedImportEdges ++ precomputedImportEdges))
 
-      -- Binding sites take precedence over scanned paths when Agda has
-      -- selected a source among duplicate module names. The scan supplies
-      -- paths for modules without QNames, including unimported sources
-      -- and re-export-only hubs. Excluded modules surface no path.
+      -- Agda's resolved source wins for loaded modules, including nested
+      -- modules belonging to the longest matching top-level module. QName
+      -- binding sites may point to a public rename in an importing file.
+      -- The scan supplies unimported / definition-free modules; binding
+      -- sites are only a fallback when neither source is available.
       moduleFileMap :: Map String FilePath
-      moduleFileMap = M.union bindingFiles scannedFiles
+      moduleFileMap = M.unions [authoritativeFiles, scannedFiles, bindingFiles]
+      -- Nested ownership applies to QName-bearing modules. A source-only
+      -- scanned child has its own file even when its parent was loaded.
+      authoritativeFiles = M.fromList
+        [ (m, p)
+        | m <- M.keys (M.union bindingFiles (M.intersection scannedFiles visitedFiles))
+        , keep m
+        , Just p <- [sourceForModule m]
+        ]
+      owners = sortOn (negate . length . fst) (M.toList visitedFiles)
+      sourceForModule m = case
+        [ p | (owner, p) <- owners, m == owner || (owner ++ ".") `isPrefixOf` m ] of
+          p : _ -> Just p
+          []    -> Nothing
       bindingFiles = M.fromListWith (\_old new -> new)
         [ (modName, p)
         | qn <- allQNames

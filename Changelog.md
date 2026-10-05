@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-05 — re-exported modules keep their declaring source paths
+
+- Module-to-file mappings now prefer the source Agda actually loaded. A
+  parameterized public re-export with a renamed definition can no longer
+  replace the original module's file with the re-exporting file during a
+  partial incremental rebuild.
+- Nested modules use their loaded top-level module's source; duplicate scanned
+  declarations do not override that choice. Unimported sources retain their
+  scanned paths. Definition lines and node identities are unchanged.
+- Existing incremental output refreshes while retaining extracted fragments.
+  Regressions cover cold/warm exports, partial and complete cache hits,
+  forced re-emission, and expanded, packed and lazy source mappings on
+  Agda 2.8/2.9. Wire and fragment payload versions are unchanged.
+
 ## 2026-10-05 — `--keep-going` collects all checkable project files
 
 - `--keep-going` / YAML `keep-going` now checks the command-line entry and every

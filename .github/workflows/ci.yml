@@ -69,6 +69,9 @@ jobs:
     - name: Scanned modules survive every JSON shape and incremental reuse
       run: python3 schema/scanned_modules_check.py "$(cabal list-bin agda-deps)"
 
+    - name: Re-exported modules retain their declaring source paths
+      run: python3 schema/module_files_check.py "$(cabal list-bin agda-deps)"
+
     - name: Keep-going recovers all checkable project files
       run: python3 schema/keep_going_check.py "$(cabal list-bin agda-deps)"
 
@@ -553,6 +556,11 @@ jobs:
     - name: Scanned modules survive JSON shapes and incremental reuse (Agda 2.9)
       run: |
         python3 schema/scanned_modules_check.py \
+          "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
+
+    - name: Re-exported modules retain declaring source paths (Agda 2.9)
+      run: |
+        python3 schema/module_files_check.py \
           "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
 
     - name: Keep-going recovers all checkable project files (Agda 2.9)
