@@ -217,3 +217,59 @@ Use a larger graph for repeated predicates. `--with-signatures` is optional;
 structural matching uses `typeTerms`. The consuming report separates
 inherited contexts, retrieves existing type bodies and checks known module
 cycles. A proposed abstraction still needs source review and Agda validation.
+
+## General computation and proof bodies
+
+```sh
+agda-deps --format=json --json-mode=expanded --with-terms \
+  --term-scope=term-evidence -i test-hardening/ \
+  -o /tmp/agda-terms test-hardening/term-evidence.agda
+agda-optimization term-patterns /tmp/agda-terms/deps.json \
+  --evidence=terms --scope=term-evidence --min-nodes=4 --json
+```
+
+The consumer can discover equations and abstractions directly from this graph:
+
+```sh
+agda-optimization term-patterns out/deps.json --json
+```
+
+Omit `--term-scope` to capture all retained bodies. With scopes, a separate
+bounded `equationSignatures` catalogue still exposes imported library laws.
+Each environment's `sourceOwnership` records owned includes and read-only
+library roots, so graph-only discovery requires no local Agda library registry.
+Source/cache copies are needed only when requesting live validation.
+
+`termEvidence.subtermTypes` supplies bounded contextual typing for neutral
+subterms without changing the root-only `occurrenceTypes` field. The consumer
+can keep dependent premises fixed, mine polymorphic computational patterns and
+proof abstractions, and check helpers in private copies of the original module:
+
+```sh
+agda-optimization term-patterns /tmp/agda-terms/deps.json \
+  --evidence=terms --scope=term-evidence --min-nodes=4 \
+  --helpers /tmp/agda-helpers --check-helpers --include test-hardening/ --json
+```
+
+Checked helper proposals name their validated instances and expression paths.
+Original source edits remain a separate review/check step. Rewrites crossing
+dependent applications require explicit transport evidence.
+
+To enable equations, save a rule file containing actual lemma identities:
+
+```yaml
+v: 1
+lemmas: [term-evidence.right-zero]
+```
+
+```sh
+agda-optimization term-patterns /tmp/agda-terms/deps.json \
+  --evidence=terms --scope=term-evidence --min-nodes=4 \
+  --rules equations.yaml --check-certificates --include test-hardening/ --json
+```
+
+The hidden Nat binder in `right-zero` and the typed `Clock.delta` projection
+are supported. Projection inputs remain opaque; generated witnesses abstract
+those Nat values. Body patterns and helpers are proposals until their instances
+are checked. The producer reports clause typing and bounded helper coverage;
+it does not certify unfolding or numeric transformations of entire proof bodies.

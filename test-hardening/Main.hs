@@ -270,7 +270,8 @@ testWireValidation = do
 
 validGraph :: ExpandedGraph
 validGraph = ExpandedGraph
-  { egTypeTerms = Nothing
+  { egTermEvidence = Nothing
+  , egTypeTerms = Nothing
   , egNodeKeyVersion = 3
   , egProducer = "test"
   , egModules = ["M"]

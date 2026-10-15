@@ -96,6 +96,8 @@ data Config = Config
     -- ^ Mirror of @--with-term-hashes@.
   , cfgMinTermDepth    :: Maybe Int
     -- ^ Mirror of @--min-term-depth=N@.
+  , cfgWithTerms       :: Maybe Bool
+  , cfgTermScopes      :: Maybe [String]
   , cfgWithTypeTerms   :: Maybe Bool
   , cfgWithSignatures  :: Maybe Bool
     -- ^ Mirror of @--with-signatures@: emit rendered type signatures.
@@ -130,6 +132,8 @@ defaultConfig = Config
   , cfgResolveDeps     = Nothing
   , cfgWithTermHashes  = Nothing
   , cfgMinTermDepth    = Nothing
+  , cfgWithTerms       = Nothing
+  , cfgTermScopes      = Nothing
   , cfgWithTypeTerms   = Nothing
   , cfgWithSignatures  = Nothing
   , cfgNormaliseSignatures = Nothing
@@ -248,6 +252,8 @@ instance FromJSON Config where
         cfgResolveDeps     <- o .:? "resolve-deps"
         cfgWithTermHashes  <- o .:? "with-term-hashes"
         cfgMinTermDepth    <- validatedField o "min-term-depth" parseMinTermDepth
+        cfgWithTerms       <- o .:? "with-terms"
+        cfgTermScopes      <- o .:? "term-scope"
         cfgWithTypeTerms   <- o .:? "with-type-terms"
         cfgWithSignatures  <- o .:? "with-signatures"
         cfgNormaliseSignatures <- o .:? "normalise-signatures"
@@ -292,6 +298,8 @@ applyConfig c opts0 =
       , optLenientImports  = fromMaybe (optLenientImports opts1) (cfgLenientImports c)
       , optWithTermHashes  = fromMaybe (optWithTermHashes opts1) (cfgWithTermHashes c)
       , optMinTermDepth    = fromMaybe (optMinTermDepth   opts1) (cfgMinTermDepth   c)
+      , optWithTerms       = fromMaybe (optWithTerms opts1) (cfgWithTerms c)
+      , optTermScopes      = fromMaybe (optTermScopes opts1) (cfgTermScopes c)
       , optWithTypeTerms   = fromMaybe (optWithTypeTerms opts1) (cfgWithTypeTerms c)
       , optWithSignatures  = fromMaybe (optWithSignatures opts1) (cfgWithSignatures c)
       , optNormaliseSignatures = fromMaybe (optNormaliseSignatures opts1) (cfgNormaliseSignatures c)
@@ -366,6 +374,8 @@ showDefaultsYaml = unlines $
   , ""
   , "# Emit each definition's reified type as the per-def \"type\" field."
   , "# Structural type DAG; requires format: json, json-mode: expanded, no incremental/skip-agda."
+  , "#with-terms: " ++ yBool (optWithTerms defaultOptions)
+  , "#term-scope: []"
   , "#with-type-terms: " ++ yBool (optWithTypeTerms defaultOptions)
   , "#with-signatures: " ++ yBool (optWithSignatures defaultOptions)
   , ""

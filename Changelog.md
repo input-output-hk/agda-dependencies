@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026-10-15
+
+- Export `.agda-lib` source ownership, dependency/module roles and source
+  spellings with general-term environments for autonomous graph-only discovery.
+- Add optional bounded `equationSignatures` outside selected body scopes, with
+  supporting small definitions and explicit coverage. Preserve graph v2, node
+  keys v3, default output and the root-only occurrence annotation contract.
+
+- Add optional `termEvidence.subtermTypes` for bounded neutral subterms in their
+  original clause telescopes. Preserve root-only `occurrenceTypes`, graph v2,
+  node keys v3 and default output. Capture runs inside restored Agda state,
+  excludes unsupported inference forms and records its partial coverage.
+- Keep the generated schema and producer contract checks aligned on Agda 2.8
+  and 2.9. Consumers use these annotations for typed regions inside otherwise
+  unsupported dependent/proof bodies; annotations alone authorize no rewrite.
+
+## 2026-10-14
+
+- Add optional expanded `termEvidence.v = 1` with general computation/proof
+  clauses, ordered patterns and telescopes, contextual result types,
+  declaration conventions, bounded helper closure, environments, and coverage.
+  `--with-terms` and repeatable `--term-scope=MODULE` select capture; YAML and
+  doctor expose the same options. Incremental, skip, and packed modes reject
+  this initial evidence export.
+- Share the structural codec with `TypeExport` while preserving graph v2,
+  node keys v3, default output, and `typeTerms.v = 1`. General evidence remains
+  inspection data with unfolding disabled. Add paired consumer fixtures and
+  producer contract checks for Agda 2.8/2.9.
+
+## 2026-10-13 — preserve external namespaces without retained definitions
+
+- External namespaces now remain in the module inventory when their
+  definitions are all filtered, for example an inlined function exported
+  publicly from a nested library module. Expanded JSON previously rejected
+  such graphs because `externalModules` referred to absent modules; packed
+  output silently omitted those external-module indices.
+- Shares the inventory correction across expanded, packed and lazy output,
+  and refreshes incremental output without changing cached fragments or wire
+  versions. A small public-inline re-export regression covers the failure
+  found while exporting the Jolteon project on Agda 2.8/2.9.
+
 ## 2026-10-05 — re-exported modules keep their declaring source paths
 
 - Module-to-file mappings now prefer the source Agda actually loaded. A

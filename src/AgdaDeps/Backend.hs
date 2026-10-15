@@ -41,6 +41,9 @@ import qualified Data.Text.Lazy.Encoding as TLE
 import qualified Data.Text.Lazy.IO as TL
 
 import Data.Version ( showVersion )
+import qualified Data.Aeson as Aeson
+import Data.Aeson ((.=))
+import qualified Agda.Version as AgdaVersion
 import Paths_agda_deps ( version )
 
 import Data.List ( foldl', sort, sortOn, isPrefixOf )
@@ -51,7 +54,7 @@ import System.Exit ( exitFailure )
 import System.FilePath ( (</>) )
 import System.IO ( hPutStrLn, stderr )
 
-import Agda.Interaction.Options ( runOptM )
+import Agda.Interaction.Options ( runOptM, commandLineOptions, optOverrideLibrariesFile )
 import Agda.Utils.GetOpt
   ( OptDescr(Option), ArgDescr(ReqArg, NoArg), ArgOrder(Permute), getOpt' )
 
@@ -76,12 +79,17 @@ import Agda.TypeChecking.Monad ( TCM )
 import Agda.TypeChecking.Monad.Base
   ( iImportedModules, miInterface, Interface
   , iScope, iModuleName, iTopLevelModuleName
-  , sigDefinitions, iFullHash
+  , sigDefinitions, iFullHash, iSignature, iSourceHash, sigRewriteRules
   , iFilePragmaOptions, iOptionsUsed, srcFilePath
   )
 -- 'pragmaStrings' + 'iFilePragmaOptions' live here on both 2.8 and 2.9
 -- (module has no export list) — no CPP for the file-OPTIONS scan.
 import Agda.Interaction.Library.Base ( pragmaStrings )
+#if MIN_VERSION_Agda(2,9,0)
+import Agda.TypeChecking.Monad.Base (grName)
+#else
+import Agda.TypeChecking.Monad.Base (rewName)
+#endif
 import Agda.TypeChecking.Monad.Imports ( getVisitedModules )
 import Agda.Interaction.FindFile ( findFile' )
 import Agda.Utils.FileName ( filePath )
@@ -123,6 +131,8 @@ import AgdaDeps.AtomicWrite
   ( atomicWriteString, atomicWriteLazyText, atomicWriteLazyBytes )
 import BuildInfo ( buildFingerprint )
 import AgdaDeps.Layout ( Position, computePositions )
+import AgdaDeps.LibResolve (sourceOwnership)
+import AgdaDeps.TermExport (initializeTermExport, readTermEvidence)
 import AgdaDeps.TypeExport (initializeTypeExport, readTypeTerms)
 import AgdaDeps.Options
   ( JsonMode(..), Options(..), OutputFormat(..), DefState(..)
@@ -133,7 +143,7 @@ import AgdaDeps.Options
   , incrementalOpt, cacheDirOpt, packedAnalyticalOpt
   , quietOpt, noExternalsOpt, jsonModeOpt, lenientImportsOpt
   , resolveDepsOpt
-  , withTermHashesOpt, minTermDepthOpt, withSignaturesOpt, withTypeTermsOpt
+  , withTermHashesOpt, minTermDepthOpt, withSignaturesOpt, withTypeTermsOpt, withTermsOpt, termScopeOpt
   , normaliseSignaturesOpt, showImplicitOpt
   , isExcludedModule
   )
@@ -223,6 +233,8 @@ backendWithSeed seed = Backend'
         "Hide progress messages"
       , Option []    ["packed-analytical"] (NoArg packedAnalyticalOpt)
         "Add per-definition fields to packed JSON"
+      , Option []    ["with-terms"] (NoArg withTermsOpt) "Export general clause evidence (expanded JSON, no incremental/skip)."
+      , Option []    ["term-scope"] (ReqArg termScopeOpt "MODULE") "Select body roots in MODULE and descendants (repeatable)."
       , Option []    ["with-type-terms"] (NoArg withTypeTermsOpt)
         "Emit structural type DAG (expanded JSON, non-incremental only)"
       , Option []    ["with-signatures"] (NoArg withSignaturesOpt)
@@ -278,6 +290,12 @@ parseBackendFlags seed argv =
        else fmap (\o -> (o, positionals))
                  (fst (runOptM (foldM (\o act -> act o) seed actions)))
 
+#if MIN_VERSION_Agda(2,9,0)
+rewriteName = grName
+#else
+rewriteName = rewName
+#endif
+
 -- | Pre-compile hook: clear every side channel for a fresh in-process run,
 -- then report every flag combination that does not compose.
 --
@@ -292,6 +310,7 @@ parseBackendFlags seed argv =
 preCompileAD :: Options -> TCM Options
 preCompileAD opts = do
   liftIO $ checkOutputFlags opts
+  liftIO $ initializeTermExport (optWithTerms opts)
   liftIO $ initializeTypeExport (optWithTypeTerms opts)
   resetSideChannels
   liftIO $ writeIORef recompiledRef False
@@ -321,6 +340,14 @@ preCompileAD opts = do
 -- reported.
 checkOutputFlags :: Options -> IO ()
 checkOutputFlags opts = do
+  when (optWithTerms opts && (optFormat opts /= FmtJson || optJsonMode opts /= JsonExpanded || optIncremental opts || optSkipAgda opts)) $ do
+    hPutStrLn stderr "agda-deps: --with-terms requires --format=json --json-mode=expanded and no --incremental/--skip-agda."
+    exitFailure
+  when (any null (optTermScopes opts)) $ do
+    hPutStrLn stderr "agda-deps: --term-scope requires a nonempty module prefix."
+    exitFailure
+  when (not (optWithTerms opts) && not (null $ optTermScopes opts)) $
+    info "agda-deps: --term-scope has no effect without --with-terms."
   when (optWithTypeTerms opts && (optFormat opts /= FmtJson || optJsonMode opts /= JsonExpanded || optIncremental opts || optSkipAgda opts)) $ do
     hPutStrLn stderr "agda-deps: --with-type-terms requires --format=json --json-mode=expanded and no --incremental/--skip-agda."
     exitFailure
@@ -374,6 +401,8 @@ outputToken opts precomputed root containment entry modules = combineEpochs
   , hashEpoch "project-containment-physical-v1"
   -- Source-only scanned modules now survive in every JSON shape.
   , hashEpoch "scanned-module-inventory-v1"
+  -- Retain external namespaces even when all their definitions are filtered.
+  , hashEpoch "external-module-inventory-v1"
   -- Refresh existing outputs whose module path came from a public rename.
   , hashEpoch "module-source-authority-v1"
   , hashEpoch (show containment)
@@ -387,6 +416,7 @@ outputToken opts precomputed root containment entry modules = combineEpochs
       [ show (optFormat opts), show (optJsonMode opts), show (optLazy opts)
       , show (optColors opts), show (optGzip opts)
       , show (optNoExternals opts), show (optExcludeModules opts)
+      , show (optWithTerms opts), show (optTermScopes opts)
       , show (optWithTypeTerms opts)
       , show (optWithSignatures opts)
       , show (optNormaliseSignatures opts), show (optShowImplicit opts)
@@ -880,10 +910,28 @@ emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippab
 
   positions <- jsonOnly M.empty $ liftIO $ computeQNamePositions allQNames defs
 
+  ownership<-if optWithTerms opts then do
+    agdaOptions<-commandLineOptions
+    liftIO $ sourceOwnership (optOverrideLibrariesFile agdaOptions) (entryModule >>= sourceForModule) (M.toList moduleFileMap)
+    else pure Aeson.Null
+  let evidenceIfaces=[(prettyShow (iTopLevelModuleName iface),iface) | mi<-M.elems visited,let iface=miInterface mi]
+      termEnvironment = Aeson.object
+        [ "sourceOwnership" .= ownership
+        , "sourceNames" .= M.fromList [(nrKey ref,nrModule ref++"."++nrShort ref) | d<-defs,let ref=_name d]
+        , "agdaVersion" .= AgdaVersion.version
+        , "effectiveOptions" .= M.fromList [(m,show (iOptionsUsed iface)) | (m,iface)<-evidenceIfaces]
+        , "interfaceHashes" .= M.fromList [(m,show (iFullHash iface)) | (m,iface)<-evidenceIfaces]
+        , "sourceHashes" .= M.fromList [(m,show (iSourceHash iface)) | (m,iface)<-evidenceIfaces]
+        , "rewriteRules" .= sort [nodeKeyOfQ (rewriteName rule) | (_,iface)<-evidenceIfaces,
+            rules<-HMap.elems (iSignature iface ^. sigRewriteRules),rule<-rules]
+        , "equality" .= ("Agda.Builtin.Equality._≡_" :: String)
+        ]
+  termEvidence <- liftIO $ readTermEvidence [nrKey (_name d) | d <- defs] (map nrKey allQNames) (optTermScopes opts) termEnvironment
   typeTerms <- liftIO $ readTypeTerms [nrKey (_name d) | d <- defs]
 
   let gi = GraphInput
-        { giTypeTerms        = typeTerms
+        { giTermEvidence     = termEvidence
+        , giTypeTerms        = typeTerms
         , giDefs             = defs
         , giImportEdges      = importEdges
         , giSourceFiles      = sourceFiles

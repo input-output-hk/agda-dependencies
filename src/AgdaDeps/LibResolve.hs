@@ -1,19 +1,27 @@
 -- | Resolve the project's @.agda-lib@ dependency closure using Agda's
 -- own parser, registry discovery and version matching. Only a complete
 -- success may replace library discovery with explicit include paths.
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings #-}
 module AgdaDeps.LibResolve
-  ( resolveProjectDepsDirs
+  ( resolveProjectDepsDirs, sourceOwnership
   ) where
 
 import Control.Exception ( IOException, displayException, try )
 import Control.Monad ( forM_ )
+import qualified Data.Aeson as A
+import Data.Aeson ((.=))
+import qualified Data.Map.Strict as M
+import Data.List (isPrefixOf)
+import System.Directory (canonicalizePath,getCurrentDirectory)
+import System.FilePath
 import Data.Containers.ListUtils ( nubOrd )
 import System.IO ( hPutStrLn, stderr )
 
 import Agda.Interaction.Library
   ( AgdaLibFile(..), LibM, getAgdaLibFile, getInstalledLibraries
   , libraryIncludePaths )
-import Agda.Interaction.Library.Base ( runLibM, formatLibErrors )
+import Agda.Interaction.Library.Base ( runLibM, formatLibErrors, OptionsPragma(..) )
 import Agda.Utils.Null ( empty )
 import Agda.Syntax.Common.Pretty ( prettyShow, render )
 
@@ -74,3 +82,50 @@ data Resolution
   = NoProject
   | NoDependencies
   | Resolved FilePath [FilePath]
+
+-- | Capture ownership next to term evidence so consumers need only the graph.
+-- Use Agda's project parser and dependency resolver, including vendored/nested
+-- registered libraries. Physical dependency paths override a containing project
+-- root. Failed resolution is explicit; it never grants ownership to unknown files.
+sourceOwnership :: Maybe FilePath -> Maybe FilePath -> [(String,FilePath)] -> IO A.Value
+sourceOwnership registryFile entry files=do
+  cwd<-canonicalizePath =<< getCurrentDirectory
+  let start=maybe cwd takeDirectory entry
+  attempted<-try $ do
+    ((result,_),_)<-runLibM (do
+      projects<-getAgdaLibFile start
+      dependencies<-if null (concatMap _libDepends projects) then pure [] else do
+        installed<-getInstalledLibraries registryFile
+        libraryIncludePaths registryFile installed (concatMap _libDepends projects)
+      pure (projects,dependencies)) empty
+    pure result
+  let projectFlags=case attempted of Right (Right (projects,_))->concatMap (pragmaStrings . _libPragmas) projects;_->[]
+      (projectRoot,declared,dependencies,basis,warnings)=case attempted of
+        Right (Right (first:rest,deps))->(takeDirectory $ _libFile first,concatMap _libIncludes (first:rest),deps,"agda-lib",[])
+        Right (Right ([],_))->(cwd,[cwd],[],"invocation-root",[])
+        Right (Left _)->(cwd,[cwd],[],"invocation-root",["Agda library ownership resolution failed"])
+        Left (_::IOException)->(cwd,[cwd],[],"invocation-root",["Agda library ownership resolution unavailable"])
+  root<-canonicalizePath projectRoot
+  declared'<-mapM canonicalizePath declared
+  dependencies'<-mapM canonicalizePath dependencies
+  canonical<-mapM (\(name,file)->do path<-canonicalizePath file;pure (name,path)) files
+  let outside=filter (not . within root) declared'
+      imported=nubOrd (dependencies'++outside)
+      owned=filter (\path->within root path && not (any (`within` path) imported)) declared'
+      role file | any (`within` file) imported="library"
+                | any (`within` file) owned="project"
+                | otherwise="library"
+      physicalRoot name file=case [iterate takeDirectory file!!k |
+          let parts=splitOnDot name,k<-[length parts,length parts-1..1],ext<-[".agda",".lagda",".lagda.md",".lagda.rst",".lagda.tex",".lagda.org",".lagda.typ"],
+          let suffix=joinPath (take k parts)++ext,reverse suffix `isPrefixOf` reverse file] of
+        path:_->path
+        []->takeDirectory file
+      libraryRoots=nubOrd $ imported++[physicalRoot name file | (name,file)<-canonical,role file=="library"]
+  pure $ A.object ["v" .= (1::Int),"basis" .= (basis::String),"projectRoot" .= root,
+    "projectRoots" .= owned,"libraryRoots" .= libraryRoots,"projectFlags" .= projectFlags,
+    "moduleRoles" .= M.fromList [(name,role file::String) | (name,file)<-canonical],"warnings" .= (warnings::[String])]
+  where
+    within root file=let relative=makeRelative (normalise root) (normalise file)
+      in not (isAbsolute relative) && ".." `notElem` splitDirectories relative
+    splitOnDot []=[]
+    splitOnDot value=let (part,rest)=break (=='.') value in part:case rest of []->[];_:xs->splitOnDot xs

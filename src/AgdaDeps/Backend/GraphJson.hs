@@ -162,7 +162,8 @@ externalsSummaryJson = encodeObject externalsSummaryFields . toWireExternals
 -- | All the inputs the schema emitter needs. Per-def state is read off
 -- 'giDefs' ('_state'); a node with no 'ADDef' of its own is 'Defined'.
 data GraphInput = GraphInput
-  { giTypeTerms       :: !(Maybe String)
+  { giTermEvidence    :: !(Maybe String)
+  , giTypeTerms       :: !(Maybe String)
     -- ^ UTF-8 decoded JSON from TypeExport; expanded output only.
   , giDefs            :: [ADDef]
   , giImportEdges     :: [(String, String)]
@@ -219,7 +220,8 @@ data GraphInput = GraphInput
 -- (see "AgdaDeps.SkipAgda").
 emptyGraphInput :: GraphInput
 emptyGraphInput = GraphInput
-  { giTypeTerms              = Nothing
+  { giTermEvidence           = Nothing
+  , giTypeTerms              = Nothing
   , giDefs                   = []
   , giImportEdges            = []
   , giSourceFiles            = []
@@ -305,23 +307,24 @@ moduleEdgeIndexPairs moduleIndexMap defs importEdges =
         _                         -> acc
 
 -- | The module-name node set shared by both emitters: union of def
--- modules, import-edge endpoints, the entry module, failed modules, and
+-- modules, import-edge endpoints, the entry module, external/failed modules, and
 -- extra modules. @'S.toAscList'@ of the result is the ascending module
 -- list both forms emit.
 graphModulesSet
   :: [String]           -- ^ 'moduleKey' of each definition
   -> [(String, String)] -- ^ import edges
   -> Maybe String       -- ^ entry module
+  -> S.Set String       -- ^ external modules, including definition-free namespaces
   -> S.Set String       -- ^ failed modules
   -> S.Set String       -- ^ extra modules
   -> S.Set String
-graphModulesSet defModuleNames importEdges entryModule failedModules extraModules =
+graphModulesSet defModuleNames importEdges entryModule externalModules failedModules extraModules =
   let !s0 = S.fromList defModuleNames
       !s1 = foldl' (\s (a, b) -> S.insert b (S.insert a s)) s0 importEdges
       !s2 = case entryModule of
               Just m  -> S.insert m s1
               Nothing -> s1
-      !s3 = S.union s2 failedModules
+      !s3 = S.unions [s2, externalModules, failedModules]
   in S.union s3 extraModules
 
 buildGraphJson :: GraphInput -> GraphJsonOutput
@@ -351,7 +354,7 @@ buildGraphJson GraphInput{..} =
       -- (2) Module list ('graphModulesSet'; 'S.toAscList' is sorted) -----
       modulesSet :: S.Set String
       modulesSet = graphModulesSet defModuleNames giImportEdges
-                     giEntryModule giFailedModules giExtraModules
+                     giEntryModule giExternalModules giFailedModules giExtraModules
 
       modules :: [String]
       modules = S.toAscList modulesSet
@@ -1457,7 +1460,7 @@ toExpandedGraph GraphInput{..} =
       -- modules: shared with buildGraphJson so the two shapes agree.
       modulesSet :: S.Set String
       modulesSet = graphModulesSet defModuleOf giImportEdges
-                     giEntryModule giFailedModules giExtraModules
+                     giEntryModule giExternalModules giFailedModules giExtraModules
 
       modules    = S.toAscList modulesSet
       externals  = S.toAscList giExternalModules
@@ -1528,7 +1531,8 @@ toExpandedGraph GraphInput{..} =
   -- Assemble the typed wire value; encoding + structural validation are
   -- handled by 'buildExpandedJson' via AgdaDeps.Backend.Wire.
   in ExpandedGraph
-       { egTypeTerms      = giTypeTerms
+       { egTermEvidence   = giTermEvidence
+       , egTypeTerms      = giTypeTerms
        , egNodeKeyVersion = nodeKeyVersion
        , egProducer       = buildFingerprint
        , egModules        = modules

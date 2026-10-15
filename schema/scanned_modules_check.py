@@ -37,10 +37,15 @@ def check(binary, root, previous=None):
     # isolated sources make accidental type-checking observable.
     module_sources = {
         "Entry": (project / "Entry.agda", "open import Hub\nopen import Used\n"
+                  "open Used.InlineOnly public\n"
                   "postulate local : Set\n"),
         "Hub": (project / "Hub.agda", "open import Base public\n"),
         "Base": (project / "Base.agda", "postulate X : Set\n"),
-        "Used": (library / "Used.agda", "postulate X : Set\n"),
+        "Used": (library / "Used.agda", "postulate X : Set\n"
+                 "module InlineOnly where\n"
+                 "  identity : Set → Set\n"
+                 "  identity A = A\n"
+                 "  {-# INLINE identity #-}\n"),
         "LocalOnly": (project / "LocalOnly.agda", ""),
         "LocalOnly.Child": (project / "LocalOnly" / "Child.agda", ""),
         "LocalDefs": (project / "LocalDefs.agda", "bad : MissingName\n"),
@@ -91,6 +96,16 @@ def check(binary, root, previous=None):
         }
         modules = set(graph["modules"])
         assert modules & tested == expected, (mode, expected, modules)
+        # Public re-exports name this external namespace even though its
+        # sole definition is filtered by ignoreDef. It has no import edge
+        # or separate source file to introduce it into the module inventory.
+        inline_namespace = "Used.InlineOnly"
+        expect_inline = (
+            not skip and not no_externals
+            and not any(inline_namespace == prefix or inline_namespace.startswith(prefix + ".")
+                        for prefix in excludes)
+        )
+        assert (inline_namespace in modules) == expect_inline, (mode, skip, no_externals, modules)
         expected_map = {m: str(module_sources[m][0]) for m in expected}
         expected_files = {
             p for p in scanned_files if not no_externals or Path(p).is_relative_to(project)
@@ -119,7 +134,7 @@ def check(binary, root, previous=None):
                 for module, filename in manifest.items():
                     detail = json.loads((path.parent / filename).read_text(encoding="utf-8"))
                     names.update(detail["defs"]["names"])
-                    if module in source_only & expected or module == "Hub" or skip:
+                    if module in source_only & expected or module in {"Hub", inline_namespace} or skip:
                         assert detail["placeholder"] is True, (module, detail)
                         assert detail["defs"]["names"] == [], (module, detail)
                         if not skip:
@@ -129,6 +144,8 @@ def check(binary, root, previous=None):
                         ), (module, detail)
             else:
                 names = set(graph["defs"]["names"])
+        assert (inline_namespace in externals) == expect_inline, (mode, externals)
+        assert not any(name.startswith(inline_namespace + ".") for name in names), names
         assert {m: p for m, p in mapping.items() if m in tested} == expected_map, mapping
         assert externals <= modules, externals
         assert externals & tested == expected & external, externals

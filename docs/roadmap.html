@@ -28,12 +28,51 @@ Shipped work: <a href="changelog.html">Changelog.md</a>.</p>
 <hr>
 <h2 id="open">Open</h2>
 <ul>
-<li>[ ] <strong>Truly minimal lazy serialise.</strong> A body-only edit already rewrites just
+<li>
+<p>[ ] <strong>Truly minimal lazy serialise.</strong> A body-only edit already rewrites just
   the edited module's lazy file, but adding/removing a definition renumbers the
   dense global node indices the per-module <code>outEdges</code> embed, so many files'
   epochs change. Making that minimal needs a stable-per-node index in the lazy
-  wire format, coordinated with the views in <code>agda-plotter</code> that read it.</li>
-</ul></div>
+  wire format, coordinated with the views in <code>agda-plotter</code> that read it.</p>
+</li>
+<li>
+<p>[ ] <strong>Nodes and uses for INLINE functions, pattern synonyms and
+  primitives.</strong> These names get no definition node and no edge, so a consumer
+  sees a use count of zero for some of the most-used names in a corpus:</p>
+</li>
+<li><code>ignoreDef</code> drops <code>INLINE</code> functions on purpose: Agda has inlined every
+    call site by the time the backend runs, so the bare node would be a
+    false-"dead" orphan. On the Jolteon graph, all 10 <code>INLINE</code> definitions
+    in agda-stdlib's <code>Function.Base</code> are missing (<code>_∘_</code>, <code>_$_</code>, <code>flip</code>,
+    <code>case_of_</code>, …) and its other 25 are present.</li>
+<li>It also drops <code>Agda.Primitive.Level</code>, primitive sorts (<code>Setω</code>) and
+    primitives without clauses.</li>
+<li>Pattern synonyms (<code>yes</code>, <code>no</code> in <code>Relation.Nullary.Decidable.Core</code>) are
+    expanded before type-checking and never become definitions.</li>
+</ul>
+<p>Why it matters: agda-graph-explorer's <code>agda-unused</code> <code>public</code> check cannot
+  judge a re-export of such a name. On Jolteon it withholds 20 findings: 8
+  that name one (all genuinely used) and 12 blanket <code>open import … public</code>
+  lines that bring one in, whose verdict stays unknown. Consumer side:
+  <code>ctxDefinedKeys</code> in <code>AgdaUnused.Analysis</code>, and agda-graph-explorer's
+  Backlog.md.</p>
+<p>What it needs:
+  - <strong>The node and its uses together, never the node alone.</strong> A node without
+    uses brings back exactly the false-dead orphan <code>ignoreDef</code> avoids.
+  - <strong>Uses from where the name is written, not from elaborated syntax</strong>,
+    which no longer holds an inlined call or a pattern synonym. Candidate
+    source: the interface's highlighting, already read here for the
+    unsolved-meta and unsolved-constraint spans. Check that its name aspects
+    carry a definition site for an inlined call and for a pattern-synonym
+    use before relying on it.
+  - <strong>Edge provenance.</strong> An occurrence range says where a use is but not
+    whether it is in the type or the body. Map it against the definition's
+    ranges, or tag the edge <code>unknown</code>.
+  - <strong>Coordinate a new <code>kind</code> with the consumer first.</strong>
+    <code>AgdaGraph.Schema</code> refuses an unknown <code>kind</code> value at decode, so a
+    <code>pattern-synonym</code> kind has to ship there before here. Marking an existing
+    kind (e.g. an <code>inline</code> flag on a <code>function</code>) is additive and needs no
+    coordination.</p></div>
 </div>
 </main>
 <footer class="site-footer"><div class="wrap">

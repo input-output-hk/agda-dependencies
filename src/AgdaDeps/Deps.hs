@@ -175,6 +175,7 @@ import Agda.Compiler.Backend ( IsMain )
 
 import AgdaDeps.Options ( Options(..), DefState(..), isExcludedModule )
 import AgdaDeps.MatchConstant ( matchConstantAnalysable, matchConstantOf )
+import AgdaDeps.TermExport (captureTermDefinition)
 import AgdaDeps.TypeExport (captureTypeDefinition)
 import AgdaDeps.TermCanon ( subtermHashes )
 import AgdaDeps.NodeKey
@@ -1471,6 +1472,7 @@ computeDefAD opts def@Defn{..} = do
   -- Convert to 'NodeRef' at the producer boundary: everything downstream
   -- is identity-as-data.
   nameRef  <- mkRef defName
+  when (optWithTerms opts) $ captureTermDefinition opts False (nrFile nameRef) def
   when (optWithTypeTerms opts) $ captureTypeDefinition (nrFile nameRef) def
   -- Tag each edge as its 'NodeRef' is built (one pass), reading the
   -- precomputed 'nrWhereHelper' bit instead of a per-edge 'prettyShow'.
@@ -1538,6 +1540,7 @@ compileDefAD opts _ _ def@Defn{..}
       -- Recorded for ignored defs too: a partial application inside a
       -- with-helper or a pattern lambda is still a partial application of
       -- its target, and those bodies live nowhere else.
+      when (optWithTerms opts) $ captureTermDefinition opts True Nothing def
       recordUnsaturatedOf def
       -- Record raw out-edges without applying 'ignoreDef' (refs to
       -- other ignored defs are kept so the closure pass can chain through).

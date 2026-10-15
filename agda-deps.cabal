@@ -61,6 +61,8 @@ executable agda-deps
                        AgdaDeps.Precompute
                        AgdaDeps.SkipAgda
                        AgdaDeps.TermCanon
+                       AgdaDeps.TermCodec
+                       AgdaDeps.TermExport
                        AgdaDeps.TypeExport
   autogen-modules:     Paths_agda_deps
   build-depends:       base >= 4.10 && < 4.23,
@@ -101,6 +103,8 @@ test-suite hardening
                        AgdaDeps.Options
                        AgdaDeps.NodeKey
                        AgdaDeps.TermCanon
+                       AgdaDeps.TermCodec
+                       AgdaDeps.TermExport
                        AgdaDeps.TypeExport
                        AgdaDeps.MatchConstant
                        AgdaDeps.Deps

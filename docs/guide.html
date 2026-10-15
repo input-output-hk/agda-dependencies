@@ -446,6 +446,49 @@ environment where security is critical, without conducting your own thorough
 security assessment. By using this code, you acknowledge and accept all
 associated risks, and our company disclaims any liability for damages or losses.</p>
 <h2 id="structural-type-evidence">Structural type evidence</h2>
+<p>For autonomous abstraction discovery, export once and pass the graph to the
+analysis consumer:</p>
+<pre><code class="language-sh">agda-deps --format=json --json-mode=expanded --with-terms -i src -o out src/Main.agda
+agda-optimization term-patterns out/deps.json --json
+</code></pre>
+<p>No rule file or consumer scope is required. The evidence includes source
+ownership resolved through Agda's <code>.agda-lib</code> parser, dependency roots and module
+roles, canonical-to-source spellings, and a bounded catalogue of builtin equality
+signatures. Imported bodies and laws supply patterns; only owned occurrences
+are editable. Explicit <code>--term-scope</code> limits body capture while retaining up to
+2,048 out-of-scope equality signatures and bounded small supporting definitions.
+<code>--no-externals</code> excludes that external catalogue. Omitted evidence and capture
+limits remain visible in <code>coverage</code>; export does not certify consumer rewrites.</p>
+<p><code>--with-terms</code> adds the separate optional <code>termEvidence.v = 1</code> payload to
+expanded JSON. It captures ordinary computation and proof clauses, ordered
+patterns, clause telescopes, contextual result types, section parameters,
+transparency, and constructor/projection conventions. Repeat
+<code>--term-scope=MODULE</code> to select body roots in modules and their descendants:</p>
+<pre><code class="language-sh">agda-deps --format=json --json-mode=expanded --with-terms \
+  --term-scope=MyLibrary --term-scope=MyArithmeticRules \
+  -i src/ -o out/ src/Main.agda
+agda-optimization term-patterns out/deps.json --evidence=terms \
+  --scope=MyLibrary --rules equations.yaml --json
+</code></pre>
+<p>Supporting evidence follows references to depth 2, with at most 512 supporting
+declarations and 10,000 structural nodes per contextual root. Reachable hidden
+implementations are separate from dependency nodes; existing reference-only
+nodes retain their graph ownership. Coverage records omissions, unsupported
+forms, unavailable bodies, and the selected roots. Environment identities retain
+compiler version, full effective option records, source/interface hashes, and
+registered rewrite lemma identities. <code>occurrenceTypes</code> retains clause-root
+annotations; optional <code>subtermTypes</code> adds at most 128 inferred neutral subterm
+types per clause in its original telescope, with a 2,000-node type limit.
+Inference stops at binders and omits unsupported inference forms, including
+constructors and relevant projections. Coverage marks subterm typing incomplete;
+it is bounded evidence, not a complete typing derivation or reduction oracle.
+Consumers can analyze supported regions inside dependent/proof bodies while
+keeping their enclosing contexts fixed. Elaborated paths are inspection
+locations, not source-edit ranges.</p>
+<p>This export requires expanded JSON and rejects <code>--incremental</code>/<code>--skip-agda</code>.
+YAML uses <code>with-terms: true</code> and <code>term-scope: [MyLibrary, MyArithmeticRules]</code>.
+It leaves dependency filtering/contraction and the existing type evidence
+contract intact. Both evidence payloads can be requested together.</p>
 <p><code>--with-type-terms</code> adds the optional <code>typeTerms</code> object to expanded v2 JSON.
 It contains one hash-consed expression DAG, definition signatures and
 inherited section-parameter counts, plus type-valued clause bodies and their

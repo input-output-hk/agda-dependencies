@@ -19,7 +19,7 @@
 <main><div class="layout">
 <aside class="toc"><div class="toc-inner">
 <div class="toc-title">On this page</div>
-<nav><a class="lvl2" href="#setup">Setup</a><a class="lvl2" href="#dot-output-default">DOT output (default)</a><a class="lvl2" href="#html-output-hand-the-json-to-agda-plotter">HTML output — hand the JSON to agda-plotter</a><a class="lvl2" href="#json-output-for-downstream-tooling">JSON output — for downstream tooling</a><a class="lvl2" href="#-no-externals-drop-stdlib-from-the-graph">--no-externals — drop stdlib from the graph</a><a class="lvl2" href="#-keep-going-collect-checkable-files-despite-type-errors">--keep-going — collect checkable files despite type errors</a><a class="lvl2" href="#-skip-agda-module-level-graph-no-type-checking">--skip-agda — module-level graph, no type-checking</a><a class="lvl2" href="#-lazy-a-page-that-stays-small-at-scale">--lazy — a page that stays small at scale</a><a class="lvl2" href="#-with-term-hashes-subterm-fingerprints">--with-term-hashes — subterm fingerprints</a><a class="lvl2" href="#argusage-find-arguments-a-definition-never-uses">argUsage — find arguments a definition never uses</a><a class="lvl2" href="#-incremental-cache-per-module-work-across-rebuilds">--incremental — cache per-module work across rebuilds</a><a class="lvl2" href="#-packed-analytical-compact-json-without-losing-fidelity">--packed-analytical — compact JSON without losing fidelity</a><a class="lvl2" href="#a-yaml-config-checked-before-use">A YAML config, checked before use</a><a class="lvl2" href="#type-abstraction-reports">Type abstraction reports</a></nav>
+<nav><a class="lvl2" href="#setup">Setup</a><a class="lvl2" href="#dot-output-default">DOT output (default)</a><a class="lvl2" href="#html-output-hand-the-json-to-agda-plotter">HTML output — hand the JSON to agda-plotter</a><a class="lvl2" href="#json-output-for-downstream-tooling">JSON output — for downstream tooling</a><a class="lvl2" href="#-no-externals-drop-stdlib-from-the-graph">--no-externals — drop stdlib from the graph</a><a class="lvl2" href="#-keep-going-collect-checkable-files-despite-type-errors">--keep-going — collect checkable files despite type errors</a><a class="lvl2" href="#-skip-agda-module-level-graph-no-type-checking">--skip-agda — module-level graph, no type-checking</a><a class="lvl2" href="#-lazy-a-page-that-stays-small-at-scale">--lazy — a page that stays small at scale</a><a class="lvl2" href="#-with-term-hashes-subterm-fingerprints">--with-term-hashes — subterm fingerprints</a><a class="lvl2" href="#argusage-find-arguments-a-definition-never-uses">argUsage — find arguments a definition never uses</a><a class="lvl2" href="#-incremental-cache-per-module-work-across-rebuilds">--incremental — cache per-module work across rebuilds</a><a class="lvl2" href="#-packed-analytical-compact-json-without-losing-fidelity">--packed-analytical — compact JSON without losing fidelity</a><a class="lvl2" href="#a-yaml-config-checked-before-use">A YAML config, checked before use</a><a class="lvl2" href="#type-abstraction-reports">Type abstraction reports</a><a class="lvl2" href="#general-computation-and-proof-bodies">General computation and proof bodies</a></nav>
 </div></aside>
 <div class="prose"><h1 id="examples">Examples</h1>
 <p>Runnable recipes for <code>agda-deps</code>. Full flag reference: <a href="guide.html">README.md</a>.</p>
@@ -175,7 +175,46 @@ agda-optimization type-patterns /tmp/type-graph/deps.json --min-owners=2
 <p>Use a larger graph for repeated predicates. <code>--with-signatures</code> is optional;
 structural matching uses <code>typeTerms</code>. The consuming report separates
 inherited contexts, retrieves existing type bodies and checks known module
-cycles. A proposed abstraction still needs source review and Agda validation.</p></div>
+cycles. A proposed abstraction still needs source review and Agda validation.</p>
+<h2 id="general-computation-and-proof-bodies">General computation and proof bodies</h2>
+<pre><code class="language-sh">agda-deps --format=json --json-mode=expanded --with-terms \
+  --term-scope=term-evidence -i test-hardening/ \
+  -o /tmp/agda-terms test-hardening/term-evidence.agda
+agda-optimization term-patterns /tmp/agda-terms/deps.json \
+  --evidence=terms --scope=term-evidence --min-nodes=4 --json
+</code></pre>
+<p>The consumer can discover equations and abstractions directly from this graph:</p>
+<pre><code class="language-sh">agda-optimization term-patterns out/deps.json --json
+</code></pre>
+<p>Omit <code>--term-scope</code> to capture all retained bodies. With scopes, a separate
+bounded <code>equationSignatures</code> catalogue still exposes imported library laws.
+Each environment's <code>sourceOwnership</code> records owned includes and read-only
+library roots, so graph-only discovery requires no local Agda library registry.
+Source/cache copies are needed only when requesting live validation.</p>
+<p><code>termEvidence.subtermTypes</code> supplies bounded contextual typing for neutral
+subterms without changing the root-only <code>occurrenceTypes</code> field. The consumer
+can keep dependent premises fixed, mine polymorphic computational patterns and
+proof abstractions, and check helpers in private copies of the original module:</p>
+<pre><code class="language-sh">agda-optimization term-patterns /tmp/agda-terms/deps.json \
+  --evidence=terms --scope=term-evidence --min-nodes=4 \
+  --helpers /tmp/agda-helpers --check-helpers --include test-hardening/ --json
+</code></pre>
+<p>Checked helper proposals name their validated instances and expression paths.
+Original source edits remain a separate review/check step. Rewrites crossing
+dependent applications require explicit transport evidence.</p>
+<p>To enable equations, save a rule file containing actual lemma identities:</p>
+<pre><code class="language-yaml">v: 1
+lemmas: [term-evidence.right-zero]
+</code></pre>
+<pre><code class="language-sh">agda-optimization term-patterns /tmp/agda-terms/deps.json \
+  --evidence=terms --scope=term-evidence --min-nodes=4 \
+  --rules equations.yaml --check-certificates --include test-hardening/ --json
+</code></pre>
+<p>The hidden Nat binder in <code>right-zero</code> and the typed <code>Clock.delta</code> projection
+are supported. Projection inputs remain opaque; generated witnesses abstract
+those Nat values. Body patterns and helpers are proposals until their instances
+are checked. The producer reports clause typing and bounded helper coverage;
+it does not certify unfolding or numeric transformations of entire proof bodies.</p></div>
 </div>
 </main>
 <footer class="site-footer"><div class="wrap">
