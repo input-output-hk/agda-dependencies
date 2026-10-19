@@ -1,14 +1,18 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
 -- Shared structural codec. No conversion checking or general normalization.
 module AgdaDeps.TermCodec
   ( Tree(..), binderInfo, ordinaryInfo, typeTree, termTree, removeCopies
-  , Intern, intern, contextTrees, limitedTree ) where
+  , Intern, intern, encodeInternNode, internNodeValue, contextTrees, limitedTree ) where
 
 import qualified Control.Monad.State.Strict as ST
+import Control.DeepSeq (NFData)
+import GHC.Generics (Generic)
 import qualified Data.Aeson as A
+import qualified Data.Aeson.Encoding as AE
 import Data.Aeson ((.=))
 import qualified Data.Map.Strict as M
 import Data.List (isPrefixOf)
@@ -28,7 +32,8 @@ import Agda.TypeChecking.Reduce (reduceDefCopy)
 import Agda.TypeChecking.Monad.Base (Reduced(..))
 import AgdaDeps.NodeKey (nodeKeyOfQ)
 
-data Tree = Tree String String [String] Bool [Tree] deriving (Eq, Ord, Show)
+data Tree = Tree String String [String] Bool [Tree] deriving (Eq, Ord, Show, Generic)
+instance NFData Tree
 
 binderInfo :: ArgInfo -> [String]
 binderInfo a = [show (getHiding a), relevance (getRelevance a), quantity (getQuantity a),
@@ -110,7 +115,18 @@ removeCopies = traverseTermM (step (64 :: Int))
 
 -- Hash-cons complete structural nodes after capture, in deterministic owner
 -- order. Binder display names are retained but ignored by consumer matching.
-type Intern = (M.Map (String,String,[String],Bool,[Int]) Int, M.Map Int A.Value)
+type InternNode = (String,String,[String],Bool,[Int])
+-- The same immutable key is shared by both maps. JSON objects and UTF-8 names
+-- are allocated only during output, not retained for every captured DAG node.
+type Intern = (M.Map InternNode Int, M.Map Int InternNode)
+
+internNodeValue :: InternNode -> A.Value
+internNodeValue (tag,name,info,binds,children)=A.object
+  ["tag" .= tag,"name" .= name,"info" .= info,"binds" .= binds,"children" .= children]
+
+encodeInternNode :: InternNode -> AE.Encoding
+encodeInternNode (tag,name,info,binds,children)=A.pairs
+  ("tag" .= tag <> "name" .= name <> "info" .= info <> "binds" .= binds <> "children" .= children)
 
 intern :: Tree -> ST.State Intern Int
 intern (Tree tag name info binds children) = do
@@ -121,9 +137,7 @@ intern (Tree tag name info binds children) = do
     Just n -> pure n
     Nothing -> do
       let n = M.size keys
-      ST.put (M.insert key n keys, M.insert n (A.object
-        ["tag" .= tag, "name" .= name, "info" .= info,
-         "binds" .= binds, "children" .= ids]) nodes)
+      ST.put (M.insert key n keys, M.insert n key nodes)
       pure n
 
 

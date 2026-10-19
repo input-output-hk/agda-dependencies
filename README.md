@@ -426,19 +426,39 @@ agda-optimization term-patterns out/deps.json --evidence=terms \
 
 Supporting evidence follows references to depth 2, with at most 512 supporting
 declarations and 10,000 structural nodes per contextual root. Reachable hidden
-implementations are separate from dependency nodes; existing reference-only
+implementations are separate from dependency nodes. Optional `sourceKind` and
+`sourceParent` identify generated with-functions and their owning declarations;
+a parent's location does not make a generated body a source replacement target.
+The producer interns nodes during capture and streams the evidence as UTF-8,
+so repeated contexts share storage. Existing reference-only
 nodes retain their graph ownership. Coverage records omissions, unsupported
 forms, unavailable bodies, and the selected roots. Environment identities retain
 compiler version, full effective option records, source/interface hashes, and
-registered rewrite lemma identities. `occurrenceTypes` retains clause-root
+registered rewrite lemma identities. Optional `compilerBuiltins` maps builtin
+pragma identifiers to sorted node-key lists from Agda's interface bindings.
+Conflicting bindings remain visible as multiple keys; consumers must decide
+which compiler foundations they support. This distinguishes compiler interval
+primitives from user postulates when compatibility-generated proof clauses
+depend on them. It does not certify an arbitrary builtin as a usable equation.
+`occurrenceTypes` retains clause-root
 annotations; optional `subtermTypes` adds at most 128 inferred neutral subterm
-types per clause in its original telescope, with a 2,000-node type limit.
+types per clause in its original telescope, with a 500-node input-expression
+limit and a 2,000-node type limit. Annotations cut away by the serialized body's
+node limit are omitted.
+Optional type queries have a 100 ms wall deadline and force their bounded
+results inside restored Agda state. A timeout or synchronous query failure
+omits that annotation and preserves the enclosing definition. Coverage records
+the deadline as `subtermQueryMicros`; available annotations can vary with the
+capture budget and load. Cancellation and process exit requests still propagate.
 Inference stops at binders and omits unsupported inference forms, including
 constructors and relevant projections. Coverage marks subterm typing incomplete;
 it is bounded evidence, not a complete typing derivation or reduction oracle.
 Consumers can analyze supported regions inside dependent/proof bodies while
 keeping their enclosing contexts fixed. Elaborated paths are inspection
 locations, not source-edit ranges.
+
+Constructor section prefixes are bounded by the compiler’s constructor
+parameter count, excluding the record module’s self argument and its fields.
 
 This export requires expanded JSON and rejects `--incremental`/`--skip-agda`.
 YAML uses `with-terms: true` and `term-scope: [MyLibrary, MyArithmeticRules]`.

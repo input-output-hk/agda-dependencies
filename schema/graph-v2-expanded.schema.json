@@ -536,6 +536,20 @@
         },
         "environment": {
           "type": "string"
+        },
+        "sourceKind": {
+          "type": "string",
+          "enum": [
+            "declaration",
+            "with-function",
+            "extended-lambda"
+          ]
+        },
+        "sourceParent": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },

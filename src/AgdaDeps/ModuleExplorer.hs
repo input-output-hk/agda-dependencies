@@ -48,7 +48,6 @@ import Agda.Utils.Tuple.Strict ( Pair(..) )
 #endif
 
 import System.Environment ( getArgs, getProgName )
-import System.Exit ( ExitCode )
 import System.IO ( hPutStrLn, stderr )
 
 import Agda.Compiler.Backend
@@ -99,12 +98,6 @@ import Agda.TypeChecking.Monad.Base
   , stPatternSynImports, stImportedDisplayForms
   , iBuiltin, iMetaBindings, iPatternSyns, iDisplayForms
   , Builtin(..), PrimitiveImpl(..), primFunName
-  -- TCM newtype access for 'catchAllTCM'.
-#if MIN_VERSION_Agda(2,9,0)
-  , pattern TCM, unTCM
-#else
-  , TCMT(TCM, unTCM)
-#endif
   )
 #if MIN_VERSION_Agda(2,9,0)
 import Agda.TypeChecking.Monad.Base ( Signature(Sig) )
@@ -121,6 +114,7 @@ import Agda.TypeChecking.MetaVars ( openMetasToPostulates )
 import Agda.TypeChecking.Reduce ( instantiateFull )
 
 import AgdaDeps.Logging ( info )
+import AgdaDeps.Util (catchAllTCM)
 
 -- ** Driver entry point
 
@@ -231,20 +225,6 @@ guardCheck reportFailed act =
     `catchAllTCM` \ ex -> Left <$> handleCheckException reportFailed ex
 
 -- ** Exception plumbing
-
--- | Catch-everything guard for the best-effort partial pass. Needed over
--- 'catchError', which catches only 'TCErr': Agda internals also throw GHC
--- exceptions (@__IMPOSSIBLE__@, exit 120). Catches both, re-throwing only
--- 'ExitCode' + async. State is NOT rolled back (unlike 'catchError'), so
--- the handler continues from the failure point — the next 'setInterface'
--- re-establishes per-module state.
-catchAllTCM :: TCM a -> (E.SomeException -> TCM a) -> TCM a
-catchAllTCM m h = TCM $ \ r e ->
-  unTCM m r e `E.catches`
-    [ E.Handler $ \ (ex :: ExitCode)         -> E.throwIO ex
-    , E.Handler $ \ (ex :: E.AsyncException) -> E.throwIO ex
-    , E.Handler $ \ (ex :: E.SomeException)  -> unTCM (h ex) r e
-    ]
 
 -- | First line of an exception's rendering, for one-line breadcrumbs.
 exceptionLine :: E.SomeException -> String

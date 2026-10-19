@@ -74,3 +74,11 @@ character _ = 2
 
 successor : Nat → Nat
 successor n = suc (n + 0)
+
+-- Empty records have an implicit constructor but no field domains that could
+-- accidentally hide a section count including the record module's self value.
+module ConstructorSection (A : Set) where
+  record EmptyRecord (a : A) : Set where
+
+  makeEmpty : (a : A) → EmptyRecord a
+  makeEmpty a = record {}

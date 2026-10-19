@@ -21,11 +21,11 @@ import Data.Maybe (isJust)
 import System.IO.Unsafe (unsafePerformIO)
 
 import Agda.Syntax.Common (getArgInfo)
-import Agda.Syntax.Internal (Term(..), Type''(..), Clause(..), domIsFinite, unDom, telToList, qnameModule)
-import Agda.TypeChecking.Monad (TCM, Definition(..), pattern Function, funClauses, lookupSection)
-import Agda.Utils.Size (size)
+import Agda.Syntax.Internal (Term(..), Type''(..), Clause(..), domIsFinite, unDom, telToList)
+import Agda.TypeChecking.Monad (TCM, Definition(..), pattern Function, funClauses)
 import Agda.TypeChecking.Telescope (telView)
 import Agda.TypeChecking.Substitute (TelV(..))
+import AgdaDeps.Util (definitionSectionParameters)
 import AgdaDeps.TermCodec
 import AgdaDeps.NodeKey (nodeKeyOfQ, moduleKeyOfQ, bindingLineOfQ)
 
@@ -41,7 +41,7 @@ initializeTypeExport :: Bool -> IO ()
 initializeTypeExport enabled = writeIORef exportRef (ExportState enabled M.empty)
 
 captureTypeDefinition :: Maybe FilePath -> Definition -> TCM ()
-captureTypeDefinition file Defn{..} = do
+captureTypeDefinition file definition@Defn{..} = do
   ExportState enabled _ <- liftIO (readIORef exportRef)
   let owner = moduleKeyOfQ defName
   when enabled $ do
@@ -54,7 +54,7 @@ captureTypeDefinition file Defn{..} = do
       _ -> pure []
     -- Module-copy wrappers are removed from the exported terms below.
     signature <- removeCopies defType
-    sectionParameters <- size <$> lookupSection (qnameModule defName)
+    sectionParameters <- definitionSectionParameters definition
     bodies <- fmap concat $ forM clauses $ \cl -> case clauseBody cl of
       Nothing -> pure []
       Just rawBody -> do
@@ -90,4 +90,4 @@ readTypeTerms retained = do
         (entries, (_, nodes)) = ST.runState
           (mapM encodeCaptured selected) (M.empty, M.empty)
     pure $ Just $ T.unpack $ TE.decodeUtf8 $ BL.toStrict $ A.encode $ A.object
-      ["v" .= (1 :: Int), "nodes" .= M.elems nodes, "definitions" .= entries]
+      ["v" .= (1 :: Int), "nodes" .= map internNodeValue (M.elems nodes), "definitions" .= entries]

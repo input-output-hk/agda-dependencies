@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-10-18
+
+- Include optional compiler builtin bindings in general-term environments.
+  Export pragma identifiers and node keys from Agda interfaces, preserving
+  conflicting bindings for conservative consumer handling. Ordinary output,
+  graph v2 and node-key identities remain unchanged.
+
+## 2026-10-16
+
+- Bound constructor section prefixes by Agda’s constructor parameter count in
+  both structural and general-term exports. Empty record modules include a
+  self argument that is absent from their constructor types.
+
+- Add optional general-term source provenance for generated with-functions and
+  their parent declarations. Keep generated implementation locations distinct
+  from editable source occurrences.
+- Intern general-term nodes during capture, share compact node records, and
+  stream term JSON without retaining a linked character representation.
+- Bound neutral-subterm inference inputs and omit annotations whose paths were
+  removed by body capture limits. Add a regression for oversized clause bodies.
+- Isolate synchronous failures in optional subterm type queries, force their
+  results before leaving restored Agda state, and preserve the enclosing
+  definition. Add a 100 ms deadline for each optional query and report it in
+  coverage. Cancellation and process exit requests still propagate; extraction
+  continues on its original TCM thread.
+
 ## 2026-10-15
 
 - Export `.agda-lib` source ownership, dependency/module roles and source

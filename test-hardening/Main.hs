@@ -4,12 +4,16 @@
 module Main (main) where
 
 import qualified Control.Exception as E
+import Control.DeepSeq (force)
+import Control.Concurrent (threadDelay,myThreadId)
 import Control.Monad ( foldM, unless )
+import Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString.Lazy as BL
 #ifndef mingw32_HOST_OS
 import Data.Bits ( (.&.) )
 #endif
 import Data.List ( isPrefixOf, permutations )
+import Data.IORef (newIORef,readIORef,writeIORef)
 import qualified Data.Text.Lazy as TL
 import System.Directory
   ( createDirectory, createDirectoryIfMissing, createDirectoryLink, createFileLink
@@ -17,6 +21,7 @@ import System.Directory
   , withCurrentDirectory )
 import System.FilePath ( (</>) )
 import System.IO ( hClose, openTempFile )
+import System.Exit (ExitCode(..))
 #ifndef mingw32_HOST_OS
 import System.Posix.Files ( fileMode, getFileStatus, setFileMode )
 #endif
@@ -35,7 +40,10 @@ import AgdaDeps.Options
   ( DefState(..), OutputFormat(..), Options(..), ColorPalette(..)
   , defaultOptions, colorOpt, applyCliPalette )
 import AgdaDeps.Precompute ( discoverAgdaFiles )
-import AgdaDeps.Util ( underCwd )
+import AgdaDeps.Util ( underCwd, catchAllTCM, boundedQueryTCM )
+import AgdaDeps.TermCodec (Tree(..))
+import qualified Agda.TypeChecking.Monad as TC
+import qualified Agda.Interaction.Options as O
 
 main :: IO ()
 main = withTempDir $ \tmp -> do
@@ -46,7 +54,57 @@ main = withTempDir $ \tmp -> do
   testCliPalette
   testFallbackLayout
   testWireValidation
+  testTCMQueryRecovery
   putStrLn "hardening tests OK"
+
+-- Optional inference can fail lazily through a GHC exception rather than
+-- TCErr. Recover inside the snapshot and force the result there; neither a
+-- changed TCM option nor a hidden thunk may leak into the following definition.
+testTCMQueryRecovery :: IO ()
+testTCMQueryRecovery = do
+  changed <- newIORef False
+  recovered <- TC.runTCMTop $ do
+    before <- TC.pragmaOptions
+    fallback <- TC.localTCState $ catchAllTCM (do
+      TC.setTCLens' TC.stPragmaOptions before {O._optInstanceSearchDepth=17}
+      current <- TC.pragmaOptions
+      liftIO $ writeIORef changed (O._optInstanceSearchDepth current==17 && O._optInstanceSearchDepth before/=17)
+      liftIO $ E.evaluate $ force [Tree "def" (error "optional type probe") [] False []])
+      (\_ -> pure [])
+    after <- TC.pragmaOptions
+    pure (null fallback, O._optInstanceSearchDepth before==O._optInstanceSearchDepth after)
+  didChange <- readIORef changed
+  assert "optional TCM query leaked a lazy failure or modified state"
+    (didChange && case recovered of Right (True,True) -> True; _ -> False)
+  entered <- newIORef False
+  timed <- TC.runTCMTop $ do
+    before <- TC.pragmaOptions
+    result <- boundedQueryTCM 10000 $ do
+      TC.setTCLens' TC.stPragmaOptions before {O._optInstanceSearchDepth=23}
+      liftIO $ writeIORef entered True
+      liftIO $ threadDelay 100000
+      pure ()
+    after <- TC.pragmaOptions
+    pure (result, O._optInstanceSearchDepth before==O._optInstanceSearchDepth after)
+  didEnter <- readIORef entered
+  assert "optional TCM query deadline did not restore modified state"
+    (didEnter && case timed of Right (Nothing,True) -> True; _ -> False)
+  callingThread <- myThreadId
+  sameThread <- TC.runTCMTop $ boundedQueryTCM 100000 (liftIO myThreadId)
+  assert "optional TCM query moved extraction to another thread"
+    (case sameThread of Right (Just actual) -> actual==callingThread; _ -> False)
+  forced <- TC.runTCMTop $ boundedQueryTCM 100000
+    (pure [Tree "def" (error "lazy bounded probe") [] False []])
+  assert "optional TCM query returned a deferred exception"
+    (case forced of Right Nothing -> True; _ -> False)
+  interrupted <- E.try (TC.runTCMTop $ boundedQueryTCM 100000
+    (liftIO $ E.throwIO E.UserInterrupt :: TC.TCM ()))
+    :: IO (Either E.AsyncException (Either TC.TCErr (Maybe ())))
+  assert "TCM recovery swallowed cancellation" (case interrupted of Left E.UserInterrupt -> True; _ -> False)
+  exited <- E.try (TC.runTCMTop $ boundedQueryTCM 100000
+    (liftIO $ E.throwIO (ExitFailure 120) :: TC.TCM ()))
+    :: IO (Either ExitCode (Either TC.TCErr (Maybe ())))
+  assert "TCM recovery swallowed an exit request" (case exited of Left (ExitFailure 120) -> True; _ -> False)
 
 -- Compare normalisation with Agda's actual GetOpt on short clusters,
 -- attached/required/optional operands, unknown options and '--'. Values

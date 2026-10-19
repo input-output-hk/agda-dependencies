@@ -63,6 +63,8 @@ import qualified Agda.Syntax.Abstract.Name as A
 import Agda.Syntax.Abstract.Name ( anameName )
 #endif
 import Agda.Syntax.Internal ( qnameModule, qnameName )
+import Agda.Syntax.Internal.Names ( namesIn )
+import Agda.Syntax.Builtin ( SomeBuiltin(..), IsBuiltin(getBuiltinId) )
 import Agda.Syntax.Common.Pretty ( prettyShow )
 import Agda.Syntax.Scope.Base
   ( NameSpace(nsNames), NameSpaceId(ImportedNS, PublicNS), scopeNameSpace
@@ -80,7 +82,7 @@ import Agda.TypeChecking.Monad.Base
   ( iImportedModules, miInterface, Interface
   , iScope, iModuleName, iTopLevelModuleName
   , sigDefinitions, iFullHash, iSignature, iSourceHash, sigRewriteRules
-  , iFilePragmaOptions, iOptionsUsed, srcFilePath
+  , iFilePragmaOptions, iOptionsUsed, srcFilePath, iBuiltin, Builtin(..)
   )
 -- 'pragmaStrings' + 'iFilePragmaOptions' live here on both 2.8 and 2.9
 -- (module has no export list) — no CPP for the file-OPTIONS scan.
@@ -915,6 +917,12 @@ emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippab
     liftIO $ sourceOwnership (optOverrideLibrariesFile agdaOptions) (entryModule >>= sourceForModule) (M.toList moduleFileMap)
     else pure Aeson.Null
   let evidenceIfaces=[(prettyShow (iTopLevelModuleName iface),iface) | mi<-M.elems visited,let iface=miInterface mi]
+      -- Export compiler bindings, not a source-name heuristic. Preserve any
+      -- disagreement across interfaces so consumers can refuse ambiguity.
+      compilerBuiltins=M.map S.toAscList $ M.fromListWith S.union
+        [(getBuiltinId builtin,S.fromList names) | (_,iface)<-evidenceIfaces,
+          (BuiltinName builtin,Builtin term)<-M.toList (iBuiltin iface),
+          let names=map nodeKeyOfQ (namesIn term),not (null names)]
       termEnvironment = Aeson.object
         [ "sourceOwnership" .= ownership
         , "sourceNames" .= M.fromList [(nrKey ref,nrModule ref++"."++nrShort ref) | d<-defs,let ref=_name d]
@@ -922,6 +930,7 @@ emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippab
         , "effectiveOptions" .= M.fromList [(m,show (iOptionsUsed iface)) | (m,iface)<-evidenceIfaces]
         , "interfaceHashes" .= M.fromList [(m,show (iFullHash iface)) | (m,iface)<-evidenceIfaces]
         , "sourceHashes" .= M.fromList [(m,show (iSourceHash iface)) | (m,iface)<-evidenceIfaces]
+        , "compilerBuiltins" .= compilerBuiltins
         , "rewriteRules" .= sort [nodeKeyOfQ (rewriteName rule) | (_,iface)<-evidenceIfaces,
             rules<-HMap.elems (iSignature iface ^. sigRewriteRules),rule<-rules]
         , "equality" .= ("Agda.Builtin.Equality._≡_" :: String)

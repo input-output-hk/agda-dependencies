@@ -32,6 +32,8 @@ def main():
         assert {k: v for k, v in graph.items() if k != "termEvidence"} == baseline, [k for k in baseline if baseline[k]!=graph.get(k)]
         data = graph["termEvidence"]
         assert data["v"] == 1
+        assert all(env["compilerBuiltins"]["EQUALITY"] == ["Agda.Builtin.Equality._≡_"]
+                   for env in data["environment"].values())
         defs = {d["name"]: d for d in data["definitions"]}
         auxiliary = {d["name"]: d for d in data["auxiliaryDefinitions"]}
         assert not (set(auxiliary) & {d["name"] for d in graph["definitions"]})
@@ -44,6 +46,8 @@ def main():
         assert defs["term-evidence.Section.compute"]["sectionParameters"] == 1
         assert any(d["projectionIndex"] for d in defs.values())
         assert any(d["constructorParameters"] is not None for d in defs.values())
+        empty_constructor = next(d for d in (defs | auxiliary).values() if d['name'].endswith('.ConstructorSection.EmptyRecord.constructor'))
+        assert empty_constructor['sectionParameters'] == empty_constructor['constructorParameters'] == 2
         tags=set()
         def patterns(ps):
             for p in ps:
@@ -53,6 +57,10 @@ def main():
         assert {'var','con','dot','absurd','lit'} <= tags, tags
         assert defs['term-evidence.absurd']['clauses'][0]['body'] is None
         assert auxiliary, "generated with-helper evidence is missing"
+        generated = [d for d in auxiliary.values() if d["sourceKind"] == "with-function"]
+        assert generated and any(d["sourceParent"] == "term-evidence.select" for d in generated)
+        assert all(d["sourceParent"] in defs or d["sourceParent"] in auxiliary for d in generated)
+        assert defs["term-evidence.shift"]["sourceKind"] == "declaration"
         assert all(not c["unfolding"] for d in list(defs.values())+list(auxiliary.values()) for c in d["clauses"])
         annotations = data["occurrenceTypes"]
         assert annotations and all(a["path"] == [] for a in annotations)
@@ -64,6 +72,7 @@ def main():
         coverage = data["coverage"][0]
         assert coverage["scopes"] == ["term-evidence"]
         assert coverage["occurrenceTyping"] == "clause-roots-and-bounded-neutral-subterms"
+        assert data["coverage"][0]["subtermQueryMicros"] == 100000
         assert data["subtermTypes"], "missing bounded contextual subterm types"
         counts = {}
         for a in data["subtermTypes"]:
@@ -76,9 +85,42 @@ def main():
                 root = node["children"][index]
             key = (a["definition"], a["clause"])
             counts[key] = counts.get(key, 0) + 1
+        # A valid annotation in Agda's complete clause may lie beyond the
+        # serialized body's node limit. It must be omitted, never emitted as
+        # a dangling path into the bounded evidence tree.
+        original_source = source
+        source = temp / "oversized.agda"
+        source.write_text("module oversized where\nopen import Agda.Builtin.Nat\nlarge : Nat → Nat\nlarge n = " +
+                          "suc (" * 5100 + "n" + ")" * 5100 + "\n")
+        bounded = run(["--with-terms"], "bounded")["termEvidence"]
+        source = original_source
+        assert "capture-node-limit" in bounded["coverage"][0]["unsupportedReasons"]
+        bounded_defs = {d["name"]: d for d in bounded["definitions"] + bounded["auxiliaryDefinitions"]}
+        for annotation in bounded["subtermTypes"]:
+            clause = bounded_defs[annotation["definition"]]["clauses"][annotation["clause"]]
+            root = clause["body"]
+            for index in annotation["path"]:
+                children = bounded["nodes"][root]["children"]
+                assert 0 <= index < len(children), "dangling bounded-body annotation"
+                root = children[index]
         assert max(counts.values()) <= coverage["subtermTypeLimit"]
         assert coverage["subtermTypingComplete"] is False
         assert all(name.startswith("term-evidence.") for name in coverage["selectedRoots"])
+        # Compatibility-generated clauses mention compiler interval postulates;
+        # consumers need the actual bindings to distinguish these foundations
+        # from ordinary source postulates, without a module-name whitelist.
+        source = temp / "Cubical.agda"
+        source.write_text("{-# OPTIONS --safe --cubical-compatible #-}\nmodule Cubical where\n"
+                          "open import Agda.Builtin.Equality\n"
+                          "cong : {A B : Set} (f : A → B) {x y : A} → x ≡ y → f x ≡ f y\n"
+                          "cong f refl = refl\n")
+        cubical = run(["--with-terms"], "cubical")["termEvidence"]
+        for env in cubical["environment"].values():
+            assert {k: env["compilerBuiltins"][k] for k in ["ISONE", "ISONE1", "ISONE2"]} == {
+                "ISONE": ["Agda.Primitive.Cubical.IsOne"],
+                "ISONE1": ["Agda.Primitive.Cubical.IsOne1"],
+                "ISONE2": ["Agda.Primitive.Cubical.IsOne2"]}
+        source = original_source
         warm = run(["--with-terms", "--term-scope=term-evidence"], "warm")["termEvidence"]
         assert {d['name'] for d in warm['definitions']} >= {'term-evidence.shift','term-evidence.map','term-evidence.projected'}
         assert warm['occurrenceTypes']

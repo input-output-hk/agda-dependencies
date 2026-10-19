@@ -34,6 +34,7 @@ import Prelude hiding ( foldl' )
 import Data.Bits ( (.|.) )
 import Data.Char ( isAlphaNum, toLower )
 import Data.Int ( Int32, Int8 )
+import qualified Data.Text.Lazy as TL
 import Data.List ( foldl', inits, intercalate, sort, sortOn )
 import Data.Maybe ( fromMaybe, isJust )
 import Data.Word ( Word64 )
@@ -162,7 +163,7 @@ externalsSummaryJson = encodeObject externalsSummaryFields . toWireExternals
 -- | All the inputs the schema emitter needs. Per-def state is read off
 -- 'giDefs' ('_state'); a node with no 'ADDef' of its own is 'Defined'.
 data GraphInput = GraphInput
-  { giTermEvidence    :: !(Maybe String)
+  { giTermEvidence    :: !(Maybe TL.Text)
   , giTypeTerms       :: !(Maybe String)
     -- ^ UTF-8 decoded JSON from TypeExport; expanded output only.
   , giDefs            :: [ADDef]

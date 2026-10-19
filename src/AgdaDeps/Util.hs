@@ -11,7 +11,11 @@
 module AgdaDeps.Util
   ( -- * Agda with-function compatibility (2.8 / 2.9)
     isWithFun
+  , withFunParent
   , ccDone
+  , catchAllTCM
+  , boundedQueryTCM
+  , definitionSectionParameters
 
     -- * Hex colour parsing
   , isValidHexColor
@@ -40,7 +44,9 @@ module AgdaDeps.Util
   , underCwd
   ) where
 
+import Control.DeepSeq (NFData,force)
 import Control.Exception ( catch, IOException )
+import qualified Control.Exception as E
 import Data.Char ( isHexDigit )
 import Data.IORef ( newIORef, readIORef, modifyIORef' )
 import Data.List ( intercalate, isSuffixOf )
@@ -53,13 +59,55 @@ import System.Directory
 import System.FilePath
   ( (</>), dropTrailingPathSeparator, equalFilePath, splitDirectories
   , takeDirectory, takeExtension )
+import System.Exit (ExitCode)
 
 import Agda.TypeChecking.CompiledClause ( CompiledClauses', pattern Done )
+import qualified System.Timeout as Timeout
+
+import Agda.TypeChecking.Monad (TCM,localTCState,Definition(..),pattern Constructor,conPars,lookupSection)
+import Agda.Syntax.Internal (qnameModule)
+import Agda.Utils.Size (size)
+#if MIN_VERSION_Agda(2,9,0)
+import Agda.TypeChecking.Monad.Base (pattern TCM, unTCM)
+#else
+import Agda.TypeChecking.Monad.Base (TCMT(TCM, unTCM))
+#endif
 #if MIN_VERSION_Agda(2,9,0)
 import Agda.TypeChecking.Monad.Base.Types ( IsWithFunction(..) )
 #else
 import Data.Maybe ( isJust )
 #endif
+
+-- | Recover synchronous TCM exceptions, including Agda's GHC-level internal
+-- errors. Preserve cancellation and exit requests. This does not roll back the
+-- state; optional queries should catch inside 'localTCState' so its successful
+-- return restores the snapshot even when the query threw a GHC exception.
+catchAllTCM :: TCM a -> (E.SomeException -> TCM a) -> TCM a
+catchAllTCM m h = TCM $ \ r e ->
+  unTCM m r e `E.catches`
+    [ E.Handler $ \ (ex :: ExitCode)         -> E.throwIO ex
+    , E.Handler $ \ (ex :: E.AsyncException) -> E.throwIO ex
+    , E.Handler $ \ (ex :: E.SomeException)  -> unTCM (h ex) r e
+    ]
+
+-- | Optional inference runs on the calling TCM thread, under restored state,
+-- with a wall deadline and a fully forced result. Catch outside 'timeout': its
+-- private cancellation exception must reach its own handler. External async
+-- exceptions and process exits still propagate through 'catchAllTCM'.
+boundedQueryTCM :: NFData a => Int -> TCM a -> TCM (Maybe a)
+boundedQueryTCM micros action = localTCState $ catchAllTCM
+  (TCM $ \ r e -> Timeout.timeout micros (unTCM action r e >>= E.evaluate . force))
+  (\_ -> pure Nothing)
+
+-- | Record modules include a self argument absent from the constructor type.
+-- Only the constructor's declared parameter prefix can be inherited context;
+-- field arguments must not be counted as section parameters.
+definitionSectionParameters :: Definition -> TCM Int
+definitionSectionParameters definition = do
+  inherited <- size <$> lookupSection (qnameModule (defName definition))
+  pure $ case theDef definition of
+    Constructor{conPars=count} -> min inherited count
+    _ -> inherited
 
 -- | Is this 'Function' a @with@-generated helper? Abstracts over the
 -- 2.8 (@Maybe QName@) vs 2.9 (@IsWithFunction QName@) shape of @funWith@
@@ -69,10 +117,17 @@ isWithFun :: IsWithFunction a -> Bool
 isWithFun NoWithFunction    = False
 isWithFun (WithFunction _)  = True
 
+withFunParent :: IsWithFunction a -> Maybe a
+withFunParent NoWithFunction = Nothing
+withFunParent (WithFunction parent) = Just parent
+
 #else
 -- Agda 2.8: @funWith :: Maybe QName@ (@Nothing@ / @Just helper@).
 isWithFun :: Maybe a -> Bool
 isWithFun = isJust
+
+withFunParent :: Maybe a -> Maybe a
+withFunParent = id
 #endif
 
 -- | A case-tree leaf: @Just (bound variables, body)@ for a @Done@ node,
