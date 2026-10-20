@@ -224,14 +224,35 @@ cycles. A proposed abstraction still needs source review and Agda validation.
 agda-deps --format=json --json-mode=expanded --with-terms \
   --term-scope=term-evidence -i test-hardening/ \
   -o /tmp/agda-terms test-hardening/term-evidence.agda
-agda-optimization term-patterns /tmp/agda-terms/deps.json \
-  --evidence=terms --scope=term-evidence --min-nodes=4 --json
 ```
 
-The consumer can discover equations and abstractions directly from this graph:
+To inspect the producer output without the analysis consumer:
 
 ```sh
-agda-optimization term-patterns out/deps.json --json
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+evidence = json.loads(Path('/tmp/agda-terms/deps.json').read_text())['termEvidence']
+coverage = evidence['coverage'][0]
+print('termEvidence version:', evidence['v'])
+print('selected roots:', len(coverage['selectedRoots']))
+print('captured definitions:', len(evidence['definitions']))
+print('supporting definitions:', len(evidence['auxiliaryDefinitions']))
+print('omitted references:', coverage['omittedDefinitions'])
+PY
+```
+
+`nodes` is a shared expression table. A definition's `signature` and each
+clause's `body` and `resultType` are indices into that table; `null` bodies
+remain explicit. `coverage` records capture limits and missing evidence.
+
+The `agda-graph-explorer` consumer can discover equations and abstractions
+directly from this graph:
+
+```sh
+agda-optimization term-patterns /tmp/agda-terms/deps.json \
+  --evidence=terms --scope=term-evidence --min-nodes=4 --json
 ```
 
 Omit `--term-scope` to capture all retained bodies. With scopes, a separate

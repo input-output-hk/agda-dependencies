@@ -41,6 +41,7 @@ module AgdaDeps.Util
   , agdaLibFilesIn
   , nearestAgdaLibAncestor
   , firstExistingFile
+  , underRoot
   , underCwd
   ) where
 
@@ -281,7 +282,16 @@ firstExistingFile (p : ps) = do
 -- external. Memoise each spelling for this run; callers stay single-threaded.
 underCwd :: IO (FilePath -> IO Bool)
 underCwd = do
-  root <- canonicalizePath =<< getCurrentDirectory
+  canonicalRoot <- canonicalizePath =<< getCurrentDirectory
+  underRoot canonicalRoot
+
+-- | Classify source files by their resolved location below an explicit
+-- project root.  This is needed when the caller disables Agda library
+-- discovery: in that mode the process cwd may be unrelated to the project,
+-- even though the positional source and @-i@ roots identify it.
+underRoot :: FilePath -> IO (FilePath -> IO Bool)
+underRoot rootPath = do
+  root <- canonicalizePath rootPath
   let rootParts = splitDirectories (dropTrailingPathSeparator root)
       classify p = (do
         exists <- doesFileExist p

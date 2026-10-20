@@ -40,7 +40,7 @@ import AgdaDeps.Options
   ( DefState(..), OutputFormat(..), Options(..), ColorPalette(..)
   , defaultOptions, colorOpt, applyCliPalette )
 import AgdaDeps.Precompute ( discoverAgdaFiles )
-import AgdaDeps.Util ( underCwd, catchAllTCM, boundedQueryTCM )
+import AgdaDeps.Util ( underCwd, underRoot, catchAllTCM, boundedQueryTCM )
 import AgdaDeps.TermCodec (Tree(..))
 import qualified Agda.TypeChecking.Monad as TC
 import qualified Agda.Interaction.Options as O
@@ -294,6 +294,11 @@ testContainment tmp = do
       (directoryAlias </> ".." </> "project-old" </> "External.agda")
     expect "broken symlink classified internal" False broken
 #endif
+  withCurrentDirectory sibling $ do
+    inside <- underRoot root
+    actual <- inside local
+    outside <- inside external
+    assert "explicit project root depended on caller cwd" (actual && not outside)
 
 testFallbackLayout :: IO ()
 testFallbackLayout = do

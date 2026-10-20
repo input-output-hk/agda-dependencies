@@ -181,6 +181,15 @@ and exits, see <a href="#checking-a-config-agda-deps-doctor">Checking a config</
   (<code>definitionSubtermHashes</code> + <code>definitionSubtermDepths</code>) in expanded JSON.</li>
 <li><code>--min-term-depth=N</code> — drop subterms below AST depth <code>N</code> (default <code>3</code>; <code>1</code>
   disables). Needs <code>--with-term-hashes</code>.</li>
+<li><code>--with-type-terms</code> — add structural signatures and type-valued bodies as
+  <code>typeTerms.v = 1</code> in expanded JSON. Incompatible with <code>--incremental</code> and
+  <code>--skip-agda</code>; see <a href="#structural-type-evidence">Structural type evidence</a>.</li>
+<li><code>--with-terms</code> — add computation and proof clauses as <code>termEvidence.v = 1</code>
+  in expanded JSON. Incompatible with <code>--incremental</code> and <code>--skip-agda</code>; see
+  <a href="#structural-type-evidence">Structural type evidence</a>.</li>
+<li><code>--term-scope=MODULE</code> — repeatable module prefix selecting body roots for
+  <code>--with-terms</code>. Without it, all retained bodies are selected; without
+  <code>--with-terms</code>, it has no effect.</li>
 <li><code>--with-signatures</code> — emit each definition's reified type as the per-def
   <code>type</code> field in expanded JSON (as written, one line). Off by default.</li>
 <li><code>--normalise-signatures</code> — normalise types before rendering.</li>
@@ -382,11 +391,23 @@ naming convention, for stale-cache detection; absent reads as <code>1</code>).</
 <td><code>reexports</code></td>
 <td>one row per <code>open import … public</code> — see below.</td>
 </tr>
+<tr>
+<td><code>typeTerms</code></td>
+<td>optional structural type evidence (<code>--with-type-terms</code>).</td>
+</tr>
+<tr>
+<td><code>termEvidence</code></td>
+<td>optional computation and proof evidence (<code>--with-terms</code>).</td>
+</tr>
 </tbody>
 </table>
 <p>Optional top-level fields (<code>moduleOptionEscapes</code>, <code>unsolvedModules</code>,
 <code>definitionSubtermHashes</code>, <code>definitionSubtermDepths</code>, <code>externals_summary</code>) are
 described below and omitted when they carry nothing.</p>
+<p><code>typeTerms</code> and <code>termEvidence</code> are independently versioned optional payloads;
+both can appear in the same expanded graph. See
+<a href="#structural-type-evidence">Structural type evidence</a> for their contents,
+capture limits, and option restrictions.</p>
 <p>Each <code>definitions</code> record always carries <code>{id, name, module, state, kind, x, y}</code>,
 plus — when known for that definition — <code>line</code>, <code>access</code> (<code>private</code> / <code>public</code>),
 <code>type</code> (under <code>--with-signatures</code>), <code>unsafe</code>, <code>unsolvedMetas</code>, and <code>argUsage</code>.</p>
@@ -464,6 +485,48 @@ expanded JSON. It captures ordinary computation and proof clauses, ordered
 patterns, clause telescopes, contextual result types, section parameters,
 transparency, and constructor/projection conventions. Repeat
 <code>--term-scope=MODULE</code> to select body roots in modules and their descendants:</p>
+<table>
+<thead>
+<tr>
+<th>Payload field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nodes</code></td>
+<td>Shared structural expression nodes; clause roots and types refer to array indices.</td>
+</tr>
+<tr>
+<td><code>definitions</code></td>
+<td>Captured definitions retained in the dependency graph.</td>
+</tr>
+<tr>
+<td><code>auxiliaryDefinitions</code></td>
+<td>Reachable supporting implementations outside the graph's definition inventory.</td>
+</tr>
+<tr>
+<td><code>equationSignatures</code></td>
+<td>Bounded law signatures outside selected body scopes; their proof bodies are not exported here.</td>
+</tr>
+<tr>
+<td><code>occurrenceTypes</code>, <code>subtermTypes</code></td>
+<td>Clause-root types and bounded neutral-subterm types, each with its original clause context.</td>
+</tr>
+<tr>
+<td><code>environment</code></td>
+<td>Compiler/options, source ownership, source identities, rewrite identities, and optional builtin bindings.</td>
+</tr>
+<tr>
+<td><code>coverage</code></td>
+<td>Selected roots, limits, omissions, and unsupported forms.</td>
+</tr>
+</tbody>
+</table>
+<p>The payload is inspection evidence. Its node indices are local to this JSON
+document, while definition names use the graph's node-key convention. Consumers
+should inspect <code>coverage</code> before treating an absent body or annotation as an
+absence in the Agda program.</p>
 <pre><code class="language-sh">agda-deps --format=json --json-mode=expanded --with-terms \
   --term-scope=MyLibrary --term-scope=MyArithmeticRules \
   -i src/ -o out/ src/Main.agda

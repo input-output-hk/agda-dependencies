@@ -142,6 +142,15 @@ and exits, see [Checking a config](#checking-a-config-agda-deps-doctor).
   (`definitionSubtermHashes` + `definitionSubtermDepths`) in expanded JSON.
 - `--min-term-depth=N` — drop subterms below AST depth `N` (default `3`; `1`
   disables). Needs `--with-term-hashes`.
+- `--with-type-terms` — add structural signatures and type-valued bodies as
+  `typeTerms.v = 1` in expanded JSON. Incompatible with `--incremental` and
+  `--skip-agda`; see [Structural type evidence](#structural-type-evidence).
+- `--with-terms` — add computation and proof clauses as `termEvidence.v = 1`
+  in expanded JSON. Incompatible with `--incremental` and `--skip-agda`; see
+  [Structural type evidence](#structural-type-evidence).
+- `--term-scope=MODULE` — repeatable module prefix selecting body roots for
+  `--with-terms`. Without it, all retained bodies are selected; without
+  `--with-terms`, it has no effect.
 - `--with-signatures` — emit each definition's reified type as the per-def
   `type` field in expanded JSON (as written, one line). Off by default.
 - `--normalise-signatures` — normalise types before rendering.
@@ -319,10 +328,17 @@ naming convention, for stale-cache detection; absent reads as `1`).
 | `moduleFiles`                | module name → source path.                        |
 | `sourceFiles`                | scanned source paths; project-only with `--no-externals`. |
 | `reexports`                  | one row per `open import … public` — see below.   |
+| `typeTerms`                  | optional structural type evidence (`--with-type-terms`). |
+| `termEvidence`               | optional computation and proof evidence (`--with-terms`). |
 
 Optional top-level fields (`moduleOptionEscapes`, `unsolvedModules`,
 `definitionSubtermHashes`, `definitionSubtermDepths`, `externals_summary`) are
 described below and omitted when they carry nothing.
+
+`typeTerms` and `termEvidence` are independently versioned optional payloads;
+both can appear in the same expanded graph. See
+[Structural type evidence](#structural-type-evidence) for their contents,
+capture limits, and option restrictions.
 
 Each `definitions` record always carries `{id, name, module, state, kind, x, y}`,
 plus — when known for that definition — `line`, `access` (`private` / `public`),
@@ -415,6 +431,21 @@ expanded JSON. It captures ordinary computation and proof clauses, ordered
 patterns, clause telescopes, contextual result types, section parameters,
 transparency, and constructor/projection conventions. Repeat
 `--term-scope=MODULE` to select body roots in modules and their descendants:
+
+| Payload field | Meaning |
+|---------------|---------|
+| `nodes` | Shared structural expression nodes; clause roots and types refer to array indices. |
+| `definitions` | Captured definitions retained in the dependency graph. |
+| `auxiliaryDefinitions` | Reachable supporting implementations outside the graph's definition inventory. |
+| `equationSignatures` | Bounded law signatures outside selected body scopes; their proof bodies are not exported here. |
+| `occurrenceTypes`, `subtermTypes` | Clause-root types and bounded neutral-subterm types, each with its original clause context. |
+| `environment` | Compiler/options, source ownership, source identities, rewrite identities, and optional builtin bindings. |
+| `coverage` | Selected roots, limits, omissions, and unsupported forms. |
+
+The payload is inspection evidence. Its node indices are local to this JSON
+document, while definition names use the graph's node-key convention. Consumers
+should inspect `coverage` before treating an absent body or annotation as an
+absence in the Agda program.
 
 ```sh
 agda-deps --format=json --json-mode=expanded --with-terms \

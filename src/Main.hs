@@ -84,10 +84,12 @@ main = do
 
   invocationDir <- getCurrentDirectory
   absolute <- canonicalizeArguments invocationDir normalized
+  mProjectRoot <- discoverProjectRoot (sourceRoots absolute)
+  let projectRoot = maybe invocationDir id mProjectRoot
   mRoot <- if any (`hasOption` absolute)
                 ["--no-libraries", "--library", "--library-file"]
              then return Nothing
-             else discoverProjectRoot (sourceRoots absolute)
+             else return mProjectRoot
   mapM_ setCurrentDirectory mRoot
 
   -- Discover + load YAML config (if any) once cwd has settled on the
@@ -149,9 +151,9 @@ main = do
   writeIORef precomputedGraphRef precomputed
   let runWith = Backend (backendWithSeed seedOptions)
   if optSkipAgda resolved
-    then runSkipAgda resolved precomputed (firstSource finalArgs)
+    then runSkipAgda projectRoot resolved precomputed (firstSource finalArgs)
     else if optKeepGoing resolved
-      then runAgdaArgsKeepGoing resolved precomputed [runWith] argv
+      then runAgdaArgsKeepGoing projectRoot resolved precomputed [runWith] argv
       else runAgdaArgs           [runWith] argv
 
 -- | Share the real flag arities with every startup decision. The option

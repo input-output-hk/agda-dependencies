@@ -8,7 +8,7 @@
 -- Output covers module-level edges and names only — no
 -- definition-level data and no state classification.
 -- \"External\" classification is best-effort: a module is external if
--- its scanned source file lives outside the working directory, or if
+-- its scanned source file lives outside the discovered project root, or if
 -- it appears only as an import target with no source file. A graph from
 -- here drives @agda-plotter@'s module-level views normally; its
 -- definition-level views render an empty canvas.
@@ -30,15 +30,15 @@ import AgdaDeps.Backend.GraphJson ( GraphInput(..), emptyGraphInput )
 import AgdaDeps.Options
   ( Options(..), lazyTreeOutput, isExcludedModule )
 import AgdaDeps.Precompute ( PrecomputedGraph(..) )
-import AgdaDeps.Util       ( underCwd )
+import AgdaDeps.Util       ( underRoot )
 
 -- | Entry point. Uses the options and positional entry source resolved
 -- by the shared startup parser, and writes the output files through
 -- 'AgdaDeps.Backend.writeOutputs', the full pipeline's writer.
 --
 -- The 'Options' assembled in 'Main' preserve defaults → config → CLI.
-runSkipAgda :: Options -> PrecomputedGraph -> Maybe FilePath -> IO ()
-runSkipAgda opts precomputed entrySource = do
+runSkipAgda :: FilePath -> Options -> PrecomputedGraph -> Maybe FilePath -> IO ()
+runSkipAgda projectRoot opts precomputed entrySource = do
   -- Options resolved, no work done. This path never reaches
   -- 'preCompileAD', so it runs the shared check itself; a local copy
   -- would be free to accept a combination the Agda path rejects.
@@ -61,13 +61,13 @@ runSkipAgda opts precomputed entrySource = do
 
       entryModule = entrySource >>= (`M.lookup` fileToModule)
 
-  isUnderRoot <- underCwd
+  isUnderRoot <- underRoot projectRoot
   outsideModuleFiles <- filterM (fmap not . isUnderRoot . snd) modFilePairs
   sourceFiles <- if optNoExternals opts
     then filterM isUnderRoot (precomputedSourceFiles precomputed)
     else pure (precomputedSourceFiles precomputed)
   let -- External classification, best-effort without Agda:
-      --   (1) modules whose resolved binding-site file lives outside cwd, and
+      --   (1) modules whose resolved binding-site file lives outside the project root, and
       --   (2) modules that appear only as import targets, with no
       --       source file under the '-i' paths.
       externalsFromFiles = S.fromList
