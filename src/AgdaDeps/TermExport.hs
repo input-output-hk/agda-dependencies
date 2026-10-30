@@ -48,6 +48,7 @@ import AgdaDeps.Util (withFunParent,boundedQueryTCM,definitionSectionParameters)
 import AgdaDeps.NodeKey
 import AgdaDeps.Options
 import AgdaDeps.TermCodec
+import AgdaDeps.RepresentationExport
 
 data PatternTree a=PatternTree String String [String] (Maybe Int) (Maybe a) [PatternTree a] deriving Generic
 instance NFData a => NFData (PatternTree a)
@@ -61,7 +62,9 @@ data ExportState=ExportState Bool (M.Map String (Captured Int)) (S.Set String) (
 exportRef :: IORef ExportState
 exportRef=unsafePerformIO (newIORef (ExportState False M.empty S.empty M.empty M.empty (M.empty,M.empty) M.empty))
 initializeTermExport :: Bool -> IO ()
-initializeTermExport enabled=writeIORef exportRef (ExportState enabled M.empty S.empty M.empty M.empty (M.empty,M.empty) M.empty)
+initializeTermExport enabled=do
+  writeIORef exportRef (ExportState enabled M.empty S.empty M.empty M.empty (M.empty,M.empty) M.empty)
+  initializeRepresentations
 
 rootNodeLimit, auxiliaryLimit, closureDepth :: Int
 rootNodeLimit=10000
@@ -74,6 +77,7 @@ captureTermDefinition opts ignored file def=do
       selected=null (optTermScopes opts) || any (\scope->owner==scope || (scope++".") `isPrefixOf` owner) (optTermScopes opts)
   when (optWithTerms opts && not ignored) $ do
     if selected then do
+      noteRepresentationSelection def
       liftIO $ modifyIORef' exportRef $ \(ExportState e ds roots omitted depths pool refs)->ExportState e ds (S.insert (nodeKeyOfQ $ defName def) roots) omitted depths pool refs
       capture closureDepth True file def
     else when (not (optNoExternals opts) && equalitySignature (typeTree $ defType def)) $ capture (-1) False file def
@@ -168,6 +172,13 @@ captureTermDefinition opts ignored file def=do
                 _<-evaluate (force packed)
                 _<-evaluate (S.size used)
                 writeIORef exportRef (ExportState e (M.insert key packed ds) rs omitted (M.insert key depth depths) nextPool (M.insert key used references))
+              when (not signatureOnly) $ do
+                captureRepresentation d (capture 0 False Nothing)
+                liftIO $ do
+                  ExportState e ds rs omitted depths pool references <- readIORef exportRef
+                  (members,nextPool) <- representationReferences key pool
+                  writeIORef exportRef (ExportState e ds rs omitted depths nextPool
+                    (M.insertWith S.union key (S.fromList members) references))
               let refs=S.toAscList $ S.fromList $ namesIn signature++concatMap (\cl->namesIn (namedClausePats cl)++maybe [] namesIn (clauseBody cl)) clauses
               -- A signature-only equation can mention a small abstraction
               -- (composition, for example) that is absent from selected bodies.
@@ -285,6 +296,7 @@ readTermEvidence retained inventory scopes environment=do
           "capabilities" .= ["signatures","clauses","patterns","clause-root-types"::String],
           "occurrenceTyping" .= ("clause-roots-and-bounded-neutral-subterms"::String),"subtermTypeLimit" .= (128::Int),"subtermInputNodeLimit" .= (500::Int),"subtermQueryMicros" .= (100000::Int),"subtermTypingComplete" .= False,"equationSignatureLimit" .= (2048::Int),"equationSignatures" .= length equations,"equationSignatureOmissions" .= M.filter ("equation-" `isPrefixOf`) omitted,"unfolding" .= False,
           "unsupportedReasons" .= unsupported,"rootNodeLimit" .= rootNodeLimit,"auxiliaryLimit" .= auxiliaryLimit,"closureDepth" .= closureDepth]
+    representations <- encodeRepresentations (M.map (\(Captured _ _ _ _ _ _ _ _ constructor _ _ _ _) -> constructor) available)
     -- Consume the capture side channel after freezing the slices. The lookup
     -- half of the intern table is no longer needed while streaming JSON.
     writeIORef exportRef (ExportState False M.empty S.empty M.empty M.empty (M.empty,M.empty) M.empty)
@@ -292,7 +304,8 @@ readTermEvidence retained inventory scopes environment=do
       ("v" .= (1::Int) <> AE.pair "nodes" (AE.list encodeInternNode (M.elems nodes)) <>
        "definitions" .= primary <> "auxiliaryDefinitions" .= auxiliary <> "equationSignatures" .= equations <>
        "occurrenceTypes" .= concat [a | (_,a,_)<-encoded] <> "subtermTypes" .= concat [a | (_,_,a)<-encoded] <>
-       "environment" .= M.singleton envKey environment <> "coverage" .= [coverage])
+       "environment" .= M.singleton envKey environment <> "coverage" .= [coverage] <>
+       "representations" .= representations)
 
 -- Paths mirror TermCodec's application/projection tree exactly. Stop at
 -- binders: subterms here retain the original clause telescope. Only neutral

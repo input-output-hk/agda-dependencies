@@ -141,6 +141,9 @@ jobs:
     - name: General clause evidence contract
       run: python3 schema/term_evidence_check.py "$(cabal list-bin agda-deps)"
 
+    - name: Representation inventories and constructor views
+      run: python3 schema/representations_check.py "$(cabal list-bin agda-deps)"
+
     - name: --show-defaults and doctor document every config key
       # Both hand-maintained mirrors of the config key set must list exactly
       # the keys the FromJSON Config instance reads: the commented sample
@@ -601,6 +604,9 @@ jobs:
 
     - name: General clause evidence contract (2.9)
       run: python3 schema/term_evidence_check.py "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
+
+    - name: Representation inventories and constructor views (2.9)
+      run: python3 schema/representations_check.py "$(cabal list-bin --project-file=cabal.project.agda29 --builddir=dist-agda29 agda-deps)"
 
     - name: Expanded output matches the golden (2.8/2.9 parity)
       # Must run cold (dead-private recovery) — see the 2.8 job's note.

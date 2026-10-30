@@ -344,6 +344,9 @@
             "additionalProperties": true,
             "properties": {}
           }
+        },
+        "representations": {
+          "$ref": "#/$defs/representations"
         }
       }
     },
@@ -963,6 +966,232 @@
             }
           },
           "description": "Per dropped module, the unqualified postulate names it held."
+        }
+      }
+    },
+    "representations": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "v",
+        "declarations",
+        "constructorViews",
+        "coverage"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "declarations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/representationDeclaration"
+          }
+        },
+        "constructorViews": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/constructorView"
+          }
+        },
+        "coverage": {
+          "$ref": "#/$defs/representationCoverage"
+        }
+      }
+    },
+    "representationDeclaration": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "name",
+        "kind",
+        "parameterCount",
+        "indexCount",
+        "constructors",
+        "recursion",
+        "record",
+        "inventoryComplete",
+        "limitations"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "datatype",
+            "record"
+          ]
+        },
+        "parameterCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "indexCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "constructors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "recursion": {
+          "type": "string",
+          "enum": [
+            "nonrecursive",
+            "recursive",
+            "unknown"
+          ]
+        },
+        "record": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/recordRepresentation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inventoryComplete": {
+          "type": "boolean"
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "recordRepresentation": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "fields",
+        "namedConstructor",
+        "eta",
+        "induction",
+        "matching"
+      ],
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "namedConstructor": {
+          "type": "boolean"
+        },
+        "eta": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "induction": {
+          "type": "string",
+          "enum": [
+            "inductive",
+            "coinductive",
+            "unspecified"
+          ]
+        },
+        "matching": {
+          "type": "string",
+          "enum": [
+            "both",
+            "pattern",
+            "copattern",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "constructorView": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "name",
+        "owner",
+        "telescope",
+        "resultType",
+        "status",
+        "limitations"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "telescope": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "resultType": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable"
+          ]
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "representationCoverage": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "selectedDeclarations",
+        "omittedDeclarations"
+      ],
+      "properties": {
+        "selectedDeclarations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "omittedDeclarations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/representationOmission"
+          }
+        }
+      }
+    },
+    "representationOmission": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "name",
+        "reason"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
         }
       }
     }

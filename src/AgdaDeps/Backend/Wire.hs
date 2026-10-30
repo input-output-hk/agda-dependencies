@@ -171,6 +171,7 @@ data SchemaDoc
   | SConstInt Int
   | SConstStr String
   | SNullableType String                       -- ^ @type: [<t>, "null"]@
+  | SNullableRef String
   | SRef String                                -- ^ @#/$defs/<name>@
   deriving (Eq, Show)
 
@@ -427,7 +428,28 @@ defsRegistry =
   , ("termEvidence", SObject ["v","nodes","definitions","auxiliaryDefinitions","occurrenceTypes","environment","coverage"]
       [("v",SConstInt 1),("nodes",arrOf (SRef "typeNode")),("definitions",arrOf (SRef "termDefinition")),
        ("auxiliaryDefinitions",arrOf (SRef "termDefinition")),("occurrenceTypes",arrOf (SRef "occurrenceType")),("subtermTypes",arrOf (SRef "occurrenceType")),("equationSignatures",arrOf (SRef "termDefinition")),
-       ("environment", SObject [] [] True),("coverage",arrOf (SObject [] [] True))] True)
+       ("environment", SObject [] [] True),("coverage",arrOf (SObject [] [] True)),
+       ("representations",SRef "representations")] True)
+  , ("representations", SObject ["v","declarations","constructorViews","coverage"]
+      [("v",SConstInt 1),("declarations",arrOf (SRef "representationDeclaration")),
+       ("constructorViews",arrOf (SRef "constructorView")),("coverage",SRef "representationCoverage")] True)
+  , ("representationDeclaration", SObject ["name","kind","parameterCount","indexCount","constructors","recursion","record","inventoryComplete","limitations"]
+      [("name",SString Nothing),("kind",SString (Just ["datatype","record"])),
+       ("parameterCount",SInteger (Just 0)),("indexCount",SInteger (Just 0)),
+       ("constructors",arrOf (SString Nothing)),("recursion",SString (Just ["nonrecursive","recursive","unknown"])),
+       ("record",SNullableRef "recordRepresentation"),("inventoryComplete",SBool),("limitations",arrOf (SString Nothing))] True)
+  , ("recordRepresentation", SObject ["fields","namedConstructor","eta","induction","matching"]
+      [("fields",arrOf (SString Nothing)),("namedConstructor",SBool),("eta",SNullableType "boolean"),
+       ("induction",SString (Just ["inductive","coinductive","unspecified"])),
+       ("matching",SString (Just ["both","pattern","copattern","unknown"]))] True)
+  , ("constructorView", SObject ["name","owner","telescope","resultType","status","limitations"]
+      [("name",SString Nothing),("owner",SString Nothing),("telescope",arrOf (SInteger (Just 0))),
+       ("resultType",SNullableType "integer"),("status",SString (Just ["complete","partial","unavailable"])),
+       ("limitations",arrOf (SString Nothing))] True)
+  , ("representationCoverage", SObject ["selectedDeclarations","omittedDeclarations"]
+      [("selectedDeclarations",SInteger (Just 0)),("omittedDeclarations",arrOf (SRef "representationOmission"))] True)
+  , ("representationOmission", SObject ["name","reason"]
+      [("name",SString Nothing),("reason",SString Nothing)] True)
   , ("termPattern", SObject ["tag","name","info","index","term","children"]
       [("tag", SString (Just ["var","con","lit","dot","proj","absurd","unsupported"])),("name",SString Nothing),
        ("info",arrOf (SString Nothing)),("index",SNullableType "integer"),("term",SNullableType "integer"),("children",arrOf (SRef "termPattern"))] True)
@@ -495,6 +517,7 @@ renderSchema sd = case sd of
   SConstInt n       -> jObj [ ("const", show n) ]
   SConstStr s       -> jObj [ ("const", jsString s) ]
   SNullableType t   -> jObj [ ("type", jStrArray [t, "null"]) ]
+  SNullableRef ref  -> jObj [("anyOf",jArray id [renderSchema (SRef ref),jObj [("type",jsString "null")]])]
   SRef name         -> jObj [ ("$ref", jsString ("#/$defs/" ++ name)) ]
 
 -- | The generated JSON Schema for the expanded @graph.json@, as text.

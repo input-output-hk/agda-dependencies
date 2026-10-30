@@ -441,6 +441,7 @@ transparency, and constructor/projection conventions. Repeat
 | `occurrenceTypes`, `subtermTypes` | Clause-root types and bounded neutral-subterm types, each with its original clause context. |
 | `environment` | Compiler/options, source ownership, source identities, rewrite identities, and optional builtin bindings. |
 | `coverage` | Selected roots, limits, omissions, and unsupported forms. |
+| `representations` | Optional versioned datatype/record inventories and bounded constructor telescope views, sharing `nodes`. |
 
 The payload is inspection evidence. Its node indices are local to this JSON
 document, while definition names use the graph's node-key convention. Consumers
@@ -490,6 +491,27 @@ locations, not source-edit ranges.
 
 Constructor section prefixes are bounded by the compiler’s constructor
 parameter count, excluding the record module’s self argument and its fields.
+
+`representations.v = 1` records compiler constructor membership, declaration
+parameter/index counts, completed recursion information, and effective record
+η/induction/matching settings. `inventoryComplete` also requires retained member
+signatures; missing members remain named with explicit limitations. Parameter
+counts include the enclosing section and implicit levels. Constructor views
+retain that whole prefix, followed by payload fields, and a result type with
+its sort. They use outermost-first `binder` nodes in the existing DAG; each
+domain is scoped under its predecessors and the result under the full telescope.
+
+For the supported single-constructor, nonrecursive, unindexed subset, bounded
+Agda telescope extraction exposes arrows hidden behind transparent aliases.
+It runs in restored state, outside abstract/opaque unfolding environments, with
+a 200 ms query deadline, 10,000-node view budget and 256-binder limit. Declaration
+capture is capped at 512 inventories. `complete`, `partial`, and `unavailable`
+view statuses distinguish extraction results from declaration eligibility.
+Inventories can still describe unsupported recursive/indexed/multi-constructor
+types. No-η records retain the effective pattern/copattern policy; erased and
+irrelevant annotations remain evidence for consumer capability checks.
+Selection, exclusions, retention losses and budgets remain visible in coverage.
+This section proves no equivalence and grants no additional source visibility.
 
 This export requires expanded JSON and rejects `--incremental`/`--skip-agda`.
 YAML uses `with-terms: true` and `term-scope: [MyLibrary, MyArithmeticRules]`.

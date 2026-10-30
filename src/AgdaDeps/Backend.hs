@@ -407,6 +407,8 @@ outputToken opts precomputed root containment entry modules = combineEpochs
   , hashEpoch "external-module-inventory-v1"
   -- Refresh existing outputs whose module path came from a public rename.
   , hashEpoch "module-source-authority-v1"
+  -- Refresh optional declaration inventories and constructor telescope views.
+  , hashEpoch "term-representations-v1"
   , hashEpoch (show containment)
   ]
   where

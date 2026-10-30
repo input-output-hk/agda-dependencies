@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-30
+
+- Add optional `termEvidence.representations.v = 1` under `--with-terms`:
+  authoritative constructor inventories, parameter/index counts, recursion and
+  record settings, plus bounded constructor telescope views in the existing
+  DAG. Preserve section prefixes, annotations, result sorts and visibility
+  boundaries. Exclusions, incomplete retention and query/node/binder limits
+  remain explicit; the export makes no equivalence or source-edit claims.
+- Cover inventories, hidden telescope arrows, effective no-eta policies,
+  exclusions and capture budgets with a portable live contract check on the
+  supported Agda versions. Default graph output and node-key identities remain
+  unchanged; structural capture still requires a non-incremental expanded run.
+
 ## 2026-10-18
 
 - Include optional compiler builtin bindings in general-term environments.
