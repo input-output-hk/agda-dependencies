@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-03
+
+- Node-key convention v4 qualifies constructors by their datatype/record owner,
+  preserving legal overloaded spellings across graph nodes/edges, term/type
+  evidence, patterns, representation views, builtin references and hashes.
+  Regenerate v3 graphs; old collapsed identities cannot be recovered downstream.
+  Coordinate explorer and plotter guards.
+- Intern structural types at capture boundaries and canonically reindex their
+  selected DAG on output. Force retained names and hashes so identity resolvers
+  cannot retain successive compiler-signature snapshots.
+- Report aggregate capture timings for structural types, general clauses/typing
+  and representations, plus evidence assembly and serialization/publication on
+  stderr. Nested timings are inclusive. Source-checkout/worktree build identity
+  and AGDA_BUILD_REVISION support improve packaged-build provenance.
+
 ## 2026-10-30
 
 - Add optional `termEvidence.representations.v = 1` under `--with-terms`:

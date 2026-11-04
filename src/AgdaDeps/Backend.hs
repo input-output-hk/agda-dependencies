@@ -107,11 +107,12 @@ import Agda.Syntax.Common ( IsMain(..) )
 
 import System.IO.Unsafe ( unsafePerformIO )
 
+import AgdaDeps.NodeKey (nodeKeyResolver)
 import AgdaDeps.Deps
   ( ADDef(..), NodeRef(..), DefAccess(..)
   , compileDefAD, collectAllQNames, moduleKey, hashQName
   , withDependencyProvenance
-  , mkRef, nodeKeyOfQ, moduleKeyOfQ, nrSrcLoc
+  , mkRef, moduleKeyOfQ, nrSrcLoc
   , optionEscapes
   , unsolvedInterfaceLines, liveSilentMetaLines
   , contractIgnoredEdges
@@ -151,7 +152,7 @@ import AgdaDeps.Options
   )
 import AgdaDeps.Config ( parseTheme, applyTheme )
 import Control.Monad.Except ( MonadError(throwError) )
-import AgdaDeps.Logging ( info )
+import AgdaDeps.Logging ( info, withPhase, resetTimings, reportTimings )
 import AgdaDeps.Precompute ( PrecomputedGraph(..), emptyGraph )
 import AgdaDeps.Util ( underCwd )
 
@@ -312,6 +313,7 @@ rewriteName = rewName
 preCompileAD :: Options -> TCM Options
 preCompileAD opts = do
   liftIO $ checkOutputFlags opts
+  liftIO resetTimings
   liftIO $ initializeTermExport (optWithTerms opts)
   liftIO $ initializeTypeExport (optWithTypeTerms opts)
   resetSideChannels
@@ -659,6 +661,7 @@ emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippab
   let filesToScan :: [FilePath]
       filesToScan = S.toAscList $ S.fromList
         [ fp | d <- defsWithInstances, Just (fp, _ln) <- [nrSrcLoc (_name d)] ]
+  keyOf <- nodeKeyResolver
   privRanges <- jsonOnly M.empty $ liftIO $
     fmap M.fromList $
       mapM (\fp -> (,) fp <$> findPrivateRanges fp) filesToScan
@@ -711,7 +714,7 @@ emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippab
       -- (host, source, qname, alias) re-export tuples across all visited
       -- interfaces, computed once and shared with 'reExportRows' below.
       reExportRaw :: [(String, String, String, Maybe String)]
-      reExportRaw = concatMap (collectReExports . miInterface) (M.elems visited)
+      reExportRaw = concatMap (collectReExports keyOf . miInterface) (M.elems visited)
       -- Re-export hubs: a module that only @open … public@s names
       -- contributes no QName of its own to 'allQNames0', so it would
       -- survive @--no-externals@. Pool host + re-exported source so an
@@ -924,7 +927,7 @@ emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippab
       compilerBuiltins=M.map S.toAscList $ M.fromListWith S.union
         [(getBuiltinId builtin,S.fromList names) | (_,iface)<-evidenceIfaces,
           (BuiltinName builtin,Builtin term)<-M.toList (iBuiltin iface),
-          let names=map nodeKeyOfQ (namesIn term),not (null names)]
+          let names=map keyOf (namesIn term),not (null names)]
       termEnvironment = Aeson.object
         [ "sourceOwnership" .= ownership
         , "sourceNames" .= M.fromList [(nrKey ref,nrModule ref++"."++nrShort ref) | d<-defs,let ref=_name d]
@@ -933,12 +936,20 @@ emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippab
         , "interfaceHashes" .= M.fromList [(m,show (iFullHash iface)) | (m,iface)<-evidenceIfaces]
         , "sourceHashes" .= M.fromList [(m,show (iSourceHash iface)) | (m,iface)<-evidenceIfaces]
         , "compilerBuiltins" .= compilerBuiltins
-        , "rewriteRules" .= sort [nodeKeyOfQ (rewriteName rule) | (_,iface)<-evidenceIfaces,
+        , "rewriteRules" .= sort [keyOf (rewriteName rule) | (_,iface)<-evidenceIfaces,
             rules<-HMap.elems (iSignature iface ^. sigRewriteRules),rule<-rules]
         , "equality" .= ("Agda.Builtin.Equality._≡_" :: String)
         ]
-  termEvidence <- liftIO $ readTermEvidence [nrKey (_name d) | d <- defs] (map nrKey allQNames) (optTermScopes opts) termEnvironment
-  typeTerms <- liftIO $ readTypeTerms [nrKey (_name d) | d <- defs]
+  reportTimings
+  let retainedNames = map (nrKey . _name) defs
+  termEvidence <- if optWithTerms opts
+    then liftIO $ withPhase "general evidence assembly (serialization follows during output)" $
+      readTermEvidence retainedNames (map nrKey allQNames) (optTermScopes opts) termEnvironment
+    else pure Nothing
+  typeTerms <- if optWithTypeTerms opts
+    then liftIO $ withPhase "structural type evidence assembly (serialization follows during output)" $
+      readTypeTerms retainedNames
+    else pure Nothing
 
   let gi = GraphInput
         { giTermEvidence     = termEvidence
@@ -965,7 +976,7 @@ emitFullGraph opts isUnderRoot defMap liveModules cacheDir monoToken monoSkippab
   info "agda-deps: writing output…"
   -- 'hoistedMonoSkip' already ran the deps.json no-op check before the
   -- graph was built; reaching here means it declined, so write.
-  liftIO $ writeOutputs opts sc
+  liftIO $ withPhase "serialization and atomic publication" $ writeOutputs opts sc
     (renderDot (optColors opts) failedModules defs) gi
 
   -- '--incremental': prune fragment files for modules no longer in the
@@ -1294,11 +1305,11 @@ findPrivateRanges fp = do
 -- last 'nodeKey' segment, which can carry an @\@line@ suffix); 'Nothing'
 -- when un-renamed. Lets a consumer resolve @Host.combine@ back to
 -- @M.merge@ under @renaming (merge to combine)@.
-collectReExports :: Interface -> [(String, String, String, Maybe String)]
-collectReExports i =
+collectReExports :: (A.QName -> String) -> Interface -> [(String, String, String, Maybe String)]
+collectReExports keyOf i =
   let hostMod  = prettyShow (iTopLevelModuleName i)
       thisModN = iModuleName i
-  in [ (hostMod, srcMod, nodeKeyOfQ qn, alias)
+  in [ (hostMod, srcMod, keyOf qn, alias)
      | scope <- M.elems (iScope i)
      , ns <- [ ImportedNS, PublicNS ]
      , let nsBag = scopeNameSpace ns scope

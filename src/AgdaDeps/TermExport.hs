@@ -18,7 +18,6 @@ import qualified Control.Monad.State.Strict as ST
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Encoding as AE
 import Data.Aeson ((.=))
-import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 import Data.IORef
@@ -28,6 +27,7 @@ import Data.List (isPrefixOf)
 import Data.Maybe (isJust)
 import System.IO.Unsafe (unsafePerformIO)
 import Agda.Syntax.Common (Arg(..), Named(..), getArgInfo)
+import Agda.Syntax.Abstract.Name (QName)
 import Agda.Syntax.Literal (Literal(..))
 import Agda.Syntax.Internal
   ( Term(..), pattern Var, Elim'(..), Clause(..), Pattern'(..), PatternInfo(..), PatOrigin(..), DBPatVar(..), DeBruijnPattern
@@ -46,6 +46,7 @@ import Agda.Syntax.Internal.Names (namesIn)
 import Agda.Utils.Hash (hashString)
 import AgdaDeps.Util (withFunParent,boundedQueryTCM,definitionSectionParameters)
 import AgdaDeps.NodeKey
+import AgdaDeps.Logging (measure)
 import AgdaDeps.Options
 import AgdaDeps.TermCodec
 import AgdaDeps.RepresentationExport
@@ -73,27 +74,32 @@ closureDepth=2
 
 captureTermDefinition :: Options -> Bool -> Maybe FilePath -> Definition -> TCM ()
 captureTermDefinition opts ignored file def=do
-  let owner=moduleKeyOfQ (defName def)
+  keyOf <- nodeKeyResolver
+  let typeTree = typeTreeWith keyOf
+      owner=moduleKeyOfQ (defName def)
       selected=null (optTermScopes opts) || any (\scope->owner==scope || (scope++".") `isPrefixOf` owner) (optTermScopes opts)
   when (optWithTerms opts && not ignored) $ do
     if selected then do
       noteRepresentationSelection def
-      liftIO $ modifyIORef' exportRef $ \(ExportState e ds roots omitted depths pool refs)->ExportState e ds (S.insert (nodeKeyOfQ $ defName def) roots) omitted depths pool refs
-      capture closureDepth True file def
-    else when (not (optNoExternals opts) && equalitySignature (typeTree $ defType def)) $ capture (-1) False file def
+      liftIO $ modifyIORef' exportRef $ \(ExportState e ds roots omitted depths pool refs)->ExportState e ds (S.insert (nodeKeyForDefinition def) roots) omitted depths pool refs
+      capture keyOf closureDepth True file def
+    else when (not (optNoExternals opts) && equalitySignature (typeTree $ defType def)) $ capture keyOf (-1) False file def
   where
     treeNodes (Tree _ _ _ _ children)=():concatMap treeNodes children
     variablePattern arg=case unArg arg of VarP{}->True;_->False
     excluded d=any (\scope->let owner=moduleKeyOfQ (defName d) in owner==scope || (scope++".") `isPrefixOf` owner) (optExcludeModules opts)
     omission key reason=liftIO $ modifyIORef' exportRef $ \(ExportState e ds roots omitted depths pool refs)->ExportState e ds roots (M.insert key reason omitted) depths pool refs
-    capture depth isRoot location d@Defn{..}=do
-      ExportState _ existing roots _ depths _ _<-liftIO $ readIORef exportRef
-      let key=nodeKeyOfQ defName
+    capture keyOf depth isRoot location d@Defn{..}=do
+      let typeTree = typeTreeWith keyOf
+          termTree = termTreeWith keyOf
+          contextTrees = contextTreesWith keyOf
+      ExportState _ existing roots _ capturedDepths _ _<-liftIO $ readIORef exportRef
+      let key=nodeKeyForDefinition d
           root=isRoot
           signatureOnly=depth<0
           isSignature (Captured _ _ _ _ _ _ _ _ _ _ p _ _)=p=="equation-signature"
       if excluded d then omission key "excluded-module" else
-        if M.member key existing && M.findWithDefault (-2) key depths>=depth then do
+        if M.member key existing && M.findWithDefault (-2) key capturedDepths>=depth then do
           -- Closure capture may have already collected this declaration at
           -- the required depth. Upgrade ownership/location without repeating
           -- contextual inference and interning when its own hook is visited.
@@ -121,7 +127,7 @@ captureTermDefinition opts ignored file def=do
                 telescope<-removeCopies (clauseTel cl)
                 body<-mapM removeCopies (clauseBody cl)
                 result<-mapM (removeCopies . unArg) (clauseType cl)
-                patterns<-mapM patternTree (clausePats cl)
+                patterns<-mapM (patternTree keyOf) (clausePats cl)
                 annotations<-case body of
                   Nothing->pure []
                   Just term->localTCState $ inTopContext $ addContext telescope $
@@ -153,7 +159,7 @@ captureTermDefinition opts ignored file def=do
               let constructor=case theDef of Constructor{..}->Just conPars;_->Nothing
                   projection=case theDef of Function{funProjection=Right p}->Just (projIndex p);_->Nothing
                   transparency=if show (defOpaque d)/="TransparentDef" then "opaque" else case show (defAbstract d) of "AbstractDef"->"abstract";_->"transparent"
-                  parent=case theDef of Function{..}->nodeKeyOfQ <$> withFunParent funWith;_->Nothing
+                  parent=case theDef of Function{..}->keyOf <$> withFunParent funWith;_->Nothing
                   origin=case theDef of
                     Function{..} | isJust parent->"with-function"
                                  | isJust funExtLam->"extended-lambda"
@@ -173,7 +179,7 @@ captureTermDefinition opts ignored file def=do
                 _<-evaluate (S.size used)
                 writeIORef exportRef (ExportState e (M.insert key packed ds) rs omitted (M.insert key depth depths) nextPool (M.insert key used references))
               when (not signatureOnly) $ do
-                captureRepresentation d (capture 0 False Nothing)
+                measure "representation inventories and views" $ captureRepresentation keyOf d (capture keyOf 0 False Nothing)
                 liftIO $ do
                   ExportState e ds rs omitted depths pool references <- readIORef exportRef
                   (members,nextPool) <- representationReferences key pool
@@ -192,11 +198,11 @@ captureTermDefinition opts ignored file def=do
                   case TC.theDef candidate of
                     Function{funClauses=[cl]} | all variablePattern (clausePats cl),
                       Just body<-clauseBody cl,length (take 129 $ treeNodes $ termTree body)<=128,
-                      not (equalitySignature $ typeTree $ TC.defType candidate)->capture 0 False Nothing candidate
+                      not (equalitySignature $ typeTree $ TC.defType candidate)->capture keyOf 0 False Nothing candidate
                     _->pure ()) (\_->pure ())
               forM_ (if signatureOnly then [] else refs) $ \q->do
-                if depth<=0 then omission (nodeKeyOfQ q) "closure-depth" else do
-                  catchError (getConstInfo q >>= capture (depth-1) False Nothing) (\_->omission (nodeKeyOfQ q) "unavailable-definition")
+                if depth<=0 then omission (keyOf q) "closure-depth" else do
+                  catchError (getConstInfo q >>= capture keyOf (depth-1) False Nothing) (\_->omission (keyOf q) "unavailable-definition")
               pure ()
 
 recursiveStatus :: Clause -> Maybe Bool
@@ -209,16 +215,17 @@ recursiveStatus cl=case clauseRecursive cl of
 recursiveStatus=clauseRecursive
 #endif
 
-patternTree :: Arg DeBruijnPattern -> TCM (PatternTree Tree)
-patternTree arg=do
+patternTree :: (QName -> String) -> Arg DeBruijnPattern -> TCM (PatternTree Tree)
+patternTree keyOf arg=do
+  let termTree = termTreeWith keyOf
   let info=binderInfo (getArgInfo arg)
       node tag name index term children=PatternTree tag name info index term children
   case unArg arg of
     VarP p v->pure $ node (if patOrigin p==PatOAbsurd then "absurd" else "var") (dbPatVarName v) (Just $ dbPatVarIndex v) Nothing []
     DotP _ t->do term<-removeCopies t;pure $ node "dot" "" Nothing (Just $ limitedTree rootNodeLimit $ termTree term) []
-    ConP c _ ps->node "con" (nodeKeyOfQ $ conName c) Nothing Nothing <$> mapM (patternTree . fmap namedThing) ps
-    LitP _ l->pure $ node "lit" (case l of LitQName q->"LitQName "++nodeKeyOfQ q;_->show l) Nothing Nothing []
-    ProjP _ q->pure $ node "proj" (nodeKeyOfQ q) Nothing Nothing []
+    ConP c _ ps->node "con" (keyOf $ conName c) Nothing Nothing <$> mapM (patternTree keyOf . fmap namedThing) ps
+    LitP _ l->pure $ node "lit" (case l of LitQName q->"LitQName "++keyOf q;_->show l) Nothing Nothing []
+    ProjP _ q->pure $ node "proj" (keyOf q) Nothing Nothing []
     _->pure $ node "unsupported" "cubical-or-defined-pattern" Nothing Nothing []
 
 -- Traverse once at the producer boundary. The retained representation and
@@ -229,7 +236,7 @@ internCaptured (Captured name owner line file section signature clauses transpar
   cs<-mapM clause clauses
   pure $ Captured name owner line file section sig cs transparency constructor projection provenance origin parent
   where
-    pattern' (PatternTree tag name info index term children)=PatternTree tag name info index <$> mapM intern term <*> mapM pattern' children
+    pattern' (PatternTree tag patternName info index term children)=PatternTree tag patternName info index <$> mapM intern term <*> mapM pattern' children
     clause (CapturedClause context patterns body result recursive unreachable types)=
       CapturedClause <$> mapM intern context <*> mapM pattern' patterns <*> mapM intern body <*> mapM intern result
         <*> pure recursive <*> pure unreachable <*> mapM (\(path,ty)->do r<-intern ty;pure (path,r)) types
@@ -242,31 +249,27 @@ capturedReferences (Captured _ _ _ _ _ signature clauses _ _ _ _ _ _)=S.unions $
     patternRefs (PatternTree tag name _ _ term children)=S.unions ((if tag `elem` ["con","proj"] then S.singleton name else S.empty):maybe [] (\t->[refs t]) term++map patternRefs children)
     refs (Tree tag name _ _ cs)=S.unions ((if tag `elem` ["def","con","proj"] then S.singleton name else S.empty):map refs cs)
 
-encodePattern :: PatternTree Int -> ST.State Intern A.Value
-encodePattern (PatternTree tag name info index term children)=do
-  root<-pure term
-  nested<-mapM encodePattern children
-  pure $ A.object ["tag" .= tag,"name" .= name,"info" .= info,"index" .= index,"term" .= root,"children" .= nested]
-encodeDefinition :: String -> Captured Int -> ST.State Intern (A.Value,[A.Value],[A.Value])
-encodeDefinition environment (Captured name owner line file section signature clauses transparency constructor projection provenance origin parent)=do
-  sig<-pure signature
-  rows<-forM (zip [0::Int ..] clauses) $ \(index,CapturedClause telescope patterns body result recursive unreachable types)->do
-    ctx<-pure telescope
-    ps<-mapM encodePattern patterns
-    b<-pure body
-    ty<-pure result
-    subterms<-forM types $ \(path,value)->do
-      r<-pure value
-      pure $ A.object ["definition" .= name,"clause" .= index,"path" .= path,"context" .= ctx,"type" .= r,"environment" .= environment]
-    let annotations=case (b,ty) of
-          (Just _,Just r)->[A.object ["definition" .= name,"clause" .= index,"path" .= ([]::[Int]),"context" .= ctx,"type" .= r,"environment" .= environment]]
-          _->[]
-    pure (A.object ["index" .= index,"context" .= ctx,"patterns" .= ps,"body" .= b,"resultType" .= ty,
-      "unfolding" .= False,"recursive" .= recursive,"unreachable" .= unreachable],annotations,subterms)
-  pure (A.object ["name" .= name,"module" .= owner,"file" .= file,"line" .= line,"signature" .= sig,
+encodePattern :: PatternTree Int -> A.Value
+encodePattern (PatternTree tag name info index term children)=
+  A.object ["tag" .= tag,"name" .= name,"info" .= info,"index" .= index,"term" .= term,
+    "children" .= map encodePattern children]
+encodeDefinition :: String -> Captured Int -> (A.Value,[A.Value],[A.Value])
+encodeDefinition environment (Captured name owner line file section signature clauses transparency constructor projection provenance origin parent)=
+  (A.object ["name" .= name,"module" .= owner,"file" .= file,"line" .= line,"signature" .= signature,
     "sectionParameters" .= section,"clauses" .= [a | (a,_,_)<-rows],"transparency" .= transparency,
     "sourceKind" .= origin,"sourceParent" .= parent,
     "constructorParameters" .= constructor,"projectionIndex" .= projection,"provenance" .= provenance,"environment" .= environment],concat [a | (_,a,_)<-rows],concat [a | (_,_,a)<-rows])
+  where
+    rows=map clause (zip [0::Int ..] clauses)
+    clause (index,CapturedClause ctx patterns body result recursive unreachable types)=
+      (A.object ["index" .= index,"context" .= ctx,"patterns" .= map encodePattern patterns,"body" .= body,"resultType" .= result,
+        "unfolding" .= False,"recursive" .= recursive,"unreachable" .= unreachable],annotations,subterms)
+      where
+        subterms=[A.object ["definition" .= name,"clause" .= index,"path" .= path,"context" .= ctx,"type" .= value,"environment" .= environment]
+          | (path,value)<-types]
+        annotations=case (body,result) of
+          (Just _,Just r)->[A.object ["definition" .= name,"clause" .= index,"path" .= ([]::[Int]),"context" .= ctx,"type" .= r,"environment" .= environment]]
+          _->[]
 
 readTermEvidence :: [String] -> [String] -> [String] -> A.Value -> IO (Maybe TL.Text)
 readTermEvidence retained inventory scopes environment=do
@@ -281,7 +284,8 @@ readTermEvidence retained inventory scopes environment=do
         equation (Captured _ _ _ _ _ _ _ _ _ _ p _ _)=p=="equation-signature"
         available=if S.null selected then M.empty else M.union (M.restrictKeys entries reachable) (M.filter equation entries)
         envKey=show $ hashString (show environment)
-        (encoded,(_,nodes))=ST.runState (mapM (encodeDefinition envKey) $ M.elems available) pool
+        encoded=map (encodeDefinition envKey) (M.elems available)
+        (_,nodes)=pool
         names=M.keys available
         graphNames=S.fromList inventory
         equationNames=M.keysSet (M.filter equation available)

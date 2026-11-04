@@ -71,6 +71,8 @@ module AgdaDeps.Deps
 
 import Prelude hiding ( foldl' )
 import Control.Monad ( filterM, unless, when )
+import Control.DeepSeq (force)
+import Control.Exception (evaluate)
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Data.Binary ( Binary )
 import qualified Data.Binary as B
@@ -173,13 +175,14 @@ import Agda.TypeChecking.Substitute ( TelV(..), absBody )
 
 import Agda.Compiler.Backend ( IsMain )
 
+import AgdaDeps.Logging (measure)
 import AgdaDeps.Options ( Options(..), DefState(..), isExcludedModule )
 import AgdaDeps.MatchConstant ( matchConstantAnalysable, matchConstantOf )
 import AgdaDeps.TermExport (captureTermDefinition)
 import AgdaDeps.TypeExport (captureTypeDefinition)
 import AgdaDeps.TermCanon ( subtermHashes )
 import AgdaDeps.NodeKey
-  ( bindingLineOfQ, moduleKeyOfQ, nodeKeyFromPretty, nodeKeyOfQ )
+  ( bindingLineOfQ, moduleKeyOfQ, nodeKeyForDefinition, nodeKeyResolver, nodeKeyOfQ )
 import AgdaDeps.Util ( fromCode, isWithFun )
 
 -- | Structural classification of a definition, derived from its
@@ -1325,7 +1328,7 @@ mkRef qn = do
           !ar    = max (arity (defType d)) (length (defArgOccurrences d))
           !raw   = prettyShow qn
           !mbLn  = bindingLineOfQ qn
-          !key   = nodeKeyFromPretty raw mbLn
+          !key   = nodeKeyForDefinition d
           !short = (reverse . takeWhile (/= '.') . reverse) raw
           !isWH  = "._." `isInfixOf` raw   -- where-helper marker
           !r = NodeRef
@@ -1348,7 +1351,7 @@ nodeRefCacheRef = unsafePerformIO (newIORef M.empty)
 
 -- ** Blessed identity accessors (NodeRef; used everywhere downstream)
 
--- | Canonical node-identity string. See 'nodeKeyOfQ'.
+-- | Canonical node-identity string. See 'nodeKeyForDefinition'.
 nodeKey :: NodeRef -> String
 nodeKey = nrKey
 
@@ -1360,12 +1363,12 @@ moduleKey = nrModule
 nrSrcLoc :: NodeRef -> Maybe (FilePath, Word32)
 nrSrcLoc r = (,) <$> nrFile r <*> (fromIntegral <$> nrLine r)
 
--- | Version of the node-key convention emitted by 'nodeKeyOfQ'. Stamped
+-- | Version of the node-key convention emitted by 'nodeKeyForDefinition'. Stamped
 -- into @graph.json@ so a consumer can detect a stale-format cached graph.
--- Bump whenever the key shape changes. Currently 3 (anonymous-module
--- segments lifted into the nearest named ancestor).
+-- Bump whenever the key shape changes. Version 4 adds constructor-owner
+-- qualification to version 3 anonymous-module lifting.
 nodeKeyVersion :: Int
-nodeKeyVersion = 3
+nodeKeyVersion = 4
 
 -- | Stable integer ID for a node, shared by every renderer. The hash of
 -- 'nodeKey', so distinct same-named @where@/anonymous-module helpers hash
@@ -1425,7 +1428,8 @@ withDependencyProvenance prov d =
 -- @with-NNN@). 'postCompileAD' later calls 'contractIgnoredEdges' to
 -- contract those out and apply the per-QName ignore filter.
 computeDefAD :: Options -> Definition -> TCM ADDef
-computeDefAD opts def@Defn{..} = do
+computeDefAD opts def@Defn{..} = measure "graph extraction (includes optional capture)" $ do
+  keyOf <- nodeKeyResolver
   let excludes = optExcludeModules opts
       -- Walk 'defType' and 'theDef' separately to record which set each
       -- name came from. Raw walks are shared with 'classifyDefWith' (one
@@ -1443,7 +1447,7 @@ computeDefAD opts def@Defn{..} = do
   (st, silentMetas) <- classifyDefWith rawNames def
   let !kd      = classifyKind def
       !termPairs = if optWithTermHashes opts
-                     then Just (concatMap (subtermHashes (optMinTermDepth opts))
+                     then Just (concatMap (subtermHashes keyOf (optMinTermDepth opts))
                                           (definitionTerms def))
                      else Nothing
       (!termHs, !termDs) = case termPairs of
@@ -1464,16 +1468,21 @@ computeDefAD opts def@Defn{..} = do
   let termTag = case theDef of
         Function{ funTerminates = Just False } -> [UNonTerminating]
         _                                      -> []
-      usesTrustMe = any ((== trustMeNodeKey) . nodeKeyOfQ) rawNames
+      usesTrustMe = any ((== trustMeNodeKey) . keyOf) rawNames
       !unsafeTags = termTag ++ [ UTrustMe | usesTrustMe ]
+  -- Hashes must not retain the immutable signature resolver through lazy
+  -- term walks. This also makes extraction timings include the hash work.
+  _ <- liftIO $ evaluate $ force (termHs,termDs,length unsafeTags)
   -- Never-used arguments, read off Agda's positivity/polarity analysis.
   -- The state read inside only fires for a def that has a finding.
   argUsage <- argUsageOf opts def
   -- Convert to 'NodeRef' at the producer boundary: everything downstream
   -- is identity-as-data.
   nameRef  <- mkRef defName
-  when (optWithTerms opts) $ captureTermDefinition opts False (nrFile nameRef) def
-  when (optWithTypeTerms opts) $ captureTypeDefinition (nrFile nameRef) def
+  when (optWithTerms opts) $ measure "general clauses and contextual typing" $
+    captureTermDefinition opts False (nrFile nameRef) def
+  when (optWithTypeTerms opts) $ measure "structural types" $
+    captureTypeDefinition (nrFile nameRef) def
   -- Tag each edge as its 'NodeRef' is built (one pass), reading the
   -- precomputed 'nrWhereHelper' bit instead of a per-edge 'prettyShow'.
   -- 'S.toAscList' fixes the key order, so 'M.fromList''s last-wins on
@@ -1540,7 +1549,8 @@ compileDefAD opts _ _ def@Defn{..}
       -- Recorded for ignored defs too: a partial application inside a
       -- with-helper or a pattern lambda is still a partial application of
       -- its target, and those bodies live nowhere else.
-      when (optWithTerms opts) $ captureTermDefinition opts True Nothing def
+      when (optWithTerms opts) $ measure "general clauses and contextual typing" $
+        captureTermDefinition opts True Nothing def
       recordUnsaturatedOf def
       -- Record raw out-edges without applying 'ignoreDef' (refs to
       -- other ignored defs are kept so the closure pass can chain through).

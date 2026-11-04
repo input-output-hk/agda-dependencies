@@ -1,25 +1,33 @@
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE PatternSynonyms #-}
 -- | The naming convention for graph nodes: how a live 'QName' becomes the
--- identity string on the wire ('nodeKeyOfQ') and the module it is
--- attributed to ('moduleKeyOfQ'). Pure functions of the 'QName', shared by
+-- identity string on the wire ('nodeKeyForDefinition') and the module it is
+-- attributed to ('moduleKeyOfQ'). Constructor identities additionally use
+-- their compiler definition's owner. The resolved naming is shared by
 -- the producer ("AgdaDeps.Deps", which stores them in each 'NodeRef') and
 -- the subterm hasher ("AgdaDeps.TermCanon"), so a hashed reference names
 -- the same node the graph does. Changing the convention means bumping
 -- 'AgdaDeps.Deps.nodeKeyVersion'.
 module AgdaDeps.NodeKey
   ( nodeKeyOfQ
+  , nodeKeyForDefinition
+  , nodeKeyResolver
   , nodeKeyFromPretty
   , moduleKeyOfQ
   , bindingLineOfQ
   , liftAnonSegments
   ) where
 
+import Control.Applicative ( (<|>) )
 import Data.List ( intercalate, isInfixOf )
 
-import Agda.Syntax.Abstract.Name ( QName, nameBindingSite )
+import Agda.Syntax.Abstract.Name ( QName, nameBindingSite, nameCanonical )
 import Agda.Syntax.Common.Pretty ( prettyShow )
 import Agda.Syntax.Internal ( qnameModule, qnameName )
 import Agda.Syntax.Position ( posLine, rStart )
+import Agda.TypeChecking.Monad
+  ( TCM, Definition(..), pattern Constructor, conData
+  , getSignature, useTC, stImports, lookupDefinition )
 
 import AgdaDeps.Util ( splitOn )
 
@@ -30,15 +38,36 @@ import AgdaDeps.Util ( splitOn )
 -- @_@ qualifier, so same-named helpers are disambiguated by binding line
 -- (@Mod.helper\@15@); one with no binding site falls back to the lifted name.
 --
--- Single source of truth for node identity (stored as 'nrKey'; the wire
--- @"name"@ and edge endpoints are this string). Do not revert to bare
+-- Base identity for non-constructors. Emission uses 'nodeKeyForDefinition' or
+-- 'nodeKeyResolver' so constructor owners remain distinct. Stored as @nrKey@;
+-- the wire @"name"@ and edge endpoints use that resolved string. Do not revert to bare
 -- 'prettyShow': same-named @where@-helpers collapse onto one node and lose
 -- their edges. 'moduleKeyOfQ' is the matching module-attribution function.
 nodeKeyOfQ :: QName -> String
 nodeKeyOfQ qn = nodeKeyFromPretty (prettyShow qn) (bindingLineOfQ qn)
 
+-- | Constructors belong to their declared datatype/record, even when Agda
+-- prints an overloaded constructor in the enclosing module. Qualifying by
+-- the owner preserves identity without changing source spellings or relying
+-- on process-local compiler counters.
+nodeKeyForDefinition :: Definition -> String
+nodeKeyForDefinition def = case theDef def of
+  Constructor{conData = owner} ->
+    nodeKeyOfQ owner ++ "." ++ prettyShow (nameCanonical (qnameName (defName def)))
+  _ -> nodeKeyOfQ (defName def)
+
+-- | Immutable compiler-signature snapshot for pure codecs and hashes. Identity
+-- lookup does not unfold a body or cross abstraction/opacity for computation.
+-- Force encoded names before retaining a result, so the snapshot can be freed.
+nodeKeyResolver :: TCM (QName -> String)
+nodeKeyResolver = do
+  local <- getSignature
+  imported <- useTC stImports
+  pure $ \q -> maybe (nodeKeyOfQ q) nodeKeyForDefinition
+    (lookupDefinition q local <|> lookupDefinition q imported)
+
 -- | 'nodeKeyOfQ' with the @prettyShow@ string and binding line supplied by
--- a caller that already has both ('AgdaDeps.Deps.mkRef').
+-- a caller implementing a base (non-constructor) identity.
 nodeKeyFromPretty :: String -> Maybe Int -> String
 nodeKeyFromPretty raw mbLine
   | "._." `isInfixOf` raw          -- where-helper marker (cf. 'nrWhereHelper')

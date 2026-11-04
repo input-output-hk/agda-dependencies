@@ -51,7 +51,7 @@ def main():
 
         _, excluded, excluded_views = run('excluded', ['--exclude=representations.Pair'])
         assert not excluded['representations.Pair']['inventoryComplete']
-        assert excluded_views['representations.pair']['status'] != 'complete'
+        assert excluded_views['representations.Pair.pair']['status'] != 'complete'
         assert 'missing-member-signatures' in excluded['representations.Pair']['limitations']
         warm, warm_declarations, warm_views = run('warm')
         assert warm_declarations == declarations, 'warm capture changed inventories/settings'

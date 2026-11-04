@@ -5,11 +5,12 @@
 {-# LANGUAGE RecordWildCards #-}
 -- Shared structural codec. No conversion checking or general normalization.
 module AgdaDeps.TermCodec
-  ( Tree(..), binderInfo, ordinaryInfo, typeTree, termTree, removeCopies
-  , Intern, intern, encodeInternNode, internNodeValue, contextTrees, limitedTree ) where
+  ( Tree(..), binderInfo, ordinaryInfo
+  , typeTreeWith, termTreeWith, contextTreesWith, removeCopies
+  , Intern, intern, internNode, encodeInternNode, internNodeValue, limitedTree ) where
 
 import qualified Control.Monad.State.Strict as ST
-import Control.DeepSeq (NFData)
+import Control.DeepSeq (NFData,deepseq)
 import GHC.Generics (Generic)
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Encoding as AE
@@ -30,7 +31,7 @@ import Agda.Syntax.Literal (Literal(..))
 import Agda.TypeChecking.Monad (TCM)
 import Agda.TypeChecking.Reduce (reduceDefCopy)
 import Agda.TypeChecking.Monad.Base (Reduced(..))
-import AgdaDeps.NodeKey (nodeKeyOfQ)
+import Agda.Syntax.Abstract.Name (QName)
 
 data Tree = Tree String String [String] Bool [Tree] deriving (Eq, Ord, Show, Generic)
 instance NFData Tree
@@ -55,42 +56,43 @@ ordinaryInfo :: ArgInfo -> Bool
 ordinaryInfo a = getCohesion a == getCohesion defaultArgInfo
   && argInfoAnnotation a == argInfoAnnotation defaultArgInfo
 
-typeTree :: Type -> Tree
-typeTree (El s t) = Tree "type" "" [] False [termTree t, sortTree s]
+-- All structural trees use the caller's constructor-aware identity resolver.
+typeTreeWith :: (QName -> String) -> Type -> Tree
+typeTreeWith keyOf (El s t) = Tree "type" "" [] False [termTreeWith keyOf t, sortTreeWith keyOf s]
 
-termTree :: Term -> Tree
-termTree = \case
+termTreeWith :: (QName -> String) -> Term -> Tree
+termTreeWith keyOf = \case
   Var n es -> elims (Tree "var" (show n) [] False []) es
-  Def q es -> elims (Tree "def" (nodeKeyOfQ q) [] False []) es
-  Con c _ es -> elims (Tree "con" (nodeKeyOfQ (conName c)) [] False []) es
-  Lam a b | ordinaryInfo a -> Tree "lam" (absName b) (binderInfo a) (dependent b) [termTree (unAbs b)]
+  Def q es -> elims (Tree "def" (keyOf q) [] False []) es
+  Con c _ es -> elims (Tree "con" (keyOf (conName c)) [] False []) es
+  Lam a b | ordinaryInfo a -> Tree "lam" (absName b) (binderInfo a) (dependent b) [termTreeWith keyOf (unAbs b)]
           | otherwise -> Tree "unsupported" "lambda-modality" [] False []
   -- Keep even unsupported binders in the telescope: inherited section
   -- parameters still consume these Pis, and the domain marks them unsupported.
   Pi d b ->
     Tree "pi" (absName b) (binderInfo (getArgInfo d)) (dependent b)
       [if ordinaryInfo (getArgInfo d) && not (domIsFinite d)
-       then typeTree (unDom d)
+       then typeTreeWith keyOf (unDom d)
        else Tree "unsupported" "pi-modality-or-finite-domain" [] False [],
-       typeTree (unAbs b)]
-  Sort s -> sortTree s
-  Level l -> levelTree l
-  Lit (LitQName q) -> Tree "lit" ("LitQName " ++ nodeKeyOfQ q) [] False []
+       typeTreeWith keyOf (unAbs b)]
+  Sort s -> sortTreeWith keyOf s
+  Level l -> levelTreeWith keyOf l
+  Lit (LitQName q) -> Tree "lit" ("LitQName " ++ keyOf q) [] False []
   Lit l -> Tree "lit" (show l) [] False []
-  DontCare t -> Tree "irrelevant" "" [] False [termTree t]
+  DontCare t -> Tree "irrelevant" "" [] False [termTreeWith keyOf t]
   MetaV m _ -> Tree "unsupported" ("meta:" ++ show m) [] False []
   Dummy reason _ -> Tree "unsupported" ("dummy:" ++ show reason) [] False []
   where
     elims = foldl one
     one f (Apply a) | ordinaryInfo (getArgInfo a) =
-      Tree "app" "" (binderInfo (getArgInfo a)) False [f, termTree (unArg a)]
+      Tree "app" "" (binderInfo (getArgInfo a)) False [f, termTreeWith keyOf (unArg a)]
                     | otherwise = Tree "unsupported" "application-modality" [] False []
-    one f (Proj _ q) = Tree "proj" (nodeKeyOfQ q) [] False [f]
+    one f (Proj _ q) = Tree "proj" (keyOf q) [] False [f]
     one _ IApply{} = Tree "unsupported" "cubical-application" [] False []
 
-sortTree :: Sort -> Tree
-sortTree = \case
-  Univ u l -> Tree "sort" (show u) [] False [levelTree l]
+sortTreeWith :: (QName -> String) -> Sort -> Tree
+sortTreeWith keyOf = \case
+  Univ u l -> Tree "sort" (show u) [] False [levelTreeWith keyOf l]
   Inf u n -> Tree "sort-inf" (show u ++ ":" ++ show n) [] False []
   SizeUniv -> Tree "sort-constant" "SizeUniv" [] False []
   LockUniv -> Tree "sort-constant" "LockUniv" [] False []
@@ -98,9 +100,9 @@ sortTree = \case
   IntervalUniv -> Tree "sort-constant" "IntervalUniv" [] False []
   s -> Tree "unsupported" ("sort:" ++ show s) [] False []
 
-levelTree :: Level -> Tree
-levelTree (Max n xs) = Tree "level" (show n) [] False
-  [Tree "level-plus" (show k) [] False [termTree t] | Plus k t <- xs]
+levelTreeWith :: (QName -> String) -> Level -> Tree
+levelTreeWith keyOf (Max n xs) = Tree "level" (show n) [] False
+  [Tree "level-plus" (show k) [] False [termTreeWith keyOf t] | Plus k t <- xs]
 
 -- Use Agda's dedicated module-copy reducer, not a conversion checker or
 -- broad normalizer. Named user predicates and local helpers remain visible.
@@ -113,8 +115,9 @@ removeCopies = traverseTermM (step (64 :: Int))
       YesReduction _ replacement -> traverseTermM (step (fuel - 1)) replacement
     step _ t = pure t
 
--- Hash-cons complete structural nodes after capture, in deterministic owner
--- order. Binder display names are retained but ignored by consumer matching.
+-- Hash-cons complete structural nodes at capture boundaries. Output may
+-- reindex selected roots in deterministic owner order. Binder display names
+-- are retained but ignored by consumer matching.
 type InternNode = (String,String,[String],Bool,[Int])
 -- The same immutable key is shared by both maps. JSON objects and UTF-8 names
 -- are allocated only during output, not retained for every captured DAG node.
@@ -131,8 +134,14 @@ encodeInternNode (tag,name,info,binds,children)=A.pairs
 intern :: Tree -> ST.State Intern Int
 intern (Tree tag name info binds children) = do
   ids <- mapM intern children
+  internNode (tag,name,info,binds,ids)
+
+-- Force names/annotations before retaining a node: resolved-name thunks must
+-- not keep a compiler-signature snapshot alive until final serialization.
+internNode :: InternNode -> ST.State Intern Int
+internNode key = do
+  key `deepseq` pure ()
   (keys, nodes) <- ST.get
-  let key = (tag,name,info,binds,ids)
   case M.lookup key keys of
     Just n -> pure n
     Nothing -> do
@@ -141,11 +150,11 @@ intern (Tree tag name info binds children) = do
       pure n
 
 
-contextTrees :: Telescope -> [Tree]
-contextTrees telescope=
+contextTreesWith :: (QName -> String) -> Telescope -> [Tree]
+contextTreesWith keyOf telescope=
   [Tree "binder" nm (binderInfo (getArgInfo d)) False
     [if ordinaryInfo (getArgInfo d) && not (domIsFinite d)
-      then typeTree ty else Tree "unsupported" "context-modality-or-finite-domain" [] False []]
+      then typeTreeWith keyOf ty else Tree "unsupported" "context-modality-or-finite-domain" [] False []]
   | d<-telToList telescope,let (nm,ty)=unDom d]
 
 -- A bounded prefix of each contextual root. Limits do not masquerade as terms.

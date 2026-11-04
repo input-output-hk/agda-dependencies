@@ -65,7 +65,7 @@ def main():
         assert "typeTerms" not in old
         graph = run(["--with-type-terms"], "with")
         data = graph["typeTerms"]
-        assert graph["v"]==2 and graph["nodeKeyVersion"]==3 and data["v"]==1
+        assert graph["v"]==2 and graph["nodeKeyVersion"]==4 and data["v"]==1
         assert {d["name"] for d in data["definitions"]} <= {d["name"] for d in graph["definitions"]}
         assert any(d["name"]=="type-terms.AtLeast≥" and d["bodies"] for d in data["definitions"]), [(d["name"],len(d["bodies"])) for d in data["definitions"]]
         validate_evidence(data)

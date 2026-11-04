@@ -14,7 +14,7 @@
 --     'absName' on 'Lam' / 'Pi' is discarded.
 --   * 'MetaV' identities are replaced by a sentinel.
 --   * 'QName' references (definitions, constructors, projections) are
---     encoded by their node key ('nodeKeyOfQ', the wire @name@), so a
+--     encoded by their resolved node key (the wire @name@), so a
 --     reference hashes by the node it names: same-named @where@ helpers
 --     (@M._.g@ in raw 'prettyShow') hash apart.
 --   * 'ArgInfo' is reduced to its 'Hiding' bit; relevance, quantity,
@@ -38,9 +38,10 @@ import           Agda.Syntax.Internal
                    , conName
                    )
 import           Agda.Syntax.Common.Pretty ( prettyShow )
+import Agda.Syntax.Literal (Literal(..))
 import           Agda.Utils.Hash ( hashString )
 
-import           AgdaDeps.NodeKey ( nodeKeyOfQ )
+import Agda.Syntax.Abstract.Name (QName)
 
 -- | Difference list of @(hash, depth)@ pairs, threaded through the walk
 -- so each parent\/child concatenation is an O(1) function composition,
@@ -72,41 +73,44 @@ type HashDList = [(Word64, Int)] -> [(Word64, Int)]
 --
 -- Walks once bottom-up: each subterm's canonical encoding and depth
 -- are built together and the emit decision made at each node.
-subtermHashes :: Int -> Term -> [(Word64, Int)]
-subtermHashes !minD t = case canonAndSubs minD t of (_, _, hs) -> hs []
+subtermHashes :: (QName -> String) -> Int -> Term -> [(Word64, Int)]
+subtermHashes keyOf !minD t = case canonAndSubs keyOf minD t of (_, _, hs) -> hs []
 
 -- | Bottom-up traversal returning (canonical encoding, AST depth,
 -- accumulated (hash, depth) pairs for qualifying subterms). The
 -- encoding is reused by the parent; the depth drives the filter; the
 -- pairs are the return value.
-canonAndSubs :: Int -> Term -> (ShowS, Int, HashDList)
-canonAndSubs !minD t0 = case t0 of
+canonAndSubs :: (QName -> String) -> Int -> Term -> (ShowS, Int, HashDList)
+canonAndSubs keyOf !minD t0 = case t0 of
   Var n es ->
-    let (esEnc, esD, esHs) = canonElimsSubs minD es
+    let (esEnc, esD, esHs) = canonElimsSubs keyOf minD es
         !d   = if null es then 1 else esD + 1
         enc  = ('V':) . shows n . esEnc
     in (enc, d, emit minD d enc esHs)
   Lam _ b ->
-    let (bEnc, bD, bHs) = canonAndSubs minD (unAbs b)
+    let (bEnc, bD, bHs) = canonAndSubs keyOf minD (unAbs b)
         !d  = bD + 1
         enc = ('L':) . bEnc
     in (enc, d, emit minD d enc bHs)
+  Lit (LitQName qn) ->
+    let enc = ('I':) . encStr (keyOf qn)
+    in (enc, 1, emit minD 1 enc id)
   Lit l ->
     let enc = ('I':) . encStr (prettyShow l)
     in (enc, 1, emit minD 1 enc id)
   Def qn es ->
-    let (esEnc, esD, esHs) = canonElimsSubs minD es
+    let (esEnc, esD, esHs) = canonElimsSubs keyOf minD es
         !d  = if null es then 1 else esD + 1
-        enc = ('D':) . encStr (nodeKeyOfQ qn) . esEnc
+        enc = ('D':) . encStr (keyOf qn) . esEnc
     in (enc, d, emit minD d enc esHs)
   Con ch _ es ->
-    let (esEnc, esD, esHs) = canonElimsSubs minD es
+    let (esEnc, esD, esHs) = canonElimsSubs keyOf minD es
         !d  = if null es then 1 else esD + 1
-        enc = ('C':) . encStr (nodeKeyOfQ (conName ch)) . esEnc
+        enc = ('C':) . encStr (keyOf (conName ch)) . esEnc
     in (enc, d, emit minD d enc esHs)
   Pi dom bod ->
-    let (dEnc, dD, dHs) = canonAndSubsDom minD dom
-        (bEnc, bD, bHs) = canonAndSubs minD (unEl (unAbs bod))
+    let (dEnc, dD, dHs) = canonAndSubsDom keyOf minD dom
+        (bEnc, bD, bHs) = canonAndSubs keyOf minD (unEl (unAbs bod))
         !d  = max dD bD + 1
         enc = ('P':) . dEnc . bEnc
     in (enc, d, emit minD d enc (dHs . bHs))
@@ -118,19 +122,19 @@ canonAndSubs !minD t0 = case t0 of
     in (enc, 1, emit minD 1 enc id)
   MetaV _ es ->
     -- MetaId wildcarded — only the eliminations carry shape information.
-    let (esEnc, esD, esHs) = canonElimsSubs minD es
+    let (esEnc, esD, esHs) = canonElimsSubs keyOf minD es
         !d  = if null es then 1 else esD + 1
         enc = ('M':) . esEnc
     in (enc, d, emit minD d enc esHs)
   DontCare u ->
-    let (uEnc, uD, uHs) = canonAndSubs minD u
+    let (uEnc, uD, uHs) = canonAndSubs keyOf minD u
         !d  = uD + 1
         enc = ('X':) . uEnc
     in (enc, d, emit minD d enc uHs)
   Dummy k es ->
     -- 'DummyTermKind' has no 'Pretty' instance; use 'show' for a
     -- stable tag.
-    let (esEnc, esD, esHs) = canonElimsSubs minD es
+    let (esEnc, esD, esHs) = canonElimsSubs keyOf minD es
         !d  = if null es then 1 else esD + 1
         enc = ('Y':) . encStr (show k) . esEnc
     in (enc, d, emit minD d enc esHs)
@@ -143,32 +147,32 @@ emit !threshold !d enc childHs
   | d >= threshold = ((mkHash enc, d) :) . childHs
   | otherwise      = childHs
 
-canonAndSubsDom :: Int -> Dom Type -> (ShowS, Int, HashDList)
-canonAndSubsDom !minD d =
-  let (tEnc, tD, tHs) = canonAndSubs minD (unEl (unDom d))
+canonAndSubsDom :: (QName -> String) -> Int -> Dom Type -> (ShowS, Int, HashDList)
+canonAndSubsDom keyOf !minD d =
+  let (tEnc, tD, tHs) = canonAndSubs keyOf minD (unEl (unDom d))
   in (('p':) . tEnc, tD, tHs)
 
-canonElimsSubs :: Int -> Elims -> (ShowS, Int, HashDList)
-canonElimsSubs !minD es =
+canonElimsSubs :: (QName -> String) -> Int -> Elims -> (ShowS, Int, HashDList)
+canonElimsSubs keyOf !minD es =
   let !n = length es
       -- Single right fold threading encoder, max depth, and the composed
       -- hash difference list together.
       step (eEnc, eD, eHs) (encAcc, dAcc, hsAcc) =
         ( ('|':) . eEnc . encAcc, max eD dAcc, eHs . hsAcc )
-      (encs, maxD, hss) = foldr (step . canonElimSubs minD) (id, 0, id) es
+      (encs, maxD, hss) = foldr (step . canonElimSubs keyOf minD) (id, 0, id) es
   in ( ('[':) . shows n . encs . (']':), maxD, hss )
 
-canonElimSubs :: Int -> Elim -> (ShowS, Int, HashDList)
-canonElimSubs !minD (Apply a) =
+canonElimSubs :: (QName -> String) -> Int -> Elim -> (ShowS, Int, HashDList)
+canonElimSubs keyOf !minD (Apply a) =
   let h            = getHiding a
-      (uEnc, uD, uHs) = canonAndSubs minD (unArg a)
+      (uEnc, uD, uHs) = canonAndSubs keyOf minD (unArg a)
   in ( ('A':) . encHiding h . uEnc , uD , uHs )
-canonElimSubs !_minD (Proj _ qn) =
-  ( ('R':) . encStr (nodeKeyOfQ qn) , 1 , id )
-canonElimSubs !minD (IApply u v w) =
-  let (uEnc, uD, uHs) = canonAndSubs minD u
-      (vEnc, vD, vHs) = canonAndSubs minD v
-      (wEnc, wD, wHs) = canonAndSubs minD w
+canonElimSubs keyOf !_minD (Proj _ qn) =
+  ( ('R':) . encStr (keyOf qn) , 1 , id )
+canonElimSubs keyOf !minD (IApply u v w) =
+  let (uEnc, uD, uHs) = canonAndSubs keyOf minD u
+      (vEnc, vD, vHs) = canonAndSubs keyOf minD v
+      (wEnc, wD, wHs) = canonAndSubs keyOf minD w
   in ( ('J':) . uEnc . vEnc . wEnc , maximum [uD, vD, wD] , uHs . vHs . wHs )
 
 encHiding :: Hiding -> ShowS

@@ -38,8 +38,9 @@ ghcVersion = "ghc " ++ showVersion compilerVersion
 buildDate :: String
 buildDate = __DATE__ ++ " " ++ __TIME__
 
--- | Git revision captured at compile time. A trailing @"+"@ marks a
--- dirty tree; falls back to @AGDA_DEPS_GIT_REV@, then @"unknown"@.
+-- | Git revision captured at compile time, overridden by @AGDA_BUILD_REVISION@.
+-- A trailing @"+"@ marks a dirty tree; outside a checkout, falls back to
+-- @AGDA_DEPS_GIT_REV@, then @"unknown"@.
 gitRevision :: String
 gitRevision = $(gitRevisionE)
 

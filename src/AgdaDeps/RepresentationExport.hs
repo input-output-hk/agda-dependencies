@@ -8,7 +8,8 @@ module AgdaDeps.RepresentationExport
   ( initializeRepresentations, noteRepresentationSelection, captureRepresentation
   , representationReferences, encodeRepresentations ) where
 
-import Control.DeepSeq (NFData)
+import Control.DeepSeq (NFData, force)
+import Control.Exception (evaluate)
 import Control.Monad (forM_, when)
 import Control.Monad.Except (catchError)
 import Control.Monad.IO.Class (liftIO)
@@ -21,6 +22,7 @@ import qualified Data.Set as S
 import Data.Maybe (isJust)
 import GHC.Generics (Generic)
 import System.IO.Unsafe (unsafePerformIO)
+import Agda.Syntax.Abstract.Name (QName)
 import Agda.Syntax.Common (HasEta'(..), PatternOrCopattern(..), Induction(..))
 import Agda.Syntax.Internal (conName, unDom)
 import Agda.TypeChecking.Monad
@@ -40,7 +42,8 @@ data Decl = Decl
   { declName :: String, declKind :: String, declParameters :: Int, declIndices :: Int
   , declConstructors :: [String], declRecursion :: String, declRecord :: Maybe A.Value
   , declFields :: [String], declLimits :: [String]
-  }
+  } deriving Generic
+instance NFData Decl
 data View a = View String String [a] (Maybe a) String [String] deriving Generic
 instance NFData a => NFData (View a)
 data RepState = RepState (M.Map String Decl) (M.Map String (View Int)) (S.Set String) (M.Map String String)
@@ -68,13 +71,13 @@ recursion (Just _) = "recursive"
 
 -- Called only after the ordinary term definition was interned, so following
 -- constructor/field signatures cannot recursively recapture its owner.
-captureRepresentation :: Definition -> (Definition -> TCM ()) -> TCM ()
-captureRepresentation d@Defn{..} ensure = case theDef of
+captureRepresentation :: (QName -> String) -> Definition -> (Definition -> TCM ()) -> TCM ()
+captureRepresentation keyOf d@Defn{..} ensure = case theDef of
   Datatype{..} -> do
     let cs = dataCons
         limits = ["module-copy" | isJust dataClause] ++ pathLimits
         pathLimits = ["path-constructors" | not (null $ TC.dataPathCons theDef)]
-    save (Decl key "datatype" dataPars dataIxs (map nodeKeyOfQ cs)
+    save (Decl key "datatype" dataPars dataIxs (map keyOf cs)
           (recursion dataMutual) Nothing [] limits) cs []
   Record{..} -> do
     let cs = [conName recConHead]
@@ -85,12 +88,12 @@ captureRepresentation d@Defn{..} ensure = case theDef of
           YesEta -> "both"; NoEta PatternMatching -> "pattern"; NoEta CopatternMatching -> "copattern"
         induction :: String
         induction = case recInduction of Just CoInductive -> "coinductive"; Just Inductive -> "inductive"; _ -> "unspecified"
-        info = A.object ["fields" .= map nodeKeyOfQ fs,"namedConstructor" .= recNamedCon,
+        info = A.object ["fields" .= map keyOf fs,"namedConstructor" .= recNamedCon,
           "eta" .= eta,"matching" .= matching,"induction" .= induction]
         limits = ["module-copy" | isJust recClause] ++ ["coinductive" | induction == "coinductive"] ++
           ["constructor-patterns-unavailable" | matching `notElem` ["both","pattern"]]
-    save (Decl key "record" recPars 0 (map nodeKeyOfQ cs) (recursion recMutual)
-          (Just info) (map nodeKeyOfQ fs) limits) cs fs
+    save (Decl key "record" recPars 0 (map keyOf cs) (recursion recMutual)
+          (Just info) (map keyOf fs) limits) cs fs
   _ -> pure ()
   where
     key = nodeKeyOfQ defName
@@ -106,20 +109,22 @@ captureRepresentation d@Defn{..} ensure = case theDef of
                 ["multiple-or-zero-constructors" | length cs /= 1] ++
                 ["recursion-" ++ declRecursion decl | declRecursion decl /= "nonrecursive"]
               saved = decl {declLimits = boundary ++ declLimits decl}
+          -- Retained metadata must not keep the signature resolver alive.
+          _ <- liftIO $ evaluate (force saved)
           liftIO $ modifyIORef' repRef $ \(RepState ds vs selected omitted) ->
             RepState (M.insert key saved ds) vs selected omitted
           forM_ (cs ++ fs) $ \q -> catchError (getConstInfo q >>= ensure) (\_ -> pure ())
           forM_ cs $ \q -> do
-            let name = nodeKeyOfQ q
+            let name = keyOf q
             raw <- if not (null unsupported) then pure $ View name key [] Nothing "unavailable" unsupported else do
               attempt <- boundedQueryTCM 200000 $ inTopContext $ inConcreteMode $ notUnderOpaque $ do
                 constructor <- getConstInfo q
                 case TC.theDef constructor of
-                  Constructor{} | nodeKeyOfQ (conData $ TC.theDef constructor) == key -> do
+                  Constructor{} | keyOf (conData $ TC.theDef constructor) == key -> do
                     TelV tel result <- telView (TC.defType constructor)
                     telescope <- removeCopies tel
                     codomain <- removeCopies result
-                    let Tree _ _ _ _ forest = limitedTree 10000 (Tree "view" "" [] False (contextTrees telescope ++ [typeTree codomain]))
+                    let Tree _ _ _ _ forest = limitedTree 10000 (Tree "view" "" [] False (contextTreesWith keyOf telescope ++ [typeTreeWith keyOf codomain]))
                         unsupportedTree (Tree tag _ _ _ children) = tag == "unsupported" || any unsupportedTree children
                     pure $ if length (take 258 forest) > 257 then View name key [] Nothing "unavailable" ["binder-limit"]
                       else if any unsupportedTree forest then View name key [] Nothing "partial" ["unsupported-telescope"]
@@ -147,6 +152,7 @@ representationReferences :: String -> Intern -> IO ([String], Intern)
 representationReferences owner pool = do
   pending <- atomicModifyIORef' pendingRef (\xs -> (M.empty, xs))
   let (packed, nextPool) = ST.runState (mapM pack pending) pool
+  _ <- evaluate (force packed)
   modifyIORef' repRef $ \(RepState ds vs selected omitted) ->
     RepState ds (M.union vs packed) selected omitted
   RepState ds _ _ _ <- readIORef repRef
