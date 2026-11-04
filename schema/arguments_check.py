@@ -129,7 +129,9 @@ def check(binary, root):
              "-o" + output, entry])
         graph(output)
 
-        # Explicit library selection opts out of root discovery in every spelling.
+        # Explicit library selection opts out of changing cwd in every spelling.
+        # Normal mode classifies against that cwd; skip mode still uses the
+        # discovered physical project root for its source scan.
         for suffix, library_flag in (
             ("attached", ["-lfixture-library"]),
             ("pair", ["-l", "fixture-library"]),
@@ -139,7 +141,8 @@ def check(binary, root):
             result = run([*mode, *library_flag, "--json-mode=expanded",
                           "-i../project/src", "-o" + output, entry])
             assert "changing directory to project root" not in result.stderr
-            assert "Entry" in graph(output)["externalModules"]
+            externals = graph(output)["externalModules"]
+            assert ("Entry" in externals) == (not skip), (prefix, suffix, externals)
 
         # Backend operands must not trigger config/help/format preprocessing.
         for suffix, operand in (

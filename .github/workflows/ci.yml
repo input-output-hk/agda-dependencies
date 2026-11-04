@@ -1,13 +1,11 @@
-# CI smoke test for agda-deps.
+# Automatic CI: one Agda 2.8 job with hardening, startup argv, and a single
+# cold expanded graph reused for schema validation, schema drift and golden
+# checks. Docs-only changes are ignored; newer runs supersede older ones.
 #
-# Two jobs, one per supported Agda:
-# - `build` (default): Agda 2.8.0 from Hackage on GHC 9.12.4. This is the
-#   default `cabal.project`, so it's a plain Hackage build — no git fetch,
-#   no submodules. Runs the full check suite incl. the golden snapshot.
-# - `build-agda29` (opt-in): Agda 2.9.0 via `cabal.project.agda29`, which
-#   pins an upstream agda/agda git commit (2.9.0 isn't on Hackage yet).
-#   Builds Agda from source (slow, ~10 min on a cold cache) and re-runs the
-#   golden check, so the 2.8/2.9 output parity stays enforced.
+# Manual CI: Actions -> CI -> Run workflow, with `full` checked, also runs
+# the output/config/recovery/cache/evidence regressions and Agda 2.9 parity.
+# Agda 2.9 builds from the git pin in cabal.project.agda29, only after the
+# 2.8 job passes. There is no scheduled full run.
 #
 # Both cache `~/.cabal/store` + their build dir aggressively; cache keys
 # include the relevant project file (Agda pin) and the cabal file (deps).
@@ -16,8 +14,24 @@ name: CI
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Run extended regressions and Agda 2.9 parity
+        type: boolean
+        default: true
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -35,7 +49,8 @@ jobs:
         cabal-version: '3.16'
 
     - name: Cache cabal store
-      uses: actions/cache@v4
+      id: cache
+      uses: actions/cache/restore@v4
       with:
         path: |
           ~/.cabal/store
@@ -49,48 +64,64 @@ jobs:
           ${{ runner.os }}-ghc9.12.4-agda28-
 
     - name: Update Hackage index
+      if: steps.cache.outputs.cache-hit != 'true'
       run: cabal update
 
-    - name: Dependency drift check
-      # Catches dependency-resolution failures early, before we burn
-      # time on the actual build.
-      run: cabal build --dry-run
-
     - name: Build agda-deps
-      # Agda 2.8.0 from Hackage; first run builds it, then cache hits.
-      run: cabal build
+      # Cache both executables before tests, so failures do not lose the build.
+      run: cabal build exe:agda-deps test:hardening
+
+    # Preserve successful builds even when a later regression check fails.
+    - name: Save cabal store
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ~/.cabal/store
+          ~/.cabal/packages
+          dist-newstyle
+        key: ${{ steps.cache.outputs.cache-primary-key }}
 
     - name: Run behavior-preserving hardening tests
       run: cabal test hardening
 
-    - name: Skip mode filters external file metadata in every JSON shape
-      run: python3 schema/skip_agda_check.py "$(cabal list-bin agda-deps)"
-
-    - name: Scanned modules survive every JSON shape and incremental reuse
-      run: python3 schema/scanned_modules_check.py "$(cabal list-bin agda-deps)"
-
-    - name: Re-exported modules retain their declaring source paths
-      run: python3 schema/module_files_check.py "$(cabal list-bin agda-deps)"
-
-    - name: Keep-going recovers all checkable project files
-      run: python3 schema/keep_going_check.py "$(cabal list-bin agda-deps)"
-
-    - name: Project containment follows symlinks and directory boundaries
-      run: python3 schema/project_containment_check.py "$(cabal list-bin agda-deps)"
-
     - name: Startup arguments agree with Agda option syntax
       run: python3 schema/arguments_check.py "$(cabal list-bin agda-deps)"
 
+    - name: Skip mode filters external file metadata in every JSON shape
+      if: inputs.full
+      run: python3 schema/skip_agda_check.py "$(cabal list-bin agda-deps)"
+
+    - name: Scanned modules survive every JSON shape and incremental reuse
+      if: inputs.full
+      run: python3 schema/scanned_modules_check.py "$(cabal list-bin agda-deps)"
+
+    - name: Re-exported modules retain their declaring source paths
+      if: inputs.full
+      run: python3 schema/module_files_check.py "$(cabal list-bin agda-deps)"
+
+    - name: Keep-going recovers all checkable project files
+      if: inputs.full
+      run: python3 schema/keep_going_check.py "$(cabal list-bin agda-deps)"
+
+    - name: Project containment follows symlinks and directory boundaries
+      if: inputs.full
+      run: python3 schema/project_containment_check.py "$(cabal list-bin agda-deps)"
+
     - name: Library resolution matches Agda and falls back atomically
+      if: inputs.full
       run: python3 schema/lib_resolve_check.py "$(cabal list-bin agda-deps)"
 
     - name: YAML scalar validation agrees with CLI and doctor
+      if: inputs.full
       run: python3 schema/config_validation_check.py "$(cabal list-bin agda-deps)"
 
     - name: Explicit CLI colours override themes in either argument order
+      if: inputs.full
       run: python3 schema/palette_precedence_check.py "$(cabal list-bin agda-deps)"
 
-    - name: Run agda-deps on the bundled test corpus (every output shape)
+    - name: Run agda-deps on the bundled test corpus (other output shapes)
+      if: inputs.full
       run: |
         mkdir -p ci-out
         cabal run agda-deps -- --format=dot  -i test/ -o ci-out/ test/Test.agda
@@ -105,6 +136,10 @@ jobs:
         if grep -q '"defs"' ci-out/lazy/graph.json; then
           echo "lazy graph.json still inlines defs" >&2; exit 1
         fi
+
+    - name: Generate the cold expanded graph
+      run: |
+        mkdir -p ci-out
         # Expanded JSON, exercising the optional --with-* fields, for schema
         # validation and the golden check. MUST run on a cold .agdai cache:
         # a warm-loaded main module skips the dead-private recovery and
@@ -113,7 +148,6 @@ jobs:
         rm -rf test/*.agdai test/_build
         cabal run agda-deps -- --format=json --json-mode=expanded --with-signatures \
           --with-term-hashes -i test/ -o ci-out/expanded test/Test.agda
-        ls -la ci-out/
 
     - name: Validate expanded JSON against the wire schema
       # Guards the producer/consumer contract: agda-deps' freshly-generated
@@ -135,19 +169,37 @@ jobs:
         python3 schema/check_schema.py ci-out/generated.schema.json \
           schema/graph-v2-expanded.schema.json
 
+    - name: Check expanded output against the golden snapshot
+      # Content regression guard (beyond shape/schema): node states, kinds,
+      # edges, provenance, reexports, subterm hashes must match the
+      # committed golden. Normalises away build- / environment-volatile
+      # fields (producer, layout x/y, absolute file paths) first. Reuses
+      # the --with-signatures --with-term-hashes output generated above.
+      # If a change is intended, regenerate:
+      #   agda-deps --json-mode=expanded --with-signatures --with-term-hashes … |
+      #     python3 schema/golden_check.py emit /dev/stdin > test/golden/expanded.golden.json
+      run: |
+        python3 schema/golden_check.py check ci-out/expanded/deps.json \
+          test/golden/expanded.golden.json
+
     - name: Structural type evidence contract
+      if: inputs.full
       run: python3 schema/type_terms_check.py "$(cabal list-bin agda-deps)"
 
     - name: General clause evidence contract
+      if: inputs.full
       run: python3 schema/term_evidence_check.py "$(cabal list-bin agda-deps)"
 
     - name: Representation inventories and constructor views
+      if: inputs.full
       run: python3 schema/representations_check.py "$(cabal list-bin agda-deps)"
 
     - name: Check overloaded constructor identities
+      if: inputs.full
       run: python3 schema/constructor_identity_check.py "$(cabal list-bin agda-deps)"
 
     - name: --show-defaults and doctor document every config key
+      if: inputs.full
       # Both hand-maintained mirrors of the config key set must list exactly
       # the keys the FromJSON Config instance reads: the commented sample
       # .agda-deps.yml emitted by --show-defaults (Config.showDefaultsYaml)
@@ -159,6 +211,7 @@ jobs:
           src/AgdaDeps/Config.hs src/AgdaDeps/Doctor.hs
 
     - name: doctor accepts the seeded config and rejects a broken one
+      if: inputs.full
       # The sample --show-defaults writes must pass its own checker, both as
       # seeded (all commented) and fully uncommented (every key at its
       # default, so every key must be known and well-typed). A config with a
@@ -176,20 +229,8 @@ jobs:
           exit 1
         fi
 
-    - name: Check expanded output against the golden snapshot
-      # Content regression guard (beyond shape/schema): node states, kinds,
-      # edges, provenance, reexports, subterm hashes must match the
-      # committed golden. Normalises away build- / environment-volatile
-      # fields (producer, layout x/y, absolute file paths) first. Reuses
-      # the --with-signatures --with-term-hashes output generated above.
-      # If a change is intended, regenerate:
-      #   agda-deps --json-mode=expanded --with-signatures --with-term-hashes … |
-      #     python3 schema/golden_check.py emit /dev/stdin > test/golden/expanded.golden.json
-      run: |
-        python3 schema/golden_check.py check ci-out/expanded/deps.json \
-          test/golden/expanded.golden.json
-
     - name: packed-analytical carries the same fidelity as expanded
+      if: inputs.full
       # Locks the packed-complete acceptance gate: a decoded
       # --packed-analytical graph must equal the expanded form
       # node-for-node (kind/line/access/type/subterm hashes). Both runs
@@ -210,6 +251,7 @@ jobs:
           ci-out/packed/deps.json ci-out/expanded/deps.json ci-out/packed-lazy
 
     - name: keep-going emits a graph on a broken corpus
+      if: inputs.full
       # Locks the --keep-going best-effort guarantee: one module whose
       # type-check fails (instance-resolution error leaving unsolved
       # metas — the class that used to kill the partial pass with a bare
@@ -253,6 +295,7 @@ jobs:
         EOF
 
     - name: silent unsolved metas are first-class under --allow-unsolved-metas
+      if: inputs.full
       # Locks the honest-?/silent-meta split: under --allow-unsolved-metas
       # a missing record field elaborates to a meta nothing can solve, the
       # module "succeeds", and failedModules stays [] — so the graph must
@@ -286,6 +329,7 @@ jobs:
         EOF
 
     - name: effective options are reported per module (--erasure)
+      if: inputs.full
       # `moduleEffectiveOptions` answers "can the advice in this module's
       # argUsage.erasable verdicts actually be taken": without --erasure,
       # `@0` is [AttributeKindNotEnabled] and every one of them is
@@ -314,6 +358,7 @@ jobs:
         EOF
 
     - name: match-constant probe (unshipped analysis) still behaves
+      if: inputs.full
       # AgdaDeps.MatchConstant is a MEASUREMENT PROBE, not a wire feature: it
       # emits nothing to graph.json and runs only under
       # AGDA_DEPS_MATCH_CONSTANT. It was measured and rejected for the wire
@@ -351,6 +396,7 @@ jobs:
         EOF
 
     - name: incremental cache reproduces the golden byte-for-byte
+      if: inputs.full
       # Locks --incremental: a cold run (writes fragments) and a warm
       # rerun (serves them via preModule Skip) must emit identical JSON,
       # and both must still match the golden snapshot. Run 1 starts from
@@ -371,6 +417,7 @@ jobs:
           test/golden/expanded.golden.json
 
     - name: incremental serialise — no-op skip, edit-detect, GC
+      if: inputs.full
       # Locks the P2 serialise cache and the GC. The warm run above
       # already wrote the manifest; (1) a third no-op run must announce
       # the skip and stay byte-identical; (2) editing a module must NOT
@@ -426,6 +473,7 @@ jobs:
         echo "incremental serialise + GC OK"
 
     - name: config keys, term-hash identity, DOT quoting, failed externals
+      if: inputs.full
       # Regressions the golden cannot see.
       # (1) quiet / skip-agda / keep-going / lenient-imports are decided in
       #     Main before Agda parses argv; each must work from the config
@@ -492,18 +540,22 @@ jobs:
         EOF
 
     - name: Upload generated artefacts
+      if: inputs.full
       uses: actions/upload-artifact@v4
       with:
         name: agda-deps-ci-out
         path: ci-out/
         if-no-files-found: warn
+        retention-days: 3
 
-  # Opt-in Agda 2.9 build. Keeps the 2.8/2.9 output parity enforced: the
+  # Agda 2.9 build. Keeps the 2.8/2.9 output parity enforced: the
   # graph must be byte-identical across both Agda versions (the golden was
   # generated on 2.8, and this re-checks the 2.9 output against it). Builds
   # Agda 2.9.0 from a git pin (cabal.project.agda29), so a cold cache is
   # slow (~10 min); the store + dist-agda29 are cached to keep reruns fast.
   build-agda29:
+    if: inputs.full
+    needs: build
     name: build (Agda 2.9, GHC 9.12.4)
     runs-on: ubuntu-latest
 
@@ -518,7 +570,8 @@ jobs:
         cabal-version: '3.16'
 
     - name: Cache cabal store (Agda 2.9)
-      uses: actions/cache@v4
+      id: cache
+      uses: actions/cache/restore@v4
       with:
         path: |
           ~/.cabal/store
@@ -546,11 +599,24 @@ jobs:
         git config --global fetch.recurseSubmodules false
 
     - name: Update Hackage index
+      if: steps.cache.outputs.cache-hit != 'true'
       run: cabal update
 
     - name: Build agda-deps against Agda 2.9
       # First time through this is slow (Agda 2.9 from git source).
-      run: cabal build --project-file=cabal.project.agda29 --builddir=dist-agda29
+      run: |
+        cabal build --project-file=cabal.project.agda29 --builddir=dist-agda29 \
+          exe:agda-deps test:hardening
+
+    - name: Save cabal store (Agda 2.9)
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ~/.cabal/store
+          ~/.cabal/packages
+          dist-agda29
+        key: ${{ steps.cache.outputs.cache-primary-key }}
 
     - name: Run behavior-preserving hardening tests (Agda 2.9)
       run: |
